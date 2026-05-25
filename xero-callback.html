@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MatiereHub — Connecting to Xero…</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'DM Mono',monospace;background:#1a1814;color:#f7f4ef;display:flex;align-items:center;justify-content:center;height:100vh;font-size:13px}
+.card{text-align:center;padding:40px;max-width:400px}
+.logo{font-size:28px;letter-spacing:.08em;margin-bottom:6px}
+.sub{color:#c9a84c;letter-spacing:.2em;font-size:10px;text-transform:uppercase;margin-bottom:32px}
+.status{color:#b5b0a6;line-height:1.8}
+.ok{color:#6b8c6e;font-size:15px;margin-bottom:12px}
+.err{color:#b85c38;font-size:15px;margin-bottom:12px}
+.spinner{width:20px;height:20px;border:2px solid rgba(255,255,255,.1);border-top-color:#c9a84c;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 20px}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">Matière</div>
+  <div class="sub">Hub</div>
+  <div id="spinner" class="spinner"></div>
+  <div id="message" class="status">Connecting to Xero…</div>
+</div>
+<script>
+async function handleCallback() {
+  const params = new URLSearchParams(window.location.search);
+  const code  = params.get('code');
+  const error = params.get('error');
+  const msg   = document.getElementById('message');
+  const spin  = document.getElementById('spinner');
+
+  if (error) {
+    spin.style.display = 'none';
+    msg.innerHTML = `<div class="err">⚠ Connection cancelled</div><div>${error}</div>`;
+    return;
+  }
+
+  if (!code) {
+    spin.style.display = 'none';
+    msg.innerHTML = `<div class="err">⚠ No authorisation code received</div>`;
+    return;
+  }
+
+  try {
+    // Exchange code for tokens via our Netlify function
+    const res = await fetch('/.netlify/functions/xero-auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'exchange', code })
+    });
+    const tokens = await res.json();
+
+    if (tokens.error) throw new Error(JSON.stringify(tokens.error));
+
+    // Get tenant ID
+    const tenantsRes = await fetch('https://api.xero.com/connections', {
+      headers: { 'Authorization': `Bearer ${tokens.access_token}` }
+    });
+    const tenants = await tenantsRes.json();
+    const tenant  = tenants[0];
+
+    // Store tokens in localStorage
+    localStorage.setItem('xero_access_token',  tokens.access_token);
+    localStorage.setItem('xero_refresh_token', tokens.refresh_token);
+    localStorage.setItem('xero_tenant_id',     tenant.tenantId);
+    localStorage.setItem('xero_org_name',      tenant.tenantName);
+    localStorage.setItem('xero_token_expiry',  Date.now() + (tokens.expires_in * 1000));
+
+    spin.style.display = 'none';
+    msg.innerHTML = `<div class="ok">✓ Connected to ${tenant.tenantName}</div><div class="status">Redirecting to MatiereHub…</div>`;
+
+    setTimeout(() => window.location.href = '/?xero=connected', 1500);
+
+  } catch(err) {
+    spin.style.display = 'none';
+    msg.innerHTML = `<div class="err">⚠ Connection failed</div><div class="status">${err.message}</div>`;
+  }
+}
+
+handleCallback();
+</script>
+</body>
+</html>

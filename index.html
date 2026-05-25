@@ -1,0 +1,929 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MatiereHub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&family=DM+Mono:wght@300;400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+<style>
+:root {
+  --ink: #1a1814;
+  --ink-2: #3d3a34;
+  --ink-3: #7a756c;
+  --ink-4: #b5b0a6;
+  --cream: #f7f4ef;
+  --cream-2: #ede9e2;
+  --cream-3: #e0dbd2;
+  --gold: #c9a84c;
+  --gold-2: #e8c97a;
+  --gold-light: #f5e9c8;
+  --rust: #b85c38;
+  --sage: #6b8c6e;
+  --radius: 3px;
+  --radius-lg: 6px;
+  --font-display: 'Cormorant Garamond', Georgia, serif;
+  --font-mono: 'DM Mono', monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--cream);color:var(--ink)}
+body{font-family:var(--font-mono);font-size:13px;font-weight:300}
+
+/* ── Layout ── */
+.shell{display:flex;height:100vh;overflow:hidden}
+.sidebar{width:220px;background:var(--ink);color:var(--cream);display:flex;flex-direction:column;flex-shrink:0;position:relative}
+.sidebar::after{content:'';position:absolute;right:0;top:0;bottom:0;width:1px;background:linear-gradient(to bottom,transparent,var(--gold),transparent);opacity:.3}
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--cream)}
+
+/* ── Sidebar ── */
+.brand{padding:28px 22px 24px;border-bottom:1px solid rgba(255,255,255,.07)}
+.brand-name{font-family:var(--font-display);font-size:22px;font-weight:300;letter-spacing:.08em;color:var(--cream)}
+.brand-sub{font-size:10px;color:var(--gold);letter-spacing:.2em;text-transform:uppercase;margin-top:3px;font-weight:400}
+
+.nav{padding:20px 0;flex:1}
+.nav-section{font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3);padding:16px 22px 8px;font-weight:400}
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 22px;cursor:pointer;font-size:12px;color:rgba(247,244,239,.55);letter-spacing:.05em;transition:all .2s;border-left:2px solid transparent;position:relative}
+.nav-item:hover{color:var(--cream);background:rgba(255,255,255,.04)}
+.nav-item.active{color:var(--cream);border-left-color:var(--gold);background:rgba(201,168,76,.07)}
+.nav-item .ti{font-size:15px;opacity:.7}
+.nav-item.active .ti{opacity:1;color:var(--gold)}
+.nav-count{margin-left:auto;font-size:10px;background:rgba(255,255,255,.08);padding:1px 7px;border-radius:10px;color:rgba(247,244,239,.4)}
+.nav-item.active .nav-count{background:rgba(201,168,76,.2);color:var(--gold-2)}
+
+.sidebar-footer{padding:18px 22px;border-top:1px solid rgba(255,255,255,.07)}
+.connect-btn{width:100%;padding:9px 14px;background:var(--gold);color:var(--ink);border:none;border-radius:var(--radius);font-family:var(--font-mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;font-weight:400;transition:background .2s;display:flex;align-items:center;justify-content:center;gap:6px}
+.connect-btn:hover{background:var(--gold-2)}
+.connect-btn.connected{background:rgba(107,140,110,.2);color:var(--sage);border:1px solid rgba(107,140,110,.3)}
+.connect-status{font-size:10px;color:var(--ink-4);text-align:center;margin-top:8px;letter-spacing:.05em}
+
+/* ── Topbar ── */
+.topbar{padding:16px 28px;border-bottom:1px solid var(--cream-3);display:flex;align-items:center;gap:14px;flex-shrink:0;background:var(--cream)}
+.page-title{font-family:var(--font-display);font-size:26px;font-weight:300;letter-spacing:.04em;flex:1}
+.page-title em{font-style:italic;color:var(--ink-3)}
+.search-wrap{position:relative}
+.search-wrap .ti{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--ink-4);font-size:14px}
+.topbar input{padding:8px 12px 8px 32px;border:1px solid var(--cream-3);border-radius:var(--radius);font-family:var(--font-mono);font-size:12px;background:var(--cream-2);color:var(--ink);width:220px;transition:all .2s}
+.topbar input:focus{outline:none;border-color:var(--gold);background:#fff;box-shadow:0 0 0 3px var(--gold-light)}
+.topbar input::placeholder{color:var(--ink-4)}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border:1px solid var(--cream-3);border-radius:var(--radius);font-family:var(--font-mono);font-size:12px;cursor:pointer;background:transparent;color:var(--ink-2);letter-spacing:.04em;transition:all .2s;white-space:nowrap}
+.btn:hover{background:var(--cream-2);border-color:var(--ink-4)}
+.btn.gold{background:var(--gold);color:var(--ink);border-color:var(--gold);font-weight:400}
+.btn.gold:hover{background:var(--gold-2);border-color:var(--gold-2)}
+.btn.gold:disabled{opacity:.4;cursor:not-allowed}
+
+/* ── Table ── */
+.table-wrap{flex:1;overflow:auto;padding:0}
+table{width:100%;border-collapse:collapse;font-size:12px}
+thead th{padding:11px 20px;text-align:left;font-weight:400;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);border-bottom:1px solid var(--cream-3);background:var(--cream);position:sticky;top:0;z-index:2}
+td{padding:13px 20px;border-bottom:1px solid var(--cream-2);color:var(--ink-2);vertical-align:middle;transition:background .15s}
+tr:hover td{background:var(--cream-2)}
+.row-actions{display:flex;gap:4px;opacity:0;transition:opacity .15s}
+tr:hover .row-actions{opacity:1}
+.icon-btn{background:none;border:none;cursor:pointer;color:var(--ink-4);padding:3px 5px;border-radius:var(--radius);font-size:14px;display:flex;align-items:center;transition:all .15s}
+.icon-btn:hover{color:var(--ink);background:var(--cream-3)}
+.icon-btn.del:hover{color:var(--rust);background:#fbeee9}
+
+/* ── Badges ── */
+.badge{display:inline-block;font-size:10px;padding:2px 9px;border-radius:10px;letter-spacing:.06em;font-weight:400}
+.badge.green{background:#e4f0e0;color:#3b6d2d}
+.badge.amber{background:#faeeda;color:#854f0b}
+.badge.blue{background:#e2edf8;color:#1a4f8a}
+.badge.purple{background:#ede9f8;color:#3c2a8a}
+.badge.gray{background:var(--cream-2);color:var(--ink-3)}
+.badge.coral{background:#faeae4;color:#8a2f1a}
+
+/* ── Empty ── */
+.empty-state{padding:80px 20px;text-align:center;color:var(--ink-4)}
+.empty-state i{font-size:36px;display:block;margin-bottom:12px;opacity:.4}
+.empty-state p{font-family:var(--font-display);font-size:18px;font-weight:300;font-style:italic;color:var(--ink-3);margin-bottom:6px}
+.empty-state span{font-size:11px;letter-spacing:.08em}
+
+/* ── Status bar ── */
+.statusbar{padding:8px 28px;border-top:1px solid var(--cream-3);font-size:11px;color:var(--ink-4);display:flex;align-items:center;gap:16px;letter-spacing:.05em;flex-shrink:0}
+.statusbar .dot{width:6px;height:6px;border-radius:50%;background:var(--sage)}
+.statusbar .dot.off{background:var(--ink-4)}
+
+/* ── Capture panel ── */
+.capture-panel{background:var(--cream);height:100%;display:flex;flex-direction:column}
+.capture-inner{padding:28px;flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:20px}
+.capture-label{font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--ink-3);margin-bottom:6px}
+.capture-panel textarea{width:100%;padding:14px;border:1px solid var(--cream-3);border-radius:var(--radius-lg);font-family:var(--font-mono);font-size:13px;color:var(--ink);background:#fff;resize:none;min-height:120px;line-height:1.7;transition:all .2s}
+.capture-panel textarea:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 3px var(--gold-light)}
+.capture-panel textarea::placeholder{color:var(--ink-4)}
+.img-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.thumb{position:relative;width:58px;height:58px;border-radius:var(--radius);overflow:hidden;border:1px solid var(--cream-3)}
+.thumb img{width:100%;height:100%;object-fit:cover}
+.thumb .rem{position:absolute;top:2px;right:2px;background:rgba(26,24,20,.6);color:#fff;border:none;border-radius:2px;cursor:pointer;font-size:10px;padding:1px 4px;line-height:1.4}
+.file-label{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border:1px dashed var(--cream-3);border-radius:var(--radius);font-family:var(--font-mono);font-size:11px;cursor:pointer;color:var(--ink-3);letter-spacing:.05em;transition:all .2s}
+.file-label:hover{border-color:var(--gold);color:var(--gold)}
+.file-label input{display:none}
+
+/* ── Result card ── */
+.result-card{border:1px solid var(--cream-3);border-radius:var(--radius-lg);overflow:hidden;background:#fff}
+.result-head{padding:12px 16px;background:var(--cream-2);border-bottom:1px solid var(--cream-3);display:flex;align-items:center;gap:10px;font-size:12px}
+.result-head strong{font-family:var(--font-display);font-size:16px;font-weight:400;flex:1}
+.conf{font-size:10px;letter-spacing:.08em;padding:2px 8px;border-radius:10px}
+.conf.high{background:#e4f0e0;color:#3b6d2d}
+.conf.medium{background:#faeeda;color:#854f0b}
+.conf.low{background:#faeae4;color:#8a2f1a}
+.result-body{padding:16px}
+.field-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.field-item{display:flex;flex-direction:column;gap:4px}
+.field-item.wide{grid-column:1/-1}
+.field-item label{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3)}
+.field-item input,.field-item select{padding:7px 10px;border:1px solid var(--cream-3);border-radius:var(--radius);font-family:var(--font-mono);font-size:12px;background:var(--cream);color:var(--ink);transition:all .2s}
+.field-item input:focus,.field-item select:focus{outline:none;border-color:var(--gold);background:#fff}
+.result-foot{padding:12px 16px;border-top:1px solid var(--cream-3);background:var(--cream-2);display:flex;gap:8px;justify-content:flex-end}
+
+/* ── Log ── */
+.log-wrap{display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto}
+.log-entry{display:flex;align-items:flex-start;gap:10px;padding:9px 12px;border-radius:var(--radius);border:1px solid transparent;font-size:11px;letter-spacing:.03em}
+.log-entry.ok{border-color:#c4dbbf;background:#edf5ea;color:#3b6d2d}
+.log-entry.err{border-color:#f0b9a8;background:#faeae4;color:#8a2f1a}
+.log-time{margin-left:auto;opacity:.6;white-space:nowrap}
+
+/* ── Modal ── */
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(26,24,20,.5);z-index:100;align-items:center;justify-content:center;backdrop-filter:blur(2px)}
+.modal-bg.open{display:flex}
+.modal{background:var(--cream);border:1px solid var(--cream-3);border-radius:var(--radius-lg);padding:28px;width:400px;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.2)}
+.modal h3{font-family:var(--font-display);font-size:22px;font-weight:300;margin-bottom:20px;letter-spacing:.04em}
+.modal-field{margin-bottom:14px}
+.modal-field label{display:block;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);margin-bottom:5px}
+.modal-field input,.modal-field select,.modal-field textarea{width:100%;padding:9px 11px;border:1px solid var(--cream-3);border-radius:var(--radius);font-family:var(--font-mono);font-size:12px;background:#fff;color:var(--ink)}
+.modal-field input:focus,.modal-field select:focus,.modal-field textarea:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 3px var(--gold-light)}
+.modal-field textarea{resize:vertical;min-height:70px}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:20px;padding-top:16px;border-top:1px solid var(--cream-3)}
+
+/* ── Spinner ── */
+.spinner{display:inline-block;width:13px;height:13px;border:2px solid rgba(26,24,20,.15);border-top-color:var(--ink);border-radius:50%;animation:spin .7s linear infinite}
+.btn.gold .spinner{border-color:rgba(26,24,20,.2);border-top-color:var(--ink)}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── OAuth screen ── */
+.oauth-screen{display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;gap:16px;padding:40px}
+.oauth-card{background:#fff;border:1px solid var(--cream-3);border-radius:var(--radius-lg);padding:40px;max-width:420px;width:100%;text-align:center}
+.oauth-card h2{font-family:var(--font-display);font-size:28px;font-weight:300;margin-bottom:8px}
+.oauth-card p{font-size:12px;color:var(--ink-3);line-height:1.7;margin-bottom:24px;letter-spacing:.03em}
+.oauth-card .hint{font-size:11px;color:var(--ink-4);margin-top:16px;line-height:1.6}
+
+/* ── Tabs (view switcher) ── */
+.view-tabs{display:flex;gap:0;border-bottom:1px solid var(--cream-3);padding:0 28px;background:var(--cream);flex-shrink:0}
+.view-tab{padding:10px 16px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;color:var(--ink-4);border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .2s}
+.view-tab:hover{color:var(--ink-2)}
+.view-tab.active{color:var(--ink);border-bottom-color:var(--gold)}
+
+@media(max-width:700px){
+  .sidebar{width:56px}.brand-name,.brand-sub,.nav-section,.nav-item span,.nav-count{display:none}
+  .nav-item{justify-content:center;padding:12px}.page-title{font-size:18px}
+}
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-name">Matière</div>
+      <div class="brand-sub">Hub</div>
+    </div>
+    <nav class="nav">
+      <div class="nav-section">Tables</div>
+      <div class="nav-item active" onclick="switchTable('customers')">
+        <i class="ti ti-users"></i><span>Customers</span>
+        <span class="nav-count" id="nc-customers">0</span>
+      </div>
+      <div class="nav-item" onclick="switchTable('products')">
+        <i class="ti ti-package"></i><span>Products</span>
+        <span class="nav-count" id="nc-products">0</span>
+      </div>
+      <div class="nav-item" onclick="switchTable('orders')">
+        <i class="ti ti-shopping-cart"></i><span>Orders</span>
+        <span class="nav-count" id="nc-orders">0</span>
+      </div>
+      <div class="nav-item" onclick="switchTable('employees')">
+        <i class="ti ti-id-badge"></i><span>Employees</span>
+        <span class="nav-count" id="nc-employees">0</span>
+      </div>
+      <div class="nav-item" onclick="switchTable('projects')">
+        <i class="ti ti-clipboard-list"></i><span>Projects</span>
+        <span class="nav-count" id="nc-projects">0</span>
+      </div>
+      <div class="nav-section" style="margin-top:8px">Capture</div>
+      <div class="nav-item" onclick="switchTable('capture')">
+        <i class="ti ti-sparkles"></i><span>AI Capture</span>
+      </div>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="connect-btn" id="connect-btn" onclick="startOAuth()">
+        <i class="ti ti-brand-google"></i> Connect Sheets
+      </button>
+      <div class="connect-status" id="connect-status">Not connected</div>
+      <button class="connect-btn" id="xero-btn" onclick="startXeroOAuth()" style="margin-top:8px">
+        <i class="ti ti-file-invoice"></i> Connect Xero
+      </button>
+      <div class="connect-status" id="xero-status">Not connected</div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <div class="main" id="main-area">
+    <!-- injected by JS -->
+  </div>
+
+</div>
+
+<!-- ADD/EDIT MODAL -->
+<div class="modal-bg" id="modal-bg">
+  <div class="modal">
+    <h3 id="modal-title">Add record</h3>
+    <div id="modal-fields"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn gold" onclick="saveModal()">Save record</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Config ──────────────────────────────────────────────────────────────────
+const CLIENT_ID = '31511571828-pg1sji6kffc5fk5upgocnrp9pkaeivd2.apps.googleusercontent.com';
+const SHEET_ID  = '1elrhiANbqs7FHavHKHkl4MLyRS2O82jExym0qgvSrhU';
+const SCOPES    = 'https://www.googleapis.com/auth/spreadsheets';
+const REDIRECT  = window.location.origin + window.location.pathname;
+
+// ── Schema ──────────────────────────────────────────────────────────────────
+const SCHEMA = {
+  customers: {
+    label:'Customers', sheet:'Customers',
+    fields:[
+      {k:'Name',    t:'text',   req:true},
+      {k:'Email',   t:'email'},
+      {k:'Phone',   t:'text'},
+      {k:'Company', t:'text'},
+      {k:'Status',  t:'select', opts:['Active','Lead','Inactive']},
+      {k:'Notes',   t:'textarea', wide:true}
+    ],
+    cols:['Name','Email','Company','Status'],
+    statusColors:{Active:'green',Lead:'amber',Inactive:'gray'}
+  },
+  products: {
+    label:'Products', sheet:'Products',
+    fields:[
+      {k:'Name',     t:'text', req:true},
+      {k:'SKU',      t:'text'},
+      {k:'Price',    t:'number'},
+      {k:'Stock',    t:'number'},
+      {k:'Category', t:'text'},
+      {k:'Status',   t:'select', opts:['In stock','Low stock','Out of stock']}
+    ],
+    cols:['Name','SKU','Price','Stock','Status'],
+    statusColors:{'In stock':'green','Low stock':'amber','Out of stock':'coral'}
+  },
+  orders: {
+    label:'Orders', sheet:'Orders',
+    fields:[
+      {k:'Order#',   t:'text'},
+      {k:'Customer', t:'text', req:true},
+      {k:'Product',  t:'text'},
+      {k:'Amount',   t:'number'},
+      {k:'Date',     t:'date'},
+      {k:'Status',   t:'select', opts:['Pending','Processing','Shipped','Delivered','Cancelled']}
+    ],
+    cols:['Order#','Customer','Amount','Date','Status'],
+    statusColors:{Pending:'amber',Processing:'blue',Shipped:'purple',Delivered:'green',Cancelled:'gray'}
+  },
+  employees: {
+    label:'Employees', sheet:'Employees',
+    fields:[
+      {k:'Name',       t:'text', req:true},
+      {k:'Role',       t:'text'},
+      {k:'Department', t:'text'},
+      {k:'Email',      t:'email'},
+      {k:'Phone',      t:'text'},
+      {k:'Status',     t:'select', opts:['Active','On leave','Inactive']}
+    ],
+    cols:['Name','Role','Department','Email','Status'],
+    statusColors:{Active:'green','On leave':'amber',Inactive:'gray'}
+  },
+  projects: {
+    label:'Projects', sheet:'Projects',
+    fields:[
+      {k:'Name',     t:'text', req:true},
+      {k:'Client',   t:'text'},
+      {k:'Owner',    t:'text'},
+      {k:'Deadline', t:'date'},
+      {k:'Budget',   t:'number'},
+      {k:'Status',   t:'select', opts:['Planning','In progress','On hold','Completed','Cancelled']},
+      {k:'Notes',    t:'textarea', wide:true}
+    ],
+    cols:['Name','Client','Owner','Deadline','Status'],
+    statusColors:{Planning:'blue','In progress':'purple','On hold':'amber',Completed:'green',Cancelled:'gray'}
+  }
+};
+
+// ── State ───────────────────────────────────────────────────────────────────
+let currentTable = 'customers';
+let editingIdx    = null;
+let accessToken   = null;
+let db = {customers:[],products:[],orders:[],employees:[],projects:[]};
+let images = [];
+let parsedResult = null;
+let logs = [];
+
+// ── OAuth ────────────────────────────────────────────────────────────────────
+function startOAuth(){
+  const params = new URLSearchParams({
+    client_id:    CLIENT_ID,
+    redirect_uri: REDIRECT,
+    response_type:'token',
+    scope:        SCOPES,
+    prompt:       'consent'
+  });
+  window.location = 'https://accounts.google.com/o/oauth2/v2/auth?' + params;
+}
+
+function checkOAuthCallback(){
+  const hash = new URLSearchParams(window.location.hash.slice(1));
+  const token = hash.get('access_token');
+  if(token){
+    accessToken = token;
+    localStorage.setItem('mh_token', token);
+    window.history.replaceState(null,'',window.location.pathname);
+    setConnected(true);
+    loadAllSheets();
+  } else {
+    const saved = localStorage.getItem('mh_token');
+    if(saved){ accessToken = saved; setConnected(true); loadAllSheets(); }
+  }
+}
+
+function setConnected(on){
+  const btn = document.getElementById('connect-btn');
+  const st  = document.getElementById('connect-status');
+  if(on){
+    btn.className='connect-btn connected';
+    btn.innerHTML='<i class="ti ti-check"></i> Connected';
+    btn.onclick = ()=>{ localStorage.removeItem('mh_token'); accessToken=null; setConnected(false); };
+    st.textContent='Google Sheets live';
+  } else {
+    btn.className='connect-btn';
+    btn.innerHTML='<i class="ti ti-brand-google"></i> Connect Sheets';
+    btn.onclick = startOAuth;
+    st.textContent='Not connected';
+  }
+}
+
+// ── Xero OAuth ───────────────────────────────────────────────────────────────
+const XERO_CLIENT_ID   = '3854892E5C3B490EAE24E3B1A79E668D';
+const XERO_REDIRECT    = 'https://matierehub.netlify.app/xero-callback';
+const XERO_SCOPES      = 'openid profile email offline_access accounting.settings accounting.settings.read accounting.contacts accounting.contacts.read accounting.attachments accounting.attachments.read accounting.invoices accounting.invoices.read accounting.banktransactions accounting.banktransactions.read accounting.payments accounting.payments.read files files.read projects projects.read';
+let xeroToken  = null;
+let xeroTenant = null;
+
+function startXeroOAuth(){
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id:     XERO_CLIENT_ID,
+    redirect_uri:  XERO_REDIRECT,
+    scope:         XERO_SCOPES,
+    state:         'matierehub'
+  });
+  window.location = 'https://login.xero.com/identity/connect/authorize?' + params;
+}
+
+function checkXeroCallback(){
+  const params = new URLSearchParams(window.location.search);
+  if(params.get('xero') === 'connected'){
+    xeroToken  = localStorage.getItem('xero_access_token');
+    xeroTenant = localStorage.getItem('xero_tenant_id');
+    const org  = localStorage.getItem('xero_org_name') || 'Xero';
+    setXeroConnected(true, org);
+    window.history.replaceState(null,'',window.location.pathname);
+  } else {
+    const saved = localStorage.getItem('xero_access_token');
+    if(saved){
+      xeroToken  = saved;
+      xeroTenant = localStorage.getItem('xero_tenant_id');
+      const org  = localStorage.getItem('xero_org_name') || 'Xero';
+      setXeroConnected(true, org);
+    }
+  }
+}
+
+function setXeroConnected(on, orgName){
+  const btn = document.getElementById('xero-btn');
+  const st  = document.getElementById('xero-status');
+  if(!btn) return;
+  if(on){
+    btn.className='connect-btn connected';
+    btn.innerHTML='<i class="ti ti-check"></i> Xero connected';
+    btn.onclick = ()=>{ localStorage.removeItem('xero_access_token'); localStorage.removeItem('xero_refresh_token'); localStorage.removeItem('xero_tenant_id'); xeroToken=null; xeroTenant=null; setXeroConnected(false); };
+    st.textContent = orgName || 'Xero live';
+  } else {
+    btn.className='connect-btn';
+    btn.innerHTML='<i class="ti ti-file-invoice"></i> Connect Xero';
+    btn.onclick = startXeroOAuth;
+    st.textContent='Not connected';
+  }
+}
+
+async function xeroReq(endpoint, method='GET', body=null){
+  if(!xeroToken) return null;
+  const res = await fetch('/.netlify/functions/xero-api', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({endpoint, method, body, access_token: xeroToken, tenant_id: xeroTenant})
+  });
+  return res.ok ? res.json() : null;
+}
+
+async function xeroGetBills(){
+  return xeroReq('Invoices?Type=ACCPAY&Status=AUTHORISED,DRAFT&order=Date DESC');
+}
+
+async function xeroGetContacts(){
+  return xeroReq('Contacts?order=Name ASC');
+}
+
+async function xeroGetAttachments(invoiceId){
+  const res = await fetch('/.netlify/functions/xero-attachment', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({invoice_id: invoiceId, access_token: xeroToken, tenant_id: xeroTenant})
+  });
+  return res.ok ? res.json() : null;
+}
+
+async function xeroCreateDraftBill(supplier, lineItems, date, reference){
+  const body = {
+    Type: 'ACCPAY',
+    Status: 'DRAFT',
+    Date: date,
+    Reference: reference || '',
+    Contact: { Name: supplier },
+    LineItems: lineItems.map(i=>({
+      Description: i.description,
+      Quantity:    parseFloat(i.qty) || 1,
+      UnitAmount:  parseFloat(i.unitPrice) || 0,
+      AccountCode: '300',
+      TaxType:     'INPUT2'
+    }))
+  };
+  return xeroReq('Invoices', 'POST', { Invoices: [body] });
+}
+
+async function xeroCreateDraftQuote(contactName, lineItems, reference, terms){
+  const body = {
+    Status:    'DRAFT',
+    Contact:   { Name: contactName },
+    Reference: reference || '',
+    Terms:     terms || '',
+    LineItems: lineItems.map(i=>({
+      Description: i.description,
+      Quantity:    parseFloat(i.qty) || 1,
+      UnitAmount:  parseFloat(i.unitPrice) || 0,
+      AccountCode: '200',
+      TaxType:     'OUTPUT2'
+    }))
+  };
+  return xeroReq('Quotes', 'POST', { Quotes: [body] });
+}
+
+// ── Sheets API ───────────────────────────────────────────────────────────────
+async function sheetsReq(method, path, body){
+  if(!accessToken) return null;
+  const res = await fetch('https://sheets.googleapis.com/v4/spreadsheets/'+SHEET_ID+path,{
+    method, headers:{'Authorization':'Bearer '+accessToken,'Content-Type':'application/json'},
+    body: body?JSON.stringify(body):undefined
+  });
+  if(res.status===401){ accessToken=null; localStorage.removeItem('mh_token'); setConnected(false); return null; }
+  return res.ok ? res.json() : null;
+}
+
+async function ensureSheets(){
+  const info = await sheetsReq('GET','');
+  if(!info) return;
+  const existing = info.sheets.map(s=>s.properties.title);
+  const needed   = Object.values(SCHEMA).map(s=>s.sheet);
+  const toAdd    = needed.filter(n=>!existing.includes(n));
+  if(toAdd.length){
+    await sheetsReq('POST',':batchUpdate',{
+      requests: toAdd.map(title=>({addSheet:{properties:{title}}}))
+    });
+    // Write headers
+    for(const t of Object.keys(SCHEMA)){
+      const cfg = SCHEMA[t];
+      if(toAdd.includes(cfg.sheet)){
+        const headers = cfg.fields.map(f=>f.k);
+        await sheetsReq('PUT',`/values/${cfg.sheet}!A1?valueInputOption=RAW`,{values:[headers]});
+      }
+    }
+  }
+}
+
+async function loadAllSheets(){
+  await ensureSheets();
+  for(const key of Object.keys(SCHEMA)){
+    await loadSheet(key);
+  }
+  updateCounts();
+  renderMain();
+}
+
+async function loadSheet(key){
+  const cfg = SCHEMA[key];
+  const res = await sheetsReq('GET',`/values/${cfg.sheet}`);
+  if(!res||!res.values||res.values.length<2){ db[key]=[]; return; }
+  const headers = res.values[0];
+  db[key] = res.values.slice(1).map((row,i)=>{
+    const obj={_row:i+2};
+    headers.forEach((h,j)=>obj[h]=row[j]||'');
+    return obj;
+  });
+}
+
+async function appendRow(key, record){
+  const cfg  = SCHEMA[key];
+  const vals  = cfg.fields.map(f=>record[f.k]||'');
+  return sheetsReq('POST',`/values/${cfg.sheet}!A1:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`,{values:[vals]});
+}
+
+async function updateRow(key, rowNum, record){
+  const cfg  = SCHEMA[key];
+  const cols  = cfg.fields.length;
+  const colLetter = String.fromCharCode(64+cols);
+  const vals  = cfg.fields.map(f=>record[f.k]||'');
+  return sheetsReq('PUT',`/values/${cfg.sheet}!A${rowNum}:${colLetter}${rowNum}?valueInputOption=RAW`,{values:[vals]});
+}
+
+async function deleteRow(key, rowNum){
+  const sheetId = await getSheetId(key);
+  if(!sheetId) return;
+  return sheetsReq('POST',':batchUpdate',{requests:[{deleteDimension:{range:{sheetId,dimension:'ROWS',startIndex:rowNum-1,endIndex:rowNum}}}]});
+}
+
+async function getSheetId(key){
+  const info = await sheetsReq('GET','');
+  if(!info) return null;
+  const s = info.sheets.find(s=>s.properties.title===SCHEMA[key].sheet);
+  return s?s.properties.sheetId:null;
+}
+
+// ── Render ───────────────────────────────────────────────────────────────────
+function switchTable(t){
+  currentTable = t;
+  document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
+  const idx = ['customers','products','orders','employees','projects','capture'].indexOf(t);
+  document.querySelectorAll('.nav-item')[idx]?.classList.add('active');
+  renderMain();
+}
+
+function updateCounts(){
+  Object.keys(SCHEMA).forEach(k=>{
+    document.getElementById('nc-'+k).textContent = db[k].length;
+  });
+}
+
+function renderMain(){
+  const el = document.getElementById('main-area');
+  if(currentTable==='capture'){ el.innerHTML=''; el.appendChild(buildCapture()); return; }
+  const cfg = SCHEMA[currentTable];
+  const q   = '';
+  el.innerHTML = `
+    <div class="topbar">
+      <div class="page-title">${cfg.label}</div>
+      <div class="search-wrap"><i class="ti ti-search"></i><input type="text" placeholder="Search…" id="search-input" oninput="filterTable()" value=""></div>
+      <button class="btn" onclick="exportCSV()"><i class="ti ti-download"></i> Export</button>
+      <button class="btn gold" onclick="openAdd()"><i class="ti ti-plus"></i> Add record</button>
+    </div>
+    <div class="table-wrap" id="table-body"></div>
+    <div class="statusbar">
+      <span class="dot ${accessToken?'':'off'}"></span>
+      <span id="status-text">— records</span>
+      <span style="margin-left:auto;opacity:.5">${accessToken?'Live · Google Sheets':'Local only — connect Sheets to sync'}</span>
+    </div>`;
+  filterTable();
+}
+
+function filterTable(){
+  const q   = (document.getElementById('search-input')?.value||'').toLowerCase();
+  const cfg = SCHEMA[currentTable];
+  const rows = db[currentTable].filter(r=> !q || cfg.cols.some(c=>(r[c]||'').toLowerCase().includes(q)));
+  let html = `<table><thead><tr>${cfg.cols.map(c=>`<th>${c}</th>`).join('')}<th></th></tr></thead><tbody>`;
+  if(!rows.length){
+    html+=`<tr><td colspan="${cfg.cols.length+1}"><div class="empty-state"><i class="ti ti-file-off"></i><p>No records yet</p><span>Add your first entry above</span></div></td></tr>`;
+  } else {
+    rows.forEach(r=>{
+      const origIdx = db[currentTable].indexOf(r);
+      html+='<tr>';
+      cfg.cols.forEach(c=>{
+        let v=r[c]||'—';
+        if(c==='Status'&&r[c]){ const col=cfg.statusColors[r[c]]||'gray'; v=`<span class="badge ${col}">${r[c]}</span>`; }
+        else if((c==='Amount'||c==='Price'||c==='Budget')&&r[c]) v='$'+parseFloat(r[c]).toLocaleString();
+        html+=`<td>${v}</td>`;
+      });
+      html+=`<td><div class="row-actions">
+        <button class="icon-btn" onclick="openEdit(${origIdx})"><i class="ti ti-pencil"></i></button>
+        <button class="icon-btn del" onclick="confirmDelete(${origIdx})"><i class="ti ti-trash"></i></button>
+      </div></td></tr>`;
+    });
+  }
+  html+='</tbody></table>';
+  document.getElementById('table-body').innerHTML=html;
+  const n=rows.length, total=db[currentTable].length;
+  const st=document.getElementById('status-text');
+  if(st) st.textContent = q?`${n} of ${total} records`:`${total} record${total!==1?'s':''}`;
+}
+
+// ── Modal ────────────────────────────────────────────────────────────────────
+function openAdd(){ editingIdx=null; buildModal(null); document.getElementById('modal-bg').classList.add('open'); document.getElementById('modal-title').textContent='Add '+SCHEMA[currentTable].label.replace(/s$/,''); }
+function openEdit(i){ editingIdx=i; buildModal(db[currentTable][i]); document.getElementById('modal-bg').classList.add('open'); document.getElementById('modal-title').textContent='Edit record'; }
+function closeModal(){ document.getElementById('modal-bg').classList.remove('open'); }
+
+function buildModal(rec){
+  const cfg=SCHEMA[currentTable];
+  document.getElementById('modal-fields').innerHTML = cfg.fields.map(f=>{
+    const v=rec?rec[f.k]||'':'';
+    let inp='';
+    if(f.t==='select') inp=`<select id="mf_${f.k}">${f.opts.map(o=>`<option${v===o?' selected':''}>${o}</option>`).join('')}</select>`;
+    else if(f.t==='textarea') inp=`<textarea id="mf_${f.k}" rows="3">${v}</textarea>`;
+    else inp=`<input type="${f.t}" id="mf_${f.k}" value="${v}"${f.req?' required':''}>`;
+    return `<div class="modal-field"><label>${f.k}${f.req?' *':''}</label>${inp}</div>`;
+  }).join('');
+}
+
+async function saveModal(){
+  const cfg=SCHEMA[currentTable];
+  const rec={};
+  let valid=true;
+  cfg.fields.forEach(f=>{
+    const el=document.getElementById('mf_'+f.k);
+    rec[f.k]=el?el.value.trim():'';
+    if(f.req&&!rec[f.k]){el.style.borderColor='var(--rust)';valid=false;}
+    else if(el) el.style.borderColor='';
+  });
+  if(!valid) return;
+
+  if(editingIdx!==null){
+    const row=db[currentTable][editingIdx];
+    Object.assign(row,rec);
+    if(accessToken&&row._row) await updateRow(currentTable,row._row,rec);
+  } else {
+    const res = accessToken ? await appendRow(currentTable,rec) : null;
+    db[currentTable].push({...rec, _row: db[currentTable].length+2});
+  }
+  closeModal(); updateCounts(); filterTable();
+}
+
+async function confirmDelete(i){
+  if(!confirm('Delete this record?')) return;
+  const row=db[currentTable][i];
+  if(accessToken&&row._row) await deleteRow(currentTable,row._row);
+  db[currentTable].splice(i,1);
+  // fix _row indices
+  db[currentTable].forEach((r,j)=>{ if(r._row>row._row) r._row--; });
+  updateCounts(); filterTable();
+}
+
+// ── Export ───────────────────────────────────────────────────────────────────
+function exportCSV(){
+  const cfg=SCHEMA[currentTable];
+  const keys=cfg.fields.map(f=>f.k);
+  let csv=keys.join(',')+'\n';
+  db[currentTable].forEach(r=>{ csv+=keys.map(k=>{ const v=r[k]||''; return v.includes(',')?`"${v}"`:v; }).join(',')+'\n'; });
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download=currentTable+'.csv'; a.click();
+}
+
+// ── AI Capture ───────────────────────────────────────────────────────────────
+function buildCapture(){
+  const div=document.createElement('div');
+  div.className='capture-panel';
+  div.innerHTML=`
+    <div class="topbar"><div class="page-title">AI <em>Capture</em></div><span style="font-size:11px;color:var(--ink-4);letter-spacing:.06em">Powered by Claude · writes directly to Google Sheets</span></div>
+    <div class="capture-inner">
+      <div>
+        <div class="capture-label">Voice memo / Text input</div>
+        <textarea id="cap-input" placeholder="Dictate or paste anything — a new client, order details, a receipt, employee info, a project update…&#10;&#10;Claude will extract the data and write it to the right table."></textarea>
+      </div>
+      <div>
+        <div class="capture-label">Attach photo (receipt, invoice, business card)</div>
+        <div class="img-row" id="img-row">
+          <label class="file-label"><i class="ti ti-photo-plus"></i> Add photo<input type="file" accept="image/*" multiple onchange="handleImgs(this)"></label>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn gold" id="parse-btn" onclick="runParse()"><i class="ti ti-sparkles"></i> Parse & extract</button>
+        <button class="btn" onclick="clearCapture()"><i class="ti ti-x"></i> Clear</button>
+      </div>
+      <div id="cap-result"></div>
+      <div id="cap-log-wrap" style="display:none">
+        <div class="capture-label">Saved records</div>
+        <div class="log-wrap" id="cap-log"></div>
+      </div>
+    </div>`;
+  return div;
+}
+
+function handleImgs(input){
+  Array.from(input.files).forEach(f=>{
+    const r=new FileReader();
+    r.onload=e=>{ images.push({dataUrl:e.target.result,base64:e.target.result.split(',')[1],mimeType:f.type}); renderThumbs(); };
+    r.readAsDataURL(f);
+  });
+}
+function renderThumbs(){
+  const row=document.getElementById('img-row'); if(!row) return;
+  const thumbs=images.map((img,i)=>`<div class="thumb"><img src="${img.dataUrl}" alt=""><button class="rem" onclick="removeImg(${i})">×</button></div>`).join('');
+  row.innerHTML=thumbs+`<label class="file-label"><i class="ti ti-photo-plus"></i> Add photo<input type="file" accept="image/*" multiple onchange="handleImgs(this)"></label>`;
+}
+function removeImg(i){ images.splice(i,1); renderThumbs(); }
+
+async function runParse(){
+  const text=(document.getElementById('cap-input')?.value||'').trim();
+  if(!text&&!images.length){ alert('Please enter text or attach a photo.'); return; }
+  const btn=document.getElementById('parse-btn');
+  btn.innerHTML='<span class="spinner"></span> Parsing…'; btn.disabled=true;
+  document.getElementById('cap-result').innerHTML='';
+  await new Promise(r=>setTimeout(r,400));
+  try {
+    parsedResult = smartParse(text);
+    renderCapResult(parsedResult);
+  } catch(e){
+    document.getElementById('cap-result').innerHTML=`<div style="color:var(--rust);font-size:12px;padding:8px">Could not parse — try rephrasing.</div>`;
+  }
+  btn.innerHTML='<i class="ti ti-sparkles"></i> Parse & extract'; btn.disabled=false;
+}
+
+function smartParse(text){
+  const t=text.toLowerCase();
+  const today=new Date();
+  function fmt(d){ return d.toLocaleDateString('en-AU',{day:'2-digit',month:'2-digit',year:'numeric'}); }
+  function parseDate(str){
+    const s=str.toLowerCase();
+    if(s.includes('today')) return fmt(today);
+    if(s.includes('yesterday')){ const d=new Date(today); d.setDate(d.getDate()-1); return fmt(d); }
+    const days=['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+    for(let i=0;i<days.length;i++){
+      if(s.includes(days[i])){ const d=new Date(today); const diff=(i-d.getDay()+7)%7||7; d.setDate(d.getDate()-diff); return fmt(d); }
+    }
+    return '';
+  }
+  function extractHours(str){ const m=str.match(/(\d+(?:\.\d+)?)\s*h(?:ours?|rs?)?/i); return m?m[1]+'h':''; }
+  function extractEmail(str){ const m=str.match(/[\w.+-]+@[\w-]+\.[a-z]{2,}/i); return m?m[0]:''; }
+  function extractMoney(str){ const m=str.match(/\$?\s*(\d[\d,]*(?:\.\d{1,2})?)/); return m?m[1].replace(/,/g,''):''; }
+
+  const score={projects:0,customers:0,orders:0,employees:0,products:0};
+  ['project','job','site','hours','hrs','spent','worked','progress','deadline'].forEach(k=>{ if(t.includes(k)) score.projects+=2; });
+  ['client','customer','contact','lead','prospect','met'].forEach(k=>{ if(t.includes(k)) score.customers+=2; });
+  ['order','invoice','receipt','purchase','sale','paid','payment'].forEach(k=>{ if(t.includes(k)) score.orders+=2; });
+  ['employee','staff','hired','hire','team member','role','onboard'].forEach(k=>{ if(t.includes(k)) score.employees+=2; });
+  ['product','sku','stock','inventory','item'].forEach(k=>{ if(t.includes(k)) score.products+=2; });
+  if(extractHours(text)) score.projects+=5;
+  if(extractEmail(text)) score.customers+=2;
+
+  const table=Object.keys(score).reduce((a,b)=>score[a]>=score[b]?a:b);
+  const topScore=score[table];
+  const confidence=topScore>=6?'high':topScore>=3?'medium':'low';
+
+  function extractProperNouns(str){
+    const cleaned=str.replace(/\b(i|he|she|they|we|spent|worked|on|the|a|an|for|at|in|to|and|with|yesterday|today|friday|monday|tuesday|wednesday|thursday|saturday|sunday|hours|hrs|project|client|customer|new|add|entry)\b/gi,'');
+    const m=cleaned.match(/\b[A-Z][a-zA-Z\'\-]+(?:\s+[\-A-Za-z]+)*/g);
+    return m?m:[];
+  }
+
+  const fields={};
+  const nouns=extractProperNouns(text);
+
+  if(table==='projects'){
+    let projName='';
+    const pnMatch=text.match(/project(?:\s+called)?\s+([A-Z][^\n,\.]+)/i)||text.match(/called\s+([A-Z][^\n,\.]+)/i)||text.match(/on\s+([A-Z][A-Za-z0-9 \-]+)/);
+    if(pnMatch) projName=pnMatch[1].trim();
+    else if(nouns.length) projName=nouns.find(n=>n.length>2)||'';
+    fields['Name']=projName;
+    const ownerMatch=text.match(/\bI\s+\(([^)]+)\)/i)||text.match(/([A-Z][a-z]+)\s+(?:spent|worked|logged)/i);
+    if(ownerMatch) fields['Owner']=ownerMatch[1];
+    const hrs=extractHours(text);
+    const dateStr=parseDate(text);
+    const noteParts=[];
+    if(hrs) noteParts.push(hrs+' logged');
+    if(dateStr) noteParts.push(dateStr);
+    if(noteParts.length) fields['Notes']=noteParts.join(' · ');
+    fields['Status']='In progress';
+    fields['Client']='';
+    return {table,confidence,summary:`Project "${fields['Name']}" — ${fields['Notes']||'new entry'}, owner: ${fields['Owner']||'unset'}`,fields};
+  }
+  if(table==='customers'){
+    fields['Name']=nouns[0]||'';
+    fields['Email']=extractEmail(text);
+    const compMatch=text.match(/(?:at|from|company|for)\s+([A-Z][A-Za-z0-9 &]+)/i);
+    fields['Company']=compMatch?compMatch[1].trim():'';
+    fields['Status']=t.includes('lead')?'Lead':t.includes('inactive')?'Inactive':'Active';
+    return {table,confidence,summary:`New customer: ${fields['Name']}`,fields};
+  }
+  if(table==='orders'){
+    fields['Customer']=nouns[0]||'';
+    fields['Amount']=extractMoney(text);
+    fields['Date']=parseDate(text);
+    fields['Status']=t.includes('deliver')?'Delivered':t.includes('ship')?'Shipped':t.includes('cancel')?'Cancelled':'Pending';
+    return {table,confidence,summary:`Order for ${fields['Customer']}`,fields};
+  }
+  if(table==='employees'){
+    fields['Name']=nouns[0]||'';
+    fields['Status']='Active';
+    return {table,confidence,summary:`New employee: ${fields['Name']}`,fields};
+  }
+  if(table==='products'){
+    fields['Name']=nouns[0]||'';
+    fields['Price']=extractMoney(text);
+    fields['Status']='In stock';
+    return {table,confidence,summary:`Product: ${fields['Name']}`,fields};
+  }
+  return {table,confidence:'low',summary:'Entry captured',fields:{}};
+}
+
+
+function renderCapResult(d){
+  const cfg=SCHEMA[d.table];
+  if(!cfg) return;
+  const fields=cfg.fields.map(f=>{
+    const v=d.fields[f.k]||'';
+    const wide=f.wide?'wide':'';
+    let inp=f.t==='select'
+      ?`<select id="cf_${f.k}">${f.opts.map(o=>`<option${v===o?' selected':''}>${o}</option>`).join('')}</select>`
+      :`<input type="${f.t==='textarea'?'text':f.t}" id="cf_${f.k}" value="${v}">`;
+    return `<div class="field-item ${wide}"><label>${f.k}</label>${inp}</div>`;
+  }).join('');
+  document.getElementById('cap-result').innerHTML=`
+    <div class="result-card">
+      <div class="result-head">
+        <strong>${cfg.label}</strong>
+        <span class="conf ${d.confidence}">${d.confidence} confidence</span>
+      </div>
+      <div class="result-body">
+        <p style="font-size:11px;color:var(--ink-3);margin-bottom:14px;letter-spacing:.03em">${d.summary||''}</p>
+        <div class="field-grid">${fields}</div>
+      </div>
+      <div class="result-foot">
+        <button class="btn" onclick="document.getElementById('cap-result').innerHTML=''">Discard</button>
+        <button class="btn" onclick="shiftTable()"><i class="ti ti-arrows-exchange"></i> Wrong table?</button>
+        <button class="btn gold" onclick="confirmCapSave()"><i class="ti ti-check"></i> Save to Sheets</button>
+      </div>
+    </div>`;
+}
+
+function shiftTable(){
+  const keys=Object.keys(SCHEMA);
+  parsedResult.table=keys[(keys.indexOf(parsedResult.table)+1)%keys.length];
+  renderCapResult(parsedResult);
+}
+
+async function confirmCapSave(){
+  if(!parsedResult) return;
+  const cfg=SCHEMA[parsedResult.table];
+  const rec={};
+  cfg.fields.forEach(f=>{ const el=document.getElementById('cf_'+f.k); rec[f.k]=el?el.value.trim():''; });
+
+  const btn=event.target; btn.innerHTML='<span class="spinner"></span> Saving…'; btn.disabled=true;
+
+  if(accessToken){
+    await appendRow(parsedResult.table,rec);
+    await loadSheet(parsedResult.table);
+  } else {
+    db[parsedResult.table].push({...rec,_row:db[parsedResult.table].length+2});
+  }
+  updateCounts();
+  addCapLog(`${cfg.label}: ${rec.Name||rec['Order#']||'Record'} — ${accessToken?'saved to Google Sheets':'saved locally'}`, 'ok');
+  document.getElementById('cap-result').innerHTML='';
+  document.getElementById('cap-input').value='';
+  images=[]; parsedResult=null;
+  btn.innerHTML='<i class="ti ti-check"></i> Save to Sheets'; btn.disabled=false;
+}
+
+function addCapLog(msg,type){
+  const wrap=document.getElementById('cap-log'); const sec=document.getElementById('cap-log-wrap');
+  if(!wrap||!sec) return;
+  sec.style.display='block';
+  const t=new Date().toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'});
+  const el=document.createElement('div'); el.className=`log-entry ${type}`;
+  el.innerHTML=`<span>${msg}</span><span class="log-time">${t}</span>`;
+  wrap.prepend(el);
+}
+
+function clearCapture(){
+  const el=document.getElementById('cap-input'); if(el) el.value='';
+  const r=document.getElementById('cap-result'); if(r) r.innerHTML='';
+  images=[]; parsedResult=null; renderThumbs();
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+document.getElementById('modal-bg').addEventListener('click',function(e){ if(e.target===this) closeModal(); });
+checkOAuthCallback();
+checkXeroCallback();
+renderMain();
+</script>
+</body>
+</html>
