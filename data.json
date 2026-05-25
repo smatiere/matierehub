@@ -114,7 +114,7 @@
     {
       "invoice": "INV-0242",
       "contact": "Nik - Collaroy",
-     "amount": 2461.25,
+      "amount": 2461.25,
       "status": "Approved",
       "date": "2025-05-07",
       "days_old": 383
