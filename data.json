@@ -1,0 +1,211 @@
+{
+  "meta": {
+    "last_updated": "2026-05-25T00:00:00",
+    "last_xero_sync": "2026-05-25",
+    "data_note": "FY26 = Jul 2025 to Apr 2026 (10 months YTD). Updated from bank export."
+  },
+  "kpis": {
+    "fy26_revenue": 154711.56,
+    "fy26_materials": 53397.18,
+    "fy26_gross_profit": 101314.38,
+    "fy26_gp_margin": 65.5,
+    "fy26_opex": 2378.45,
+    "fy26_owner_drawings": 57721.7,
+    "fy26_wages": 9877.0,
+    "total_outstanding": 21603.98,
+    "overdue_xero": 14156.0,
+    "pipeline_total": 539000,
+    "total_revenue_alltime": 599248.5,
+    "sebRate_per_hour": 100
+  },
+  "monthly": {
+    "labels": [
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr"
+    ],
+    "periods": [
+      "2025-07",
+      "2025-08",
+      "2025-09",
+      "2025-10",
+      "2025-11",
+      "2025-12",
+      "2026-01",
+      "2026-02",
+      "2026-03",
+      "2026-04"
+    ],
+    "revenue": [
+      9340.38,
+      7353.2,
+      23612.05,
+      26017.4,
+      16695.25,
+      14389.0,
+      23901.23,
+      7976.61,
+      17845.24,
+      7581.2
+    ],
+    "materials": [
+      2813.5,
+      2417.55,
+      4962.71,
+      7854.32,
+      13618.13,
+      5171.65,
+      1596.68,
+      6567.74,
+      2911.39,
+      5483.51
+    ]
+  },
+  "top_customers": [
+    {
+      "name": "Pauline - French Forest",
+      "revenue": 45846.7
+    },
+    {
+      "name": "Serena - Manly Vale",
+      "revenue": 36833.5
+    },
+    {
+      "name": "Beacon Hill Community Kindergarten",
+      "revenue": 28406.98
+    },
+    {
+      "name": "Tony - Balgowlah",
+      "revenue": 26596.78
+    },
+    {
+      "name": "Mark Shippen",
+      "revenue": 22924.0
+    },
+    {
+      "name": "Selvi - Seaforth",
+      "revenue": 19981.5
+    },
+    {
+      "name": "Kate Melrose",
+      "revenue": 18140.15
+    },
+    {
+      "name": "Peter Black",
+      "revenue": 16485.7
+    }
+  ],
+  "open_invoices": [
+    {
+      "invoice": "INV-0221",
+      "contact": "Ryan Broadbead",
+      "amount": 770.0,
+      "status": "Approved",
+      "date": "2025-04-02",
+      "days_old": 418
+    },
+    {
+      "invoice": "INV-0242",
+      "contact": "Nik - Collaroy",
+     "amount": 2461.25,
+      "status": "Approved",
+      "date": "2025-05-07",
+      "days_old": 383
+    },
+    {
+      "invoice": "INV-0245",
+      "contact": "Nik - Collaroy",
+      "amount": 3361.88,
+      "status": "Approved",
+      "date": "2025-05-13",
+      "days_old": 377
+    },
+    {
+      "invoice": "INV-0257",
+      "contact": "Mark - Queenscliff",
+      "amount": 520.85,
+      "status": "Approved",
+      "date": "2025-08-18",
+      "days_old": 280
+    },
+    {
+      "invoice": "INV-0280",
+      "contact": "Paul - Frenchs Forest",
+      "amount": 1540.0,
+      "status": "Approved",
+      "date": "2025-10-08",
+      "days_old": 229
+    },
+    {
+      "invoice": "INV-0299",
+      "contact": "Beth - Mosman",
+      "amount": 126.5,
+      "status": "Approved",
+      "date": "2025-11-15",
+      "days_old": 191
+    },
+    {
+      "invoice": "INV-0308",
+      "contact": "Selvi - Seaforth",
+      "amount": 3759.5,
+      "status": "Approved",
+      "date": "2025-12-23",
+      "days_old": 153
+    },
+    {
+      "invoice": "INV-0318",
+      "contact": "Samantha Kirchner",
+      "amount": 3888.5,
+      "status": "Approved",
+      "date": "2026-02-16",
+      "days_old": 98
+    },
+    {
+      "invoice": "INV-0319",
+      "contact": "Samantha Kirchner",
+      "amount": 3360.5,
+      "status": "Approved",
+      "date": "2026-02-16",
+      "days_old": 98
+    },
+    {
+      "invoice": "INV-0330",
+      "contact": "Bryan Dalton",
+      "amount": 1595.0,
+      "status": "Approved",
+      "date": "2026-04-14",
+      "days_old": 41
+    },
+    {
+      "invoice": "INV-0341",
+      "contact": "Angela Ferlita",
+      "amount": 220.0,
+      "status": "Approved",
+      "date": "2026-05-13",
+      "days_old": 12
+    }
+  ],
+  "projects": [
+    {
+      "name": "Mark - Nth Balgowlah",
+      "status": "Active",
+      "quoted": 39450,
+      "notes": "Active project"
+    },
+    {
+      "name": "Rob - Balgowlah",
+      "status": "Active",
+      "quoted": 2035,
+      "notes": "Active project"
+    }
+  ],
+  "timesheets": [],
+  "expense_log": []
+}
