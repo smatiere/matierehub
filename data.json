@@ -206,6 +206,27 @@
       "notes": "Active project"
     }
   ],
-  "timesheets": [],
+  "timesheets": [
+    {
+      "id": "TS-001",
+      "date": "2026-05-25",
+      "project": "Admin",
+      "hours": 6,
+      "rate": 100,
+      "value": 600,
+      "employee": "Seb",
+      "notes": ""
+    },
+    {
+      "id": "TS-002",
+      "date": "2026-05-25",
+      "project": "Neil - Balgowlah",
+      "hours": 3,
+      "rate": 100,
+      "value": 300,
+      "employee": "Seb",
+      "notes": ""
+    }
+  ],
   "expense_log": []
 }
