@@ -1,11 +1,6 @@
-// netlify/functions/xero-api.js
-// Proxies all Xero API calls — reads bills, contacts, invoices, quotes
-// and WRITES bills, contacts, invoices, quotes, attaches receipts
-// Environment variables required:
-//   XERO_CLIENT_ID
-//   XERO_CLIENT_SECRET
+const https = require('https');
 
-export async function handler(event) {
+exports.handler = async function(event) {
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
@@ -18,25 +13,40 @@ export async function handler(event) {
 
   try {
     const { endpoint, method = 'GET', body, access_token, tenant_id } = JSON.parse(event.body || '{}');
-
     if (!access_token) return { statusCode: 401, headers, body: JSON.stringify({ error: 'No access token' }) };
-    if (!endpoint)     return { statusCode: 400, headers, body: JSON.stringify({ error: 'No endpoint specified' }) };
+    if (!endpoint)     return { statusCode: 400, headers, body: JSON.stringify({ error: 'No endpoint' }) };
 
-    const xeroRes = await fetch(`https://api.xero.com/api.xro/2.0/${endpoint}`, {
-      method,
-      headers: {
+    const postData = body ? JSON.stringify(body) : null;
+
+    const result = await new Promise((resolve, reject) => {
+      const reqHeaders = {
         'Authorization':  `Bearer ${access_token}`,
         'Xero-Tenant-Id': tenant_id,
-        'Content-Type':   'application/json',
         'Accept':         'application/json'
-      },
-      body: body ? JSON.stringify(body) : undefined
+      };
+      if (postData) {
+        reqHeaders['Content-Type'] = 'application/json';
+        reqHeaders['Content-Length'] = Buffer.byteLength(postData);
+      }
+
+      const req = https.request({
+        hostname: 'api.xero.com',
+        path: `/api.xro/2.0/${endpoint}`,
+        method,
+        headers: reqHeaders
+      }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => resolve({ status: res.statusCode, body: data }));
+      });
+      req.on('error', reject);
+      if (postData) req.write(postData);
+      req.end();
     });
 
-    const data = await xeroRes.json();
-    return { statusCode: xeroRes.status, headers, body: JSON.stringify(data) };
+    return { statusCode: result.status, headers, body: result.body };
 
   } catch (err) {
     return { statusCode: 500, headers, body: JSON.stringify({ error: err.message }) };
   }
-}
+};

@@ -1,11 +1,7 @@
-// netlify/functions/xero-auth.js
-// Handles Xero OAuth2 token exchange and refresh
-// Environment variables required:
-//   XERO_CLIENT_ID     — your Xero app client ID
-//   XERO_CLIENT_SECRET — your Xero app client secret
-//   XERO_REDIRECT_URI  — e.g. https://matierehub.netlify.app/xero-callback
+const https = require('https');
+const querystring = require('querystring');
 
-export async function handler(event) {
+exports.handler = async function(event) {
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type',
@@ -21,40 +17,45 @@ export async function handler(event) {
     const clientId     = process.env.XERO_CLIENT_ID;
     const clientSecret = process.env.XERO_CLIENT_SECRET;
     const redirectUri  = process.env.XERO_REDIRECT_URI;
-    const credentials  = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
 
-    let body;
-    if (action === 'exchange') {
-      // Exchange auth code for tokens
-      body = new URLSearchParams({
-        grant_type:   'authorization_code',
-        code,
-        redirect_uri: redirectUri
-      });
-    } else if (action === 'refresh') {
-      // Refresh access token
-      body = new URLSearchParams({
-        grant_type:    'refresh_token',
-        refresh_token
-      });
-    } else {
-      return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid action' }) };
+    if (!clientId || !clientSecret) {
+      return { statusCode: 500, headers, body: JSON.stringify({ error: 'Missing environment variables XERO_CLIENT_ID or XERO_CLIENT_SECRET' }) };
     }
 
-    const res = await fetch('https://identity.xero.com/connect/token', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Basic ${credentials}`,
-        'Content-Type':  'application/x-www-form-urlencoded'
-      },
-      body
+    const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+
+    let params;
+    if (action === 'exchange') {
+      params = querystring.stringify({ grant_type: 'authorization_code', code, redirect_uri: redirectUri });
+    } else if (action === 'refresh') {
+      params = querystring.stringify({ grant_type: 'refresh_token', refresh_token });
+    } else {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid action: ' + action }) };
+    }
+
+    const result = await new Promise((resolve, reject) => {
+      const req = https.request({
+        hostname: 'identity.xero.com',
+        path: '/connect/token',
+        method: 'POST',
+        headers: {
+          'Authorization': `Basic ${credentials}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Length': Buffer.byteLength(params)
+        }
+      }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => resolve({ status: res.statusCode, body: data }));
+      });
+      req.on('error', reject);
+      req.write(params);
+      req.end();
     });
 
-    const data = await res.json();
-    if (!res.ok) return { statusCode: res.status, headers, body: JSON.stringify({ error: data }) };
-    return { statusCode: 200, headers, body: JSON.stringify(data) };
+    return { statusCode: result.status, headers, body: result.body };
 
   } catch (err) {
     return { statusCode: 500, headers, body: JSON.stringify({ error: err.message }) };
   }
-}
+};

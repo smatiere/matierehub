@@ -1,8 +1,6 @@
-// netlify/functions/xero-attachment.js
-// Pulls receipt/bill attachment files from Xero and returns as base64
-// so they can be displayed or parsed in the chat interface
+const https = require('https');
 
-export async function handler(event) {
+exports.handler = async function(event) {
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type',
@@ -15,45 +13,39 @@ export async function handler(event) {
 
   try {
     const { invoice_id, filename, access_token, tenant_id } = JSON.parse(event.body || '{}');
+    const path = filename
+      ? `/api.xro/2.0/Invoices/${invoice_id}/Attachments/${filename}`
+      : `/api.xro/2.0/Invoices/${invoice_id}/Attachments`;
 
-    // First get list of attachments if no filename specified
-    if (!filename) {
-      const listRes = await fetch(
-        `https://api.xero.com/api.xro/2.0/Invoices/${invoice_id}/Attachments`,
-        {
-          headers: {
-            'Authorization':  `Bearer ${access_token}`,
-            'Xero-Tenant-Id': tenant_id,
-            'Accept':         'application/json'
-          }
-        }
-      );
-      const list = await listRes.json();
-      return { statusCode: 200, headers, body: JSON.stringify(list) };
-    }
-
-    // Download the actual file
-    const fileRes = await fetch(
-      `https://api.xero.com/api.xro/2.0/Invoices/${invoice_id}/Attachments/${filename}`,
-      {
+    const result = await new Promise((resolve, reject) => {
+      const req = https.request({
+        hostname: 'api.xero.com',
+        path,
+        method: 'GET',
         headers: {
           'Authorization':  `Bearer ${access_token}`,
-          'Xero-Tenant-Id': tenant_id
+          'Xero-Tenant-Id': tenant_id,
+          'Accept': filename ? '*/*' : 'application/json'
         }
-      }
-    );
+      }, (res) => {
+        const chunks = [];
+        res.on('data', chunk => chunks.push(chunk));
+        res.on('end', () => {
+          const buf = Buffer.concat(chunks);
+          resolve({ status: res.statusCode, body: buf, contentType: res.headers['content-type'] || 'application/json' });
+        });
+      });
+      req.on('error', reject);
+      req.end();
+    });
 
-    const buffer     = await fileRes.arrayBuffer();
-    const base64     = Buffer.from(buffer).toString('base64');
-    const mimeType   = fileRes.headers.get('content-type') || 'image/jpeg';
-
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify({ base64, mimeType, filename })
-    };
+    if (filename) {
+      const base64 = result.body.toString('base64');
+      return { statusCode: result.status, headers, body: JSON.stringify({ base64, mimeType: result.contentType, filename }) };
+    }
+    return { statusCode: result.status, headers, body: result.body.toString() };
 
   } catch (err) {
     return { statusCode: 500, headers, body: JSON.stringify({ error: err.message }) };
   }
-}
+};
