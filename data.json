@@ -236,6 +236,16 @@
       "value": 800,
       "employee": "Seb",
       "notes": ""
+    },
+    {
+      "id": "TS-004",
+      "date": "2026-05-20",
+      "project": "Mark - Nth Balgowlah",
+      "hours": 8,
+      "rate": 100,
+      "value": 800,
+      "employee": "Seb",
+      "notes": ""
     }
   ],
   "expense_log": []
