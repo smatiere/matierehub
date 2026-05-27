@@ -246,6 +246,46 @@
       "value": 800,
       "employee": "Seb",
       "notes": ""
+    },
+    {
+      "id": "TS-005",
+      "date": "2026-05-25",
+      "project": "Admin",
+      "hours": 6,
+      "rate": 100,
+      "value": 600,
+      "employee": "Seb",
+      "notes": ""
+    },
+    {
+      "id": "TS-006",
+      "date": "2026-05-26",
+      "project": "Josie - Mosman",
+      "hours": 8,
+      "rate": 100,
+      "value": 800,
+      "employee": "Seb",
+      "notes": ""
+    },
+    {
+      "id": "TS-007",
+      "date": "2026-05-27",
+      "project": "Josie - Mosman",
+      "hours": 6,
+      "rate": 100,
+      "value": 600,
+      "employee": "Seb",
+      "notes": ""
+    },
+    {
+      "id": "TS-008",
+      "date": "2026-05-27",
+      "project": "Wasted Time",
+      "hours": 3,
+      "rate": 100,
+      "value": 300,
+      "employee": "Seb",
+      "notes": ""
     }
   ],
   "expense_log": [
