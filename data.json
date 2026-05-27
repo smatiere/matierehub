@@ -295,6 +295,20 @@
       "category": "Vehicle",
       "project": "Office",
       "amount": 160
+    },
+    {
+      "date": "2026-05-25",
+      "description": "Bunnings Warehouse - building materials (SPLIT NEEDED: deduct saw blades amount)",
+      "category": "Materials",
+      "project": "Josie - Mosman",
+      "amount": 136.25
+    },
+    {
+      "date": "2026-05-25",
+      "description": "Bunnings Warehouse - saw blades",
+      "category": "Materials",
+      "project": "Consumables",
+      "amount": 0
     }
   ]
 }
