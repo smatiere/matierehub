@@ -251,8 +251,9 @@
   "expense_log": [
     {
       "date": "2026-05-25",
-      "description": "Parking penalty notice - Northern Beaches Council, Ross Street Seaforth (plate EIN650) | Project: Josie - Mosman",
+      "description": "Parking penalty notice - Northern Beaches Council, Ross Street Seaforth (plate EIN650)",
       "category": "Vehicle",
+      "project": "Office",
       "amount": 160
     }
   ]
