@@ -212,10 +212,10 @@
       "notes": "Active project"
     },
     {
-      "name": "Josie - Mosman",
+      "name": "IBK - Mosman",
       "status": "Active",
-      "quoted": null,
-      "notes": "Active \u2014 not yet quoted in Xero. Hours logged via data drops."
+      "quoted": 1248.50,
+      "notes": "IBK (Ibathrooms and kitchen renovations pty Ltd). INV-0343 raised 2026-05-27 \u2014 $1,248.50 AUTHORISED. Hours logged via data drops."
     },
     {
       "name": "Neil - Balgowlah",
@@ -278,7 +278,7 @@
     {
       "id": "TS-006",
       "date": "2026-05-26",
-      "project": "Josie - Mosman",
+      "project": "IBK - Mosman",
       "hours": 8,
       "rate": 100,
       "value": 800,
@@ -288,7 +288,7 @@
     {
       "id": "TS-007",
       "date": "2026-05-27",
-      "project": "Josie - Mosman",
+      "project": "IBK - Mosman",
       "hours": 6,
       "rate": 100,
       "value": 600,
@@ -318,7 +318,7 @@
       "date": "2026-05-25",
       "description": "Bunnings - batteries (AAA Varta 24pk), pine structural MGP10 (x3), plasterboard CSR 13mm",
       "category": "Materials",
-      "project": "Josie - Mosman",
+      "project": "IBK - Mosman",
       "amount": 62.6
     },
     {
