@@ -2,7 +2,5 @@
   "name": "matierehub-xero",
   "version": "1.0.0",
   "description": "MatiereHub — Xero API bridge",
-  "dependencies": {
-    "node-fetch": "^3.3.2"
-  }
+  "dependencies": {}
 }
