@@ -7,16 +7,14 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 :root {
-  --ink: #1a1814; --ink-2: #3d3a34; --ink-3: #7a756c; --ink-4: #b5b0a6;
-  --cream: #f7f4ef; --cream-2: #ede9e2; --cream-3: #e0dbd2;
-  --gold: #c9a84c; --gold-2: #e8c97a; --gold-light: #f5e9c8;
-  --rust: #b85c38; --sage: #6b8c6e; --navy: #1b2a4a;
-  --r: 4px;
+--ink: #1a1814; --ink-2: #3d3a34; --ink-3: #7a756c; --ink-4: #b5b0a6;
+--cream: #f7f4ef; --cream-2: #ede9e2; --cream-3: #e0dbd2;
+--gold: #c9a84c; --gold-2: #e8c97a; --gold-light: #f5e9c8;
+--rust: #b85c38; --sage: #6b8c6e; --navy: #1b2a4a;
+--r: 4px;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;background:var(--cream);color:var(--ink);min-height:100vh}
-
-/* Header */
 .header{background:var(--navy);color:#fff;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;position:sticky;top:0;z-index:100}
 .header-brand{display:flex;align-items:baseline;gap:8px}
 .header-brand h1{font-size:20px;font-weight:600;letter-spacing:.04em}
@@ -24,19 +22,13 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-siz
 .header-meta{font-size:11px;color:rgba(255,255,255,.45);text-align:right;line-height:1.5}
 .btn-refresh{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);color:#fff;padding:6px 14px;border-radius:var(--r);font-size:12px;cursor:pointer;transition:background .2s}
 .btn-refresh:hover{background:rgba(255,255,255,.2)}
-
-/* Tabs */
 .tabs{display:flex;gap:0;background:#fff;border-bottom:2px solid var(--cream-3);overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
 .tabs::-webkit-scrollbar{display:none}
 .tab{padding:12px 18px;font-size:12px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);cursor:pointer;white-space:nowrap;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .2s}
 .tab:hover{color:var(--ink)}
 .tab.active{color:var(--navy);border-bottom-color:var(--gold);font-weight:600}
-
-/* Main */
 .page{display:none;padding:20px;max-width:1000px;margin:0 auto}
 .page.active{display:block}
-
-/* KPI grid */
 .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:24px}
 .kpi{background:#fff;border:1px solid var(--cream-3);border-radius:var(--r);padding:16px;position:relative}
 .kpi-label{font-size:10px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);margin-bottom:6px}
@@ -45,15 +37,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-siz
 .kpi.highlight{border-left:3px solid var(--gold)}
 .kpi.warn{border-left:3px solid var(--rust)}
 .kpi.good{border-left:3px solid var(--sage)}
-
-/* Section */
 .section{background:#fff;border:1px solid var(--cream-3);border-radius:var(--r);margin-bottom:16px;overflow:hidden}
 .section-head{padding:14px 18px;border-bottom:1px solid var(--cream-3);display:flex;align-items:center;justify-content:space-between}
 .section-head h2{font-size:13px;font-weight:600;letter-spacing:.04em;color:var(--ink)}
 .section-body{padding:18px}
 .chart-wrap{position:relative;height:220px}
-
-/* Table */
 table{width:100%;border-collapse:collapse;font-size:13px}
 th{padding:9px 14px;text-align:left;font-size:10px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);border-bottom:1px solid var(--cream-3);white-space:nowrap}
 td{padding:11px 14px;border-bottom:1px solid var(--cream-2);color:var(--ink-2);vertical-align:middle}
@@ -66,27 +54,16 @@ tr:hover td{background:var(--cream-2)}
 .badge-red{background:#fde8e4;color:#8a1a0a}
 .badge-blue{background:#e0eaf8;color:#1a3f8a}
 .badge-gray{background:var(--cream-2);color:var(--ink-3)}
-
-/* Bar chart inline */
 .mini-bar{background:var(--cream-3);border-radius:2px;height:8px;overflow:hidden;margin-top:4px}
 .mini-bar-fill{background:var(--gold);height:100%;border-radius:2px;transition:width .4s}
-
-/* Two col layout */
 .two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 @media(max-width:640px){.two-col{grid-template-columns:1fr}.kpi-value{font-size:22px}}
-
-/* Divider label */
 .divider{font-size:10px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:var(--ink-4);margin:20px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--cream-3)}
-
-/* Loading */
 #loading{display:flex;align-items:center;justify-content:center;height:60vh;flex-direction:column;gap:12px;color:var(--ink-3)}
 .spinner{width:28px;height:28px;border:3px solid var(--cream-3);border-top-color:var(--gold);border-radius:50%;animation:spin .7s linear infinite}
+.spinner-sm{width:14px;height:14px;border:2px solid var(--cream-3);border-top-color:var(--gold);border-radius:50%;animation:spin .7s linear infinite;display:inline-block}
 @keyframes spin{to{transform:rotate(360deg)}}
-
-/* Error */
 #error-box{display:none;background:#fde8e4;border:1px solid #f0b9a8;border-radius:var(--r);padding:16px;margin:20px;color:#8a1a0a;font-size:13px}
-
-/* Log page */
 .log-entry{padding:12px 0;border-bottom:1px solid var(--cream-2);display:flex;align-items:flex-start;gap:12px}
 .log-entry:last-child{border-bottom:none}
 .log-dot{width:8px;height:8px;border-radius:50%;background:var(--gold);margin-top:5px;flex-shrink:0}
@@ -97,8 +74,6 @@ tr:hover td{background:var(--cream-2)}
 .log-amount{font-weight:600;white-space:nowrap;color:var(--ink)}
 .empty{text-align:center;padding:40px 20px;color:var(--ink-4);font-size:13px}
 .empty-icon{font-size:32px;margin-bottom:8px}
-
-/* Modal */
 .modal-overlay{display:none;position:fixed;inset:0;background:rgba(26,24,20,.55);z-index:1000;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto}
 .modal-overlay.open{display:flex}
 .modal{background:#fff;border-radius:8px;width:100%;max-width:660px;margin:auto;box-shadow:0 12px 48px rgba(0,0,0,.22);animation:modalIn .18s ease}
@@ -110,29 +85,23 @@ tr:hover td{background:var(--cream-2)}
 .modal-body{padding:20px;max-height:72vh;overflow-y:auto}
 .modal-body .kpi{padding:12px}
 .modal-body .kpi-value{font-size:20px}
-.modal-body tfoot td{background:var(--cream-2);font-size:12px}
-
-/* Clickable rows */
 .project-row{cursor:pointer}
 .chart-clickable-hint{font-size:10px;color:var(--ink-4);letter-spacing:.04em}
+.btn-primary{background:var(--navy);color:#fff;border:none;padding:10px 20px;font-size:13px;border-radius:var(--r);cursor:pointer;transition:background .2s;font-weight:500;letter-spacing:.02em}
+.btn-primary:hover{background:#253d6b}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed}
+.load-bar{display:flex;align-items:center;gap:14px;margin-bottom:20px;flex-wrap:wrap;padding:16px;background:#fff;border:1px solid var(--cream-3);border-radius:var(--r)}
 </style>
 </head>
 <body>
 
-<div id="loading">
-  <div class="spinner"></div>
-  <span>Loading Matière Hub…</span>
-</div>
-
+<div id="loading"><div class="spinner"></div><span>Loading Matière Hub…</span></div>
 <div id="error-box"></div>
 
 <div id="app" style="display:none">
 
 <div class="header">
-  <div class="header-brand">
-    <h1>Matière</h1>
-    <span>Hub</span>
-  </div>
+  <div class="header-brand"><h1>Matière</h1><span>Hub</span></div>
   <div style="display:flex;align-items:center;gap:12px">
     <div class="header-meta" id="header-meta"></div>
     <button id="xero-btn" class="btn-refresh">⚡ Connect Xero</button>
@@ -147,44 +116,32 @@ tr:hover td{background:var(--cream-2)}
   <div class="tab" onclick="showTab('profitability')">Profitability</div>
   <div class="tab" onclick="showTab('materials')">Materials</div>
   <div class="tab" onclick="showTab('projects')">Projects</div>
+  <div class="tab" onclick="showTab('quotes')">Quotes & Pricing</div>
   <div class="tab" onclick="showTab('log')">Activity Log</div>
 </div>
 
-<!-- OVERVIEW -->
 <div class="page active" id="page-overview"></div>
-
-<!-- CASH -->
 <div class="page" id="page-cash"></div>
-
-<!-- PROFITABILITY -->
 <div class="page" id="page-profitability"></div>
-
-<!-- MATERIALS -->
 <div class="page" id="page-materials"></div>
-
-<!-- PROJECTS -->
 <div class="page" id="page-projects"></div>
-
-<!-- LOG -->
+<div class="page" id="page-quotes"></div>
 <div class="page" id="page-log"></div>
 
-<!-- MODAL -->
 <div id="modal-overlay" class="modal-overlay" onclick="if(event.target===this)closeModal()">
   <div class="modal">
-    <div class="modal-head">
-      <h3 id="modal-title"></h3>
-      <button class="modal-close" onclick="closeModal()">✕</button>
-    </div>
+    <div class="modal-head"><h3 id="modal-title"></h3><button class="modal-close" onclick="closeModal()">✕</button></div>
     <div class="modal-body" id="modal-body"></div>
   </div>
 </div>
 
-</div><!-- #app -->
+</div>
 
 <script>
-let D = null; // global data store
+let D = null;
 let charts = {};
 
+// ── Data load ─────────────────────────────────────────────────────────────────
 async function loadData() {
   try {
     const r = await fetch('https://raw.githubusercontent.com/smatiere/matierehub/main/data.json?t=' + Date.now());
@@ -204,10 +161,7 @@ async function loadData() {
 
 function fmt(n, decimals=0) {
   if (n == null || isNaN(n)) return '—';
-  return '$' + Number(n).toLocaleString('en-AU', {minimumFractionDigits: decimals, maximumFractionDigits: decimals});
-}
-function fmtN(n) {
-  return Number(n).toLocaleString('en-AU', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+  return '$' + Number(n).toLocaleString('en-AU', {minimumFractionDigits:decimals, maximumFractionDigits:decimals});
 }
 function pct(n) { return (n||0).toFixed(1) + '%'; }
 
@@ -216,6 +170,7 @@ function showTab(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   event.target.classList.add('active');
   document.getElementById('page-' + name).classList.add('active');
+  if (name === 'quotes') renderQuotes();
 }
 
 function kpi(label, value, sub, style='') {
@@ -231,11 +186,11 @@ function destroyChart(id) {
 }
 
 function renderAll() {
-  const k = D.kpis;
-  const m = D.monthly;
-  const lastSync = D.meta.last_updated ? new Date(D.meta.last_updated).toLocaleDateString('en-AU', {day:'numeric',month:'short',year:'numeric'}) : '—';
+  const k = D.kpis, m = D.monthly;
+  const lastSync = D.meta && D.meta.last_updated
+    ? new Date(D.meta.last_updated).toLocaleDateString('en-AU', {day:'numeric',month:'short',year:'numeric'})
+    : '—';
   document.getElementById('header-meta').innerHTML = `Last updated: ${lastSync}`;
-
   renderOverview(k, m);
   renderCash(k);
   renderProfitability(k, m);
@@ -244,16 +199,18 @@ function renderAll() {
   renderLog();
 }
 
+// ── Overview ──────────────────────────────────────────────────────────────────
 function renderOverview(k, m) {
-  const totalMonthlyRev = m.revenue.reduce((a,b) => a+b, 0);
+  const totalMonthlyRev = m.revenue.reduce((a,b)=>a+b,0);
   const avgMonthly = totalMonthlyRev / m.revenue.filter(v=>v>0).length;
-  const html = `
+  const openCount = D.open_invoices ? D.open_invoices.length : 0;
+  document.getElementById('page-overview').innerHTML = `
     <div class="divider">FY2026 · Year to Date (Jul 2025 – Apr 2026)</div>
     <div class="kpi-grid">
       ${kpi('Revenue YTD', fmt(k.fy26_revenue), '10 months collected', 'highlight')}
-      ${kpi('Gross Profit', fmt(k.fy26_gross_profit), `Margin: ${pct(k.fy26_gp_margin)}`, 'good')}
+      ${kpi('Gross Profit', fmt(k.fy26_gross_profit), 'Margin: ' + pct(k.fy26_gp_margin), 'good')}
       ${kpi('Materials Cost', fmt(k.fy26_materials), 'Direct job costs', '')}
-      ${kpi('Outstanding', fmt(k.total_outstanding), '${D.open_invoices ? D.open_invoices.length : 0} open invoices', k.total_outstanding > 10000 ? 'warn' : '')}
+      ${kpi('Outstanding', fmt(k.total_outstanding), openCount + ' open invoices', k.total_outstanding > 10000 ? 'warn' : '')}
       ${kpi('Avg Monthly Rev', fmt(avgMonthly), 'Active months only', '')}
       ${kpi('Owner Drawings', fmt(k.fy26_owner_drawings), 'FY26 paid to Seb', '')}
     </div>
@@ -265,9 +222,8 @@ function renderOverview(k, m) {
       <div class="section">
         <div class="section-head"><h2>Top Customers (All Time)</h2></div>
         <div class="section-body" style="padding:12px 0">
-          ${D.top_customers.map((c,i) => {
-            const maxRev = D.top_customers[0].revenue;
-            const w = Math.round(c.revenue / maxRev * 100);
+          ${D.top_customers.map(c => {
+            const w = Math.round(c.revenue / D.top_customers[0].revenue * 100);
             return `<div style="padding:8px 18px">
               <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px">
                 <span style="color:var(--ink-2)">${c.name}</span>
@@ -283,22 +239,11 @@ function renderOverview(k, m) {
         <div class="section-body"><div class="chart-wrap"><canvas id="chart-overview-costs"></canvas></div></div>
       </div>
     </div>`;
-  document.getElementById('page-overview').innerHTML = html.replace('${D.open_invoices ? D.open_invoices.length : 0}', D.open_invoices ? D.open_invoices.length : 0);
 
   destroyChart('overview-rev');
   charts['overview-rev'] = new Chart(document.getElementById('chart-overview-rev'), {
     type: 'bar',
-    data: {
-      labels: m.labels,
-      datasets: [{
-        label: 'Revenue',
-        data: m.revenue,
-        backgroundColor: '#c9a84c',
-        borderRadius: 3,
-        borderSkipped: false,
-        hoverBackgroundColor: '#e8c97a'
-      }]
-    },
+    data: { labels: m.labels, datasets: [{ label: 'Revenue', data: m.revenue, backgroundColor: '#c9a84c', borderRadius: 3, borderSkipped: false, hoverBackgroundColor: '#e8c97a' }] },
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false } },
@@ -306,76 +251,57 @@ function renderOverview(k, m) {
         y: { ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'k', font:{size:11} }, grid:{color:'#f0ebe4'} },
         x: { ticks: { font:{size:11} }, grid:{display:false} }
       },
-      onClick: (event, elements) => { if (elements.length > 0) showMonthDetail(elements[0].index); },
-      onHover: (event, elements) => { event.native.target.style.cursor = elements.length > 0 ? 'pointer' : 'default'; }
+      onClick: (ev, els) => { if (els.length) showMonthDetail(els[0].index); },
+      onHover: (ev, els) => { ev.native.target.style.cursor = els.length ? 'pointer' : 'default'; }
     }
   });
 
   destroyChart('overview-costs');
-  const k2 = D.kpis;
   charts['overview-costs'] = new Chart(document.getElementById('chart-overview-costs'), {
     type: 'doughnut',
     data: {
       labels: ['Materials', 'Owner Drawings', 'Wages/PAYG', 'Operating'],
-      datasets: [{
-        data: [k2.fy26_materials, k2.fy26_owner_drawings, k2.fy26_wages, k2.fy26_opex],
-        backgroundColor: ['#c9a84c','#1b2a4a','#6b8c6e','#b5b0a6'],
-        borderWidth: 0
-      }]
+      datasets: [{ data: [k.fy26_materials, k.fy26_owner_drawings, k.fy26_wages, k.fy26_opex], backgroundColor: ['#c9a84c','#1b2a4a','#6b8c6e','#b5b0a6'], borderWidth: 0 }]
     },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: {
-        legend: { position: 'bottom', labels: { font:{size:11}, padding:12 } },
-        tooltip: { callbacks: { label: ctx => ' ' + fmt(ctx.raw) } }
-      }
+      plugins: { legend: { position:'bottom', labels:{font:{size:11},padding:12} }, tooltip: { callbacks: { label: ctx => ' ' + fmt(ctx.raw) } } }
     }
   });
 }
 
+// ── Cash & Invoices ───────────────────────────────────────────────────────────
 function renderCash(k) {
   const invoices = D.open_invoices || [];
-  const today = new Date('2026-05-25');
   const rows = invoices.map(inv => {
     const age = inv.days_old;
-    let badge = age > 60 ? 'badge-red' : age > 30 ? 'badge-amber' : 'badge-blue';
-    let ageLabel = age > 60 ? 'Overdue 60+d' : age > 30 ? 'Overdue 30+d' : `${age}d old`;
-    return `<tr>
-      <td>${inv.invoice}</td>
-      <td>${inv.contact}</td>
-      <td>${inv.date}</td>
+    const badge = age > 60 ? 'badge-red' : age > 30 ? 'badge-amber' : 'badge-blue';
+    const ageLabel = age > 60 ? 'Overdue 60+d' : age > 30 ? 'Overdue 30+d' : age + 'd old';
+    return `<tr><td>${inv.invoice}</td><td>${inv.contact}</td><td>${inv.date}</td>
       <td class="amount">${fmt(inv.amount)}</td>
-      <td><span class="badge ${badge}">${ageLabel}</span></td>
-    </tr>`;
+      <td><span class="badge ${badge}">${ageLabel}</span></td></tr>`;
   }).join('');
-
   const total = invoices.reduce((a,b) => a + b.amount, 0);
-
   document.getElementById('page-cash').innerHTML = `
     <div class="divider">Outstanding Receivables</div>
     <div class="kpi-grid">
-      ${kpi('Outstanding Total', fmt(total), `${invoices.length} open invoices`, 'warn')}
+      ${kpi('Outstanding Total', fmt(total), invoices.length + ' open invoices', 'warn')}
       ${kpi('Overdue (Xero)', fmt(k.overdue_xero), 'Live from Xero', 'warn')}
       ${kpi('Seb Rate', fmt(k.sebRate_per_hour) + '/hr', 'Ex GST', '')}
       ${kpi('Pipeline', fmt(k.pipeline_total), 'Quoted, not yet won', 'highlight')}
     </div>
     <div class="section">
-      <div class="section-head">
-        <h2>Open Invoices</h2>
-        <span style="font-size:11px;color:var(--ink-3)">${fmt(total)} total</span>
-      </div>
-      ${invoices.length ? `
-      <table>
-        <thead><tr><th>Invoice</th><th>Client</th><th>Date</th><th style="text-align:right">Amount</th><th>Age</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>` : `<div class="empty"><div class="empty-icon">✓</div>No open invoices</div>`}
+      <div class="section-head"><h2>Open Invoices</h2><span style="font-size:11px;color:var(--ink-3)">${fmt(total)} total</span></div>
+      ${invoices.length
+        ? `<table><thead><tr><th>Invoice</th><th>Client</th><th>Date</th><th style="text-align:right">Amount</th><th>Age</th></tr></thead><tbody>${rows}</tbody></table>`
+        : `<div class="empty"><div class="empty-icon">✓</div>No open invoices</div>`}
     </div>`;
 }
 
+// ── Profitability ─────────────────────────────────────────────────────────────
 function renderProfitability(k, m) {
   const netProfit = k.fy26_revenue - k.fy26_materials - k.fy26_opex - k.fy26_wages;
   const netMargin = netProfit / k.fy26_revenue * 100;
-
   document.getElementById('page-profitability').innerHTML = `
     <div class="divider">Profitability — FY2026 YTD</div>
     <div class="kpi-grid">
@@ -391,18 +317,16 @@ function renderProfitability(k, m) {
       <div class="section-body"><div class="chart-wrap"><canvas id="chart-profit-monthly"></canvas></div></div>
     </div>
     <div class="section">
-      <div class="section-head"><h2>P&amp;L Summary</h2></div>
-      <table>
-        <tbody>
-          <tr><td>Revenue (cash received)</td><td class="amount">${fmt(k.fy26_revenue)}</td></tr>
-          <tr><td style="padding-left:24px;color:var(--ink-3)">Less: Materials &amp; Direct Costs</td><td class="amount" style="color:var(--rust)">(${fmt(k.fy26_materials)})</td></tr>
-          <tr style="font-weight:600"><td>Gross Profit</td><td class="amount">${fmt(k.fy26_gross_profit)} <span style="font-weight:400;font-size:11px;color:var(--ink-3)">${pct(k.fy26_gp_margin)}</span></td></tr>
-          <tr><td style="padding-left:24px;color:var(--ink-3)">Less: Operating Expenses</td><td class="amount" style="color:var(--rust)">(${fmt(k.fy26_opex)})</td></tr>
-          <tr><td style="padding-left:24px;color:var(--ink-3)">Less: Wages &amp; PAYG</td><td class="amount" style="color:var(--rust)">(${fmt(k.fy26_wages)})</td></tr>
-          <tr style="font-weight:700;border-top:2px solid var(--cream-3)"><td>Estimated Net Profit</td><td class="amount" style="color:${netProfit>0?'var(--sage)':'var(--rust)'}">${fmt(netProfit)}</td></tr>
-          <tr style="color:var(--ink-3)"><td style="padding-left:24px">Owner Drawings (separate)</td><td class="amount">${fmt(k.fy26_owner_drawings)}</td></tr>
-        </tbody>
-      </table>
+      <div class="section-head"><h2>P&L Summary</h2></div>
+      <table><tbody>
+        <tr><td>Revenue (cash received)</td><td class="amount">${fmt(k.fy26_revenue)}</td></tr>
+        <tr><td style="padding-left:24px;color:var(--ink-3)">Less: Materials &amp; Direct Costs</td><td class="amount" style="color:var(--rust)">(${fmt(k.fy26_materials)})</td></tr>
+        <tr style="font-weight:600"><td>Gross Profit</td><td class="amount">${fmt(k.fy26_gross_profit)} <span style="font-weight:400;font-size:11px;color:var(--ink-3)">${pct(k.fy26_gp_margin)}</span></td></tr>
+        <tr><td style="padding-left:24px;color:var(--ink-3)">Less: Operating Expenses</td><td class="amount" style="color:var(--rust)">(${fmt(k.fy26_opex)})</td></tr>
+        <tr><td style="padding-left:24px;color:var(--ink-3)">Less: Wages &amp; PAYG</td><td class="amount" style="color:var(--rust)">(${fmt(k.fy26_wages)})</td></tr>
+        <tr style="font-weight:700;border-top:2px solid var(--cream-3)"><td>Estimated Net Profit</td><td class="amount" style="color:${netProfit>0?'var(--sage)':'var(--rust)'}">${fmt(netProfit)}</td></tr>
+        <tr style="color:var(--ink-3)"><td style="padding-left:24px">Owner Drawings (separate)</td><td class="amount">${fmt(k.fy26_owner_drawings)}</td></tr>
+      </tbody></table>
     </div>`;
 
   destroyChart('profit-monthly');
@@ -426,10 +350,10 @@ function renderProfitability(k, m) {
   });
 }
 
+// ── Materials ─────────────────────────────────────────────────────────────────
 function renderMaterials(k, m) {
-  const totalMat = m.materials.reduce((a,b) => a+b, 0);
+  const totalMat = m.materials.reduce((a,b)=>a+b,0);
   const matPctOfRev = totalMat / k.fy26_revenue * 100;
-
   document.getElementById('page-materials').innerHTML = `
     <div class="divider">Materials Spend — FY2026 YTD</div>
     <div class="kpi-grid">
@@ -444,95 +368,53 @@ function renderMaterials(k, m) {
     </div>
     <div class="section">
       <div class="section-head"><h2>Monthly Breakdown</h2></div>
-      <table>
-        <thead><tr><th>Month</th><th style="text-align:right">Revenue</th><th style="text-align:right">Materials</th><th style="text-align:right">Gross Profit</th><th style="text-align:right">GP%</th></tr></thead>
-        <tbody>
-          ${m.labels.map((label, i) => {
-            const rev = m.revenue[i];
-            const mat = m.materials[i];
-            const gp = rev - mat;
-            const gpm = rev > 0 ? (gp/rev*100) : 0;
-            return `<tr>
-              <td>${label} ${m.periods[i].slice(0,4)}</td>
-              <td class="amount">${fmt(rev)}</td>
-              <td class="amount" style="color:var(--rust)">${fmt(mat)}</td>
-              <td class="amount" style="color:var(--sage)">${fmt(gp)}</td>
-              <td class="amount" style="font-size:12px;color:var(--ink-3)">${rev > 0 ? pct(gpm) : '—'}</td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table>
+      <table><thead><tr><th>Month</th><th style="text-align:right">Revenue</th><th style="text-align:right">Materials</th><th style="text-align:right">Gross Profit</th><th style="text-align:right">GP%</th></tr></thead>
+      <tbody>${m.labels.map((label,i) => {
+        const rev = m.revenue[i], mat = m.materials[i], gp = rev - mat;
+        const gpm = rev > 0 ? gp/rev*100 : 0;
+        return `<tr><td>${label} ${m.periods[i].slice(0,4)}</td><td class="amount">${fmt(rev)}</td>
+          <td class="amount" style="color:var(--rust)">${fmt(mat)}</td>
+          <td class="amount" style="color:var(--sage)">${fmt(gp)}</td>
+          <td class="amount" style="font-size:12px;color:var(--ink-3)">${rev > 0 ? pct(gpm) : '—'}</td></tr>`;
+      }).join('')}</tbody></table>
     </div>`;
 
   destroyChart('materials');
   charts['materials'] = new Chart(document.getElementById('chart-materials'), {
     type: 'line',
-    data: {
-      labels: m.labels,
-      datasets: [{
-        label: 'Materials $',
-        data: m.materials,
-        borderColor: '#b85c38',
-        backgroundColor: 'rgba(184,92,56,.1)',
-        fill: true,
-        tension: 0.3,
-        pointRadius: 4,
-        pointBackgroundColor: '#b85c38'
-      }]
-    },
+    data: { labels: m.labels, datasets: [{ label: 'Materials $', data: m.materials, borderColor: '#b85c38', backgroundColor: 'rgba(184,92,56,.1)', fill: true, tension: 0.3, pointRadius: 4, pointBackgroundColor: '#b85c38' }] },
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend:{display:false} },
-      scales: {
-        y: { ticks:{callback: v=>'$'+(v/1000).toFixed(0)+'k', font:{size:11}}, grid:{color:'#f0ebe4'} },
-        x: { ticks:{font:{size:11}}, grid:{display:false} }
-      }
+      scales: { y: { ticks:{callback:v=>'$'+(v/1000).toFixed(0)+'k',font:{size:11}}, grid:{color:'#f0ebe4'} }, x: { ticks:{font:{size:11}}, grid:{display:false} } }
     }
   });
 }
 
+// ── Projects ──────────────────────────────────────────────────────────────────
 function renderProjects(k) {
   const definedProjects = D.projects || [];
   const timesheets = D.timesheets || [];
   const expenses = D.expense_log || [];
   const rate = k.sebRate_per_hour || 100;
-
-  // Map of explicitly defined projects
   const definedNames = new Set(definedProjects.map(p => p.name));
   const definedMap = {};
   definedProjects.forEach(p => definedMap[p.name] = p);
-
-  // Collect ALL unique project names from activity logs
   const allNames = new Set(definedProjects.map(p => p.name));
   timesheets.forEach(t => t.project && allNames.add(t.project));
   expenses.forEach(e => e.project && allNames.add(e.project));
-
-  // Build per-project aggregates
   const pData = {};
   allNames.forEach(name => {
     const def = definedMap[name] || {};
     pData[name] = { name, status: def.status || 'Active', quoted: def.quoted != null ? def.quoted : null, hours: 0, laborValue: 0, expenses: 0 };
   });
-  timesheets.forEach(t => {
-    if (t.project && pData[t.project]) {
-      pData[t.project].hours += (t.hours || 0);
-      pData[t.project].laborValue += (t.hours || 0) * rate;
-    }
-  });
-  expenses.forEach(e => {
-    if (e.project && pData[e.project]) {
-      pData[e.project].expenses += (e.amount || 0);
-    }
-  });
-
-  // Sort: defined projects first, then alpha
-  const sorted = Object.values(pData).sort((a, b) => {
-    const aD = definedNames.has(a.name) ? 0 : 1;
-    const bD = definedNames.has(b.name) ? 0 : 1;
+  timesheets.forEach(t => { if (t.project && pData[t.project]) { pData[t.project].hours += (t.hours||0); pData[t.project].laborValue += (t.hours||0) * rate; } });
+  expenses.forEach(e => { if (e.project && pData[e.project]) pData[e.project].expenses += (e.amount||0); });
+  const sorted = Object.values(pData).sort((a,b) => {
+    const aD = definedNames.has(a.name) ? 0 : 1, bD = definedNames.has(b.name) ? 0 : 1;
     if (aD !== bD) return aD - bD;
     return a.name.localeCompare(b.name);
   });
-
   const projectRows = sorted.map(p => {
     const remaining = p.quoted != null ? p.quoted - p.laborValue - p.expenses : null;
     const safeName = p.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
@@ -544,24 +426,16 @@ function renderProjects(k) {
       <td class="amount">${p.laborValue > 0 ? fmt(p.laborValue) : '—'}</td>
       <td class="amount" style="color:var(--rust)">${p.expenses > 0 ? fmt(p.expenses) : '—'}</td>
       <td class="amount" style="color:${remaining===null?'var(--ink-4)':remaining>=0?'var(--sage)':'var(--rust)'}">
-        ${remaining !== null ? fmt(remaining) : '—'}
-      </td>
+        ${remaining !== null ? fmt(remaining) : '—'}</td>
     </tr>`;
   }).join('');
-
   const recentHours = timesheets.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'')).slice(0,10);
-  const hoursRows = recentHours.length ? recentHours.map(t => `<tr>
-    <td>${t.date || '—'}</td>
-    <td>${t.project || '—'}</td>
-    <td>${t.notes || '—'}</td>
-    <td class="amount">${t.hours}h</td>
-    <td class="amount">${fmt(t.hours * rate)}</td>
-  </tr>`).join('') : '<tr><td colspan="5"><div class="empty">No hours logged yet. Tell Claude to log your hours.</div></td></tr>';
-
-  const totalQuoted = definedProjects.reduce((a,p) => a + (p.quoted||0), 0);
-  const totalHoursAll = timesheets.reduce((a,t) => a + (t.hours||0), 0);
-  const totalExpensesAll = expenses.reduce((a,e) => a + (e.amount||0), 0);
-
+  const hoursRows = recentHours.length
+    ? recentHours.map(t => `<tr><td>${t.date||'—'}</td><td>${t.project||'—'}</td><td>${t.notes||'—'}</td><td class="amount">${t.hours}h</td><td class="amount">${fmt(t.hours*rate)}</td></tr>`).join('')
+    : '<tr><td colspan="5"><div class="empty" style="padding:20px">No hours logged yet.</div></td></tr>';
+  const totalQuoted = definedProjects.reduce((a,p)=>a+(p.quoted||0),0);
+  const totalHoursAll = timesheets.reduce((a,t)=>a+(t.hours||0),0);
+  const totalExpensesAll = expenses.reduce((a,e)=>a+(e.amount||0),0);
   document.getElementById('page-projects').innerHTML = `
     <div class="divider">Projects — All Active</div>
     <div class="kpi-grid">
@@ -572,60 +446,44 @@ function renderProjects(k) {
     </div>
     <div class="section">
       <div class="section-head"><h2>Project Overview</h2><span class="chart-clickable-hint">↑ Click a row for details</span></div>
-      <table>
-        <thead><tr><th>Project</th><th>Status</th><th style="text-align:right">Quoted</th><th style="text-align:right">Hours</th><th style="text-align:right">Labour</th><th style="text-align:right">Expenses</th><th style="text-align:right">Remaining</th></tr></thead>
-        <tbody>${projectRows || '<tr><td colspan="7"><div class="empty">No projects yet</div></td></tr>'}</tbody>
-      </table>
+      <table><thead><tr><th>Project</th><th>Status</th><th style="text-align:right">Quoted</th><th style="text-align:right">Hours</th><th style="text-align:right">Labour</th><th style="text-align:right">Expenses</th><th style="text-align:right">Remaining</th></tr></thead>
+      <tbody>${projectRows || '<tr><td colspan="7"><div class="empty">No projects yet</div></td></tr>'}</tbody></table>
     </div>
     <div class="section">
       <div class="section-head"><h2>Recent Timesheet Entries</h2></div>
-      <table>
-        <thead><tr><th>Date</th><th>Project</th><th>Notes</th><th style="text-align:right">Hours</th><th style="text-align:right">Value</th></tr></thead>
-        <tbody>${hoursRows}</tbody>
-      </table>
+      <table><thead><tr><th>Date</th><th>Project</th><th>Notes</th><th style="text-align:right">Hours</th><th style="text-align:right">Value</th></tr></thead>
+      <tbody>${hoursRows}</tbody></table>
     </div>`;
 }
 
+// ── Activity Log ──────────────────────────────────────────────────────────────
 function renderLog() {
   const timesheets = D.timesheets || [];
   const expenses = D.expense_log || [];
-
+  const rate = D.kpis.sebRate_per_hour || 100;
   const allEntries = [
-    ...timesheets.map(t => ({type:'hours', date:t.date, text:`${t.hours}h on ${t.project}${t.description?': '+t.description:''}`, amount: t.hours * (D.kpis.sebRate_per_hour||100)})),
-    ...expenses.map(e => ({type:'expense', date:e.date, text:`${e.description}${e.category?' ('+e.category+')':''}`, amount: e.amount}))
-  ].sort((a,b) => (b.date||'').localeCompare(a.date||''));
-
-  const entries = allEntries.length ? allEntries.map(e => `
-    <div class="log-entry">
-      <div class="log-dot ${e.type}"></div>
-      <div class="log-text">
-        <div>${e.text}</div>
-        <div class="log-date">${e.date || '—'}</div>
-      </div>
-      <div class="log-amount">${e.type === 'hours' ? e.amount/D.kpis.sebRate_per_hour + 'h' : fmt(e.amount)}</div>
-    </div>`).join('') :
-    `<div class="empty">
-      <div class="empty-icon">💬</div>
-      <div>No activity logged yet.</div>
-      <div style="margin-top:8px;font-size:12px">Tell Claude things like:<br>
-      "Log 4 hours on Mark Nth Balgowlah today"<br>
-      "Add $285 materials expense at Bunnings"</div>
-    </div>`;
-
+    ...timesheets.map(t => ({type:'hours', date:t.date, text:`${t.hours}h on ${t.project}${t.description?': '+t.description:''}`, amount:t.hours*rate})),
+    ...expenses.map(e => ({type:'expense', date:e.date, text:`${e.description}${e.category?' ('+e.category+')':''}`, amount:e.amount}))
+  ].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const entries = allEntries.length
+    ? allEntries.map(e => `<div class="log-entry">
+        <div class="log-dot ${e.type}"></div>
+        <div class="log-text"><div>${e.text}</div><div class="log-date">${e.date||'—'}</div></div>
+        <div class="log-amount">${e.type==='hours' ? e.amount/rate+'h' : fmt(e.amount)}</div>
+      </div>`).join('')
+    : `<div class="empty"><div class="empty-icon">💬</div><div>No activity logged yet.</div>
+        <div style="margin-top:8px;font-size:12px">Tell Claude things like:<br>"Log 4 hours on Mark Nth Balgowlah today"<br>"Add $285 materials expense at Bunnings"</div></div>`;
   document.getElementById('page-log').innerHTML = `
     <div class="divider">Captured Activity</div>
     <div class="kpi-grid">
-      ${kpi('Hours Logged', timesheets.reduce((a,t)=>a+t.hours,0) + 'h', 'Via Claude chat', '')}
+      ${kpi('Hours Logged', timesheets.reduce((a,t)=>a+t.hours,0)+'h', 'Via Claude chat', '')}
       ${kpi('Expenses Logged', expenses.length, 'Via Claude chat', '')}
-      ${kpi('Labour Value', fmt(timesheets.reduce((a,t)=>a+(t.hours*(D.kpis.sebRate_per_hour||100)),0)), 'At $' + D.kpis.sebRate_per_hour + '/hr', 'highlight')}
+      ${kpi('Labour Value', fmt(timesheets.reduce((a,t)=>a+(t.hours*rate),0)), 'At $'+rate+'/hr', 'highlight')}
     </div>
-    <div class="section">
-      <div class="section-head"><h2>Activity Feed</h2></div>
-      <div class="section-body">${entries}</div>
-    </div>`;
+    <div class="section"><div class="section-head"><h2>Activity Feed</h2></div><div class="section-body">${entries}</div></div>`;
 }
 
-// ── Modal helpers ──────────────────────────────────────────────────────────────
+// ── Modals ────────────────────────────────────────────────────────────────────
 function openModal(title, bodyHtml) {
   document.getElementById('modal-title').textContent = title;
   document.getElementById('modal-body').innerHTML = bodyHtml;
@@ -638,127 +496,73 @@ function closeModal() {
 }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
-// ── Project detail modal ────────────────────────────────────────────────────────
 function showProjectDetail(name) {
-  const k = D.kpis;
-  const rate = k.sebRate_per_hour || 100;
-  const ts = (D.timesheets || []).filter(t => t.project === name).sort((a,b) => (b.date||'').localeCompare(a.date||''));
-  const exp = (D.expense_log || []).filter(e => e.project === name).sort((a,b) => (b.date||'').localeCompare(a.date||''));
-
-  const totalHours = ts.reduce((a,t) => a + (t.hours||0), 0);
+  const rate = D.kpis.sebRate_per_hour || 100;
+  const ts = (D.timesheets||[]).filter(t=>t.project===name).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const exp = (D.expense_log||[]).filter(e=>e.project===name).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const totalHours = ts.reduce((a,t)=>a+(t.hours||0),0);
   const laborValue = totalHours * rate;
-  const totalExpenses = exp.reduce((a,e) => a + (e.amount||0), 0);
-  const defined = (D.projects || []).find(p => p.name === name);
+  const totalExpenses = exp.reduce((a,e)=>a+(e.amount||0),0);
+  const defined = (D.projects||[]).find(p=>p.name===name);
   const quoted = defined && defined.quoted != null ? defined.quoted : null;
   const remaining = quoted != null ? quoted - laborValue - totalExpenses : null;
-
-  const tsRows = ts.length ? ts.map(t => `<tr>
-    <td>${t.date||'—'}</td>
-    <td>${t.employee||'Seb'}</td>
-    <td style="color:var(--ink-3)">${t.notes||'—'}</td>
-    <td class="amount">${t.hours}h</td>
-    <td class="amount">${fmt(t.hours * rate)}</td>
-  </tr>`).join('') + `<tr style="font-weight:600;background:var(--cream-2)"><td colspan="3" style="font-size:12px">Total</td><td class="amount">${totalHours}h</td><td class="amount">${fmt(laborValue)}</td></tr>`
-  : `<tr><td colspan="5" style="text-align:center;color:var(--ink-4);padding:16px 0">No timesheet entries</td></tr>`;
-
-  const expRows = exp.length ? exp.map(e => `<tr>
-    <td>${e.date||'—'}</td>
-    <td style="color:var(--ink-3)">${e.description||'—'}</td>
-    <td>${e.category||'—'}</td>
-    <td class="amount">${fmt(e.amount)}</td>
-  </tr>`).join('') + `<tr style="font-weight:600;background:var(--cream-2)"><td colspan="3" style="font-size:12px">Total</td><td class="amount">${fmt(totalExpenses)}</td></tr>`
-  : `<tr><td colspan="4" style="text-align:center;color:var(--ink-4);padding:16px 0">No expenses logged</td></tr>`;
-
-  const html = `
+  const tsRows = ts.length
+    ? ts.map(t=>`<tr><td>${t.date||'—'}</td><td>${t.employee||'Seb'}</td><td style="color:var(--ink-3)">${t.notes||'—'}</td><td class="amount">${t.hours}h</td><td class="amount">${fmt(t.hours*rate)}</td></tr>`).join('')
+      + `<tr style="font-weight:600;background:var(--cream-2)"><td colspan="3" style="font-size:12px">Total</td><td class="amount">${totalHours}h</td><td class="amount">${fmt(laborValue)}</td></tr>`
+    : `<tr><td colspan="5" style="text-align:center;color:var(--ink-4);padding:16px 0">No timesheet entries</td></tr>`;
+  const expRows = exp.length
+    ? exp.map(e=>`<tr><td>${e.date||'—'}</td><td style="color:var(--ink-3)">${e.description||'—'}</td><td>${e.category||'—'}</td><td class="amount">${fmt(e.amount)}</td></tr>`).join('')
+      + `<tr style="font-weight:600;background:var(--cream-2)"><td colspan="3" style="font-size:12px">Total</td><td class="amount">${fmt(totalExpenses)}</td></tr>`
+    : `<tr><td colspan="4" style="text-align:center;color:var(--ink-4);padding:16px 0">No expenses logged</td></tr>`;
+  openModal(name, `
     <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:20px">
-      ${kpi('Quoted', quoted != null ? fmt(quoted) : 'TBD', '', quoted ? 'highlight' : '')}
-      ${kpi('Labour', fmt(laborValue), totalHours + 'h @ $' + rate + '/hr', '')}
-      ${kpi('Expenses', totalExpenses > 0 ? fmt(totalExpenses) : '$0', 'Materials & costs', '')}
-      ${kpi('Remaining', remaining !== null ? fmt(remaining) : '—', 'Budget left', remaining === null ? '' : remaining >= 0 ? 'good' : 'warn')}
+      ${kpi('Quoted', quoted!=null?fmt(quoted):'TBD','',quoted?'highlight':'')}
+      ${kpi('Labour',fmt(laborValue),totalHours+'h @ $'+rate+'/hr','')}
+      ${kpi('Expenses',totalExpenses>0?fmt(totalExpenses):'$0','Materials & costs','')}
+      ${kpi('Remaining',remaining!==null?fmt(remaining):'—','Budget left',remaining===null?'':remaining>=0?'good':'warn')}
     </div>
     <div style="margin-bottom:20px">
       <div class="divider" style="margin-top:0">Timesheets</div>
-      <table>
-        <thead><tr><th>Date</th><th>By</th><th>Notes</th><th style="text-align:right">Hours</th><th style="text-align:right">Value</th></tr></thead>
-        <tbody>${tsRows}</tbody>
-      </table>
+      <table><thead><tr><th>Date</th><th>By</th><th>Notes</th><th style="text-align:right">Hours</th><th style="text-align:right">Value</th></tr></thead><tbody>${tsRows}</tbody></table>
     </div>
     <div>
       <div class="divider">Expenses</div>
-      <table>
-        <thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right">Amount</th></tr></thead>
-        <tbody>${expRows}</tbody>
-      </table>
-    </div>`;
-
-  openModal(name, html);
+      <table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right">Amount</th></tr></thead><tbody>${expRows}</tbody></table>
+    </div>`);
 }
 
-// ── Month detail modal ─────────────────────────────────────────────────────────
 function showMonthDetail(idx) {
   const m = D.monthly;
-  const label = m.labels[idx];
-  const period = m.periods[idx]; // e.g. "2025-07"
-  const revenue = m.revenue[idx] || 0;
-  const materials = (m.materials && m.materials[idx]) || 0;
-  const gp = revenue - materials;
-  const gpm = revenue > 0 ? gp / revenue * 100 : 0;
+  const label = m.labels[idx], period = m.periods[idx];
+  const revenue = m.revenue[idx]||0, materials = (m.materials&&m.materials[idx])||0;
+  const gp = revenue - materials, gpm = revenue > 0 ? gp/revenue*100 : 0;
   const rate = D.kpis.sebRate_per_hour || 100;
-
-  // Filter logged entries to this month
-  const monthTs = (D.timesheets || []).filter(t => t.date && t.date.startsWith(period)).sort((a,b) => (b.date||'').localeCompare(a.date||''));
-  const monthExp = (D.expense_log || []).filter(e => e.date && e.date.startsWith(period)).sort((a,b) => (b.date||'').localeCompare(a.date||''));
-
-  const tsSection = monthTs.length ? `
-    <div style="margin-bottom:20px">
-      <div class="divider" style="margin-top:0">Hours Logged</div>
-      <table>
-        <thead><tr><th>Date</th><th>Project</th><th>Notes</th><th style="text-align:right">Hours</th><th style="text-align:right">Value</th></tr></thead>
-        <tbody>${monthTs.map(t => `<tr>
-          <td>${t.date}</td><td>${t.project||'—'}</td><td style="color:var(--ink-3)">${t.notes||'—'}</td>
-          <td class="amount">${t.hours}h</td><td class="amount">${fmt(t.hours*rate)}</td>
-        </tr>`).join('')}
-        <tr style="font-weight:600;background:var(--cream-2)"><td colspan="3" style="font-size:12px">Total</td>
-          <td class="amount">${monthTs.reduce((a,t)=>a+(t.hours||0),0)}h</td>
-          <td class="amount">${fmt(monthTs.reduce((a,t)=>a+(t.hours||0),0)*rate)}</td>
-        </tr></tbody>
-      </table>
-    </div>` : '';
-
-  const expSection = monthExp.length ? `
-    <div>
-      <div class="divider">Expenses Logged</div>
-      <table>
-        <thead><tr><th>Date</th><th>Project</th><th>Description</th><th style="text-align:right">Amount</th></tr></thead>
-        <tbody>${monthExp.map(e => `<tr>
-          <td>${e.date}</td><td>${e.project||'—'}</td><td style="color:var(--ink-3)">${e.description||'—'}</td>
-          <td class="amount">${fmt(e.amount)}</td>
-        </tr>`).join('')}
-        <tr style="font-weight:600;background:var(--cream-2)"><td colspan="3" style="font-size:12px">Total</td>
-          <td class="amount">${fmt(monthExp.reduce((a,e)=>a+(e.amount||0),0))}</td>
-        </tr></tbody>
-      </table>
-    </div>` : '';
-
-  const noData = !monthTs.length && !monthExp.length ? `
-    <div class="empty" style="padding:28px 0">
-      <div class="empty-icon">📅</div>
-      <div>No Claude-logged entries for this month.</div>
-      <div style="font-size:12px;margin-top:6px;color:var(--ink-4)">Historical data lives in Xero — only hours & expenses you've logged here appear.</div>
-    </div>` : '';
-
-  const html = `
+  const monthTs = (D.timesheets||[]).filter(t=>t.date&&t.date.startsWith(period)).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const monthExp = (D.expense_log||[]).filter(e=>e.date&&e.date.startsWith(period)).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const tsSection = monthTs.length ? `<div style="margin-bottom:20px">
+    <div class="divider" style="margin-top:0">Hours Logged</div>
+    <table><thead><tr><th>Date</th><th>Project</th><th>Notes</th><th style="text-align:right">Hours</th><th style="text-align:right">Value</th></tr></thead>
+    <tbody>${monthTs.map(t=>`<tr><td>${t.date}</td><td>${t.project||'—'}</td><td style="color:var(--ink-3)">${t.notes||'—'}</td><td class="amount">${t.hours}h</td><td class="amount">${fmt(t.hours*rate)}</td></tr>`).join('')}
+    <tr style="font-weight:600;background:var(--cream-2)"><td colspan="3" style="font-size:12px">Total</td><td class="amount">${monthTs.reduce((a,t)=>a+(t.hours||0),0)}h</td><td class="amount">${fmt(monthTs.reduce((a,t)=>a+(t.hours||0),0)*rate)}</td></tr>
+    </tbody></table></div>` : '';
+  const expSection = monthExp.length ? `<div>
+    <div class="divider">Expenses Logged</div>
+    <table><thead><tr><th>Date</th><th>Project</th><th>Description</th><th style="text-align:right">Amount</th></tr></thead>
+    <tbody>${monthExp.map(e=>`<tr><td>${e.date}</td><td>${e.project||'—'}</td><td style="color:var(--ink-3)">${e.description||'—'}</td><td class="amount">${fmt(e.amount)}</td></tr>`).join('')}
+    <tr style="font-weight:600;background:var(--cream-2)"><td colspan="3" style="font-size:12px">Total</td><td class="amount">${fmt(monthExp.reduce((a,e)=>a+(e.amount||0),0))}</td></tr>
+    </tbody></table></div>` : '';
+  const noData = !monthTs.length&&!monthExp.length ? `<div class="empty" style="padding:28px 0">
+    <div class="empty-icon">📅</div><div>No Claude-logged entries for this month.</div>
+    <div style="font-size:12px;margin-top:6px;color:var(--ink-4)">Historical data lives in Xero — only hours & expenses you've logged here appear.</div></div>` : '';
+  openModal(label + ' ' + period.slice(0,4), `
     <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:20px">
-      ${kpi('Revenue', fmt(revenue), 'Cash received (Xero)', 'highlight')}
-      ${kpi('Materials', fmt(materials), 'Direct costs (Xero)', '')}
-      ${kpi('Gross Profit', fmt(gp), pct(gpm) + ' margin', gp >= 0 ? 'good' : 'warn')}
-    </div>
-    ${tsSection}${expSection}${noData}`;
-
-  openModal(label + ' ' + period.slice(0, 4), html);
+      ${kpi('Revenue',fmt(revenue),'Cash received (Xero)','highlight')}
+      ${kpi('Materials',fmt(materials),'Direct costs (Xero)','')}
+      ${kpi('Gross Profit',fmt(gp),pct(gpm)+' margin',gp>=0?'good':'warn')}
+    </div>${tsSection}${expSection}${noData}`);
 }
 
-// ── Xero connection ───────────────────────────────────────────────────────────
+// ── Xero Auth ─────────────────────────────────────────────────────────────────
 const XERO_CLIENT_ID = '3854892E5C3B490EAE24E3B1A79E668D';
 const XERO_REDIRECT_URI = 'https://matierehub2.netlify.app/xero-callback';
 const XERO_SCOPES = 'openid profile email offline_access accounting.settings accounting.settings.read accounting.contacts accounting.contacts.read accounting.attachments accounting.attachments.read accounting.budgets.read accounting.payments accounting.payments.read accounting.invoices accounting.invoices.read accounting.banktransactions accounting.banktransactions.read accounting.manualjournals accounting.manualjournals.read accounting.reports.aged.read accounting.reports.balancesheet.read accounting.reports.banksummary.read accounting.reports.budgetsummary.read accounting.reports.executivesummary.read accounting.reports.profitandloss.read accounting.reports.trialbalance.read accounting.reports.taxreports.read accounting.reports.tenninetynine.read files files.read assets assets.read projects projects.read';
@@ -766,13 +570,11 @@ const XERO_SCOPES = 'openid profile email offline_access accounting.settings acc
 function xeroConnect() {
   const state = Math.random().toString(36).substring(2);
   localStorage.setItem('xero_state', state);
-  const url = 'https://login.xero.com/identity/connect/authorize'
-    + '?response_type=code'
-    + '&client_id=' + XERO_CLIENT_ID
+  window.location.href = 'https://login.xero.com/identity/connect/authorize'
+    + '?response_type=code&client_id=' + XERO_CLIENT_ID
     + '&redirect_uri=' + encodeURIComponent(XERO_REDIRECT_URI)
     + '&scope=' + encodeURIComponent(XERO_SCOPES)
     + '&state=' + state;
-  window.location.href = url;
 }
 
 function xeroDisconnect() {
@@ -781,15 +583,14 @@ function xeroDisconnect() {
 }
 
 async function getXeroToken() {
-  const expiry = parseInt(localStorage.getItem('xero_token_expiry') || '0');
+  const expiry = parseInt(localStorage.getItem('xero_token_expiry')||'0');
   if (Date.now() < expiry - 60000) return localStorage.getItem('xero_access_token');
   const refresh_token = localStorage.getItem('xero_refresh_token');
   if (!refresh_token) return null;
   try {
     const res = await fetch('/.netlify/functions/xero-auth', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'refresh', refresh_token })
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({action:'refresh', refresh_token})
     });
     const tokens = await res.json();
     if (tokens.error) throw new Error(JSON.stringify(tokens.error));
@@ -800,14 +601,12 @@ async function getXeroToken() {
   } catch(e) { console.error('Xero token refresh failed:', e); return null; }
 }
 
-// Call any Xero API endpoint — used by Claude to read/write Xero data
 async function xeroApiCall(endpoint, method='GET', body=null) {
   const token = await getXeroToken();
   if (!token) throw new Error('Not connected to Xero');
   const res = await fetch('/.netlify/functions/xero-api', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ endpoint, method, body, access_token: token, tenant_id: localStorage.getItem('xero_tenant_id') })
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({endpoint, method, body, access_token:token, tenant_id:localStorage.getItem('xero_tenant_id')})
   });
   return res.json();
 }
@@ -833,62 +632,55 @@ function updateXeroBtn() {
   }
 }
 
-// ── Xero Full Sync ────────────────────────────────────────────────────────────
+// ── Xero Full Sync (download JSON for Claude to process) ──────────────────────
 async function syncFromXero() {
   openModal('Syncing from Xero…', '<div style="text-align:center;padding:30px"><div class="spinner" style="margin:0 auto 16px"></div><div id="sync-status" style="color:var(--ink-3);font-size:13px">Connecting…</div></div>');
-
   const status = t => { const el = document.getElementById('sync-status'); if (el) el.textContent = t; };
   const results = { synced_at: new Date().toISOString() };
-
   try {
-    // Invoices — FY26 customer invoices
     status('Fetching invoices…');
     const invRes = await xeroApiCall('Invoices?where=Type%3D%3D%22ACCREC%22%26%26Date%3E%3DDateTime(2025%2C7%2C1)&unitdp=2&summaryOnly=false');
     results.invoices = invRes.Invoices || [];
 
-    // Quotes
-    status('Fetching quotes…');
-    const qtRes = await xeroApiCall('Quotes');
-    results.quotes = qtRes.Quotes || [];
+    // Quotes — paginated to get ALL (not just first 100)
+    let allQ = []; let qp = 1;
+    while (true) {
+      status('Fetching quotes page ' + qp + ' (' + allQ.length + ' so far)…');
+      const qtRes = await xeroApiCall('Quotes?page=' + qp);
+      const batch = qtRes.Quotes || [];
+      allQ = allQ.concat(batch);
+      if (batch.length < 100) break;
+      qp++; if (qp > 10) break;
+    }
+    results.quotes = allQ;
 
-    // Contacts (customers)
     status('Fetching contacts…');
     const ctRes = await xeroApiCall('Contacts?where=IsCustomer%3D%3Dtrue');
     results.contacts = ctRes.Contacts || [];
-
-    // P&L — May 2026
     status('Fetching May 2026 P&L…');
     const pnlMay = await xeroApiCall('Reports/ProfitAndLoss?fromDate=2026-05-01&toDate=2026-05-31');
     results.pnl_may = pnlMay.Reports ? pnlMay.Reports[0] : pnlMay;
-
-    // P&L — FY26 full year
     status('Fetching FY26 P&L…');
     const pnlFY = await xeroApiCall('Reports/ProfitAndLoss?fromDate=2025-07-01&toDate=2026-05-31');
     results.pnl_fy26 = pnlFY.Reports ? pnlFY.Reports[0] : pnlFY;
-
-    // Bank transactions — FY26 (expenses/materials)
     status('Fetching bank transactions…');
     const btRes = await xeroApiCall('BankTransactions?where=Date%3E%3DDateTime(2025%2C7%2C1)&unitdp=2');
     results.bank_transactions = btRes.BankTransactions || [];
-
-    // Accounts
-    status('Fetching chart of accounts…');
+    status('Fetching accounts…');
     const acRes = await xeroApiCall('Accounts?where=Status%3D%3D%22ACTIVE%22');
     results.accounts = acRes.Accounts || [];
 
-    // Summary for modal
     const summary = [
       `✓ Invoices: ${results.invoices.length}`,
-      `✓ Quotes: ${results.quotes.length}`,
+      `✓ Quotes: ${results.quotes.length} (${qp} page${qp>1?'s':''})`,
       `✓ Contacts: ${results.contacts.length}`,
       `✓ Bank transactions: ${results.bank_transactions.length}`,
       `✓ P&L reports: 2 (May 2026 + FY26)`,
     ].join('<br>');
 
-    // Download JSON for Claude to process
-    const blob = new Blob([JSON.stringify(results, null, 2)], { type: 'application/json' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
+    const blob = new Blob([JSON.stringify(results,null,2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
     a.href = url; a.download = 'xero_sync_' + new Date().toISOString().slice(0,10) + '.json'; a.click();
     URL.revokeObjectURL(url);
 
@@ -897,24 +689,286 @@ async function syncFromXero() {
         <div style="color:var(--sage);font-size:15px;font-weight:600;margin-bottom:16px">✓ Sync complete</div>
         <div style="line-height:2;font-size:13px;color:var(--ink-2)">${summary}</div>
         <div style="margin-top:20px;padding:14px;background:var(--cream-2);border-radius:4px;font-size:12px;color:var(--ink-3);line-height:1.7">
-          <strong>Next step:</strong> A file called <code>xero_sync_YYYY-MM-DD.json</code> has been downloaded.<br>
+          <strong>Next step:</strong> A file <code>xero_sync_YYYY-MM-DD.json</code> has been downloaded.<br>
           Upload it to Claude and ask: <em>"Merge this Xero sync into data.json"</em>
         </div>
       </div>`;
-
   } catch(err) {
-    document.getElementById('modal-body').innerHTML = `
-      <div style="color:var(--rust);padding:16px 0">
-        <div style="font-weight:600;margin-bottom:8px">⚠ Sync failed</div>
-        <div style="font-size:12px;color:var(--ink-3)">${err.message}</div>
-      </div>`;
+    document.getElementById('modal-body').innerHTML = `<div style="color:var(--rust);padding:16px 0"><div style="font-weight:600;margin-bottom:8px">⚠ Sync failed</div><div style="font-size:12px;color:var(--ink-3)">${err.message}</div></div>`;
   }
 }
 
-// Boot
-if (window.location.search.includes('xero=connected')) {
-  history.replaceState({}, '', '/');
+// ── Quotes & Pricing Intelligence ─────────────────────────────────────────────
+let QUOTES_DATA = null;
+
+// Keyword-based job category detector — improve over time as patterns emerge
+function detectCategory(text) {
+  const t = (text || '').toLowerCase();
+  if (/paling|picket|pool fence|boundary fence|timber fence|\bfenc/.test(t)) return 'Fencing';
+  if (/\bdeck\b|decking/.test(t)) return 'Decking';
+  if (/pergola|carport|gazebo|shade structure/.test(t)) return 'Pergola & Carport';
+  if (/timber floor|floorboard|flooring|floor board/.test(t)) return 'Flooring';
+  if (/handrail|balustrade|staircase|\bstair/.test(t)) return 'Handrails & Stairs';
+  if (/cladding|weatherboard|lining board/.test(t)) return 'Cladding';
+  if (/wardrobe|cabinet|joinery|built.in|built in/.test(t)) return 'Joinery & Built-ins';
+  if (/\bshelf\b|shelving|bookcase/.test(t)) return 'Shelving';
+  if (/\bdoor\b|\bwindow\b/.test(t)) return 'Doors & Windows';
+  if (/retaining|garden bed|planter|landscape/.test(t)) return 'Garden & Landscaping';
+  if (/\bframe\b|stud wall|partition/.test(t)) return 'Framing';
+  if (/repair|replace|\bfix\b|patch|maintenance/.test(t)) return 'Repairs & Maintenance';
+  return 'General Carpentry';
 }
+
+function renderQuotes() {
+  const connected = !!localStorage.getItem('xero_access_token');
+  document.getElementById('page-quotes').innerHTML = `
+    <div class="divider">Quotes & Pricing Intelligence</div>
+    <div class="load-bar">
+      <button class="btn-primary" id="load-quotes-btn" onclick="loadXeroQuotes()">⬇ Load All Quotes from Xero</button>
+      <div id="quotes-status" style="font-size:12px;color:var(--ink-3)">
+        ${connected
+          ? 'Connected · fetches all quotes with line items — takes ~20–30s for 280 quotes'
+          : '⚠ Connect Xero first using the ⚡ button in the top right corner'}
+      </div>
+    </div>
+    <div id="quotes-content">
+      <div class="section"><div class="section-body">
+        <div class="empty">
+          <div class="empty-icon">📋</div>
+          <div style="margin-bottom:8px;font-weight:500">Click <em>Load All Quotes from Xero</em> to get started</div>
+          <div style="font-size:12px">Pulls all 280+ quotes with full line items directly from Xero.<br>
+          Auto-detects job categories · builds pricing benchmarks · click any category for detail.</div>
+        </div>
+      </div></div>
+    </div>`;
+  // If quotes were already loaded in this session, re-render them immediately
+  if (QUOTES_DATA) renderQuotesData();
+}
+
+async function loadXeroQuotes() {
+  const statusEl = document.getElementById('quotes-status');
+  const btn = document.getElementById('load-quotes-btn');
+  if (!localStorage.getItem('xero_access_token')) {
+    statusEl.innerHTML = '<span style="color:var(--rust)">⚠ Connect Xero first — use the ⚡ button top right</span>';
+    return;
+  }
+  btn.disabled = true;
+  const setStatus = msg => { if (statusEl) statusEl.innerHTML = `<span style="display:inline-flex;align-items:center;gap:8px"><span class="spinner-sm"></span>${msg}</span>`; };
+  setStatus('Connecting to Xero…');
+  try {
+    let allQuotes = [], page = 1;
+    while (true) {
+      setStatus(`Fetching page ${page} · ${allQuotes.length} quotes so far…`);
+      const res = await xeroApiCall('Quotes?page=' + page);
+      const batch = res.Quotes || [];
+      allQuotes = allQuotes.concat(batch);
+      if (batch.length < 100) break;
+      page++; if (page > 10) break;
+    }
+    QUOTES_DATA = allQuotes;
+    if (statusEl) statusEl.innerHTML = `<span style="color:var(--sage)">✓ ${allQuotes.length} quotes loaded (${page} page${page>1?'s':''})</span>`;
+    btn.disabled = false;
+    btn.textContent = '↻ Reload Quotes';
+    renderQuotesData();
+  } catch(err) {
+    if (statusEl) statusEl.innerHTML = `<span style="color:var(--rust)">⚠ ${err.message}</span>`;
+    btn.disabled = false;
+  }
+}
+
+function renderQuotesData() {
+  const quotes = QUOTES_DATA || [];
+
+  // Build enriched list
+  const enriched = quotes.map(q => {
+    const lineItems = (q.LineItems || []).filter(li => (li.Description||'').trim());
+    const allDesc = lineItems.map(li => (li.Description||'') + ' ' + (li.ItemCode||'')).join(' ');
+    const total = Math.abs(q.SubTotal || q.Total || 0);
+    return {
+      number: q.QuoteNumber || '—',
+      contact: q.Contact ? q.Contact.Name : '—',
+      date: (q.DateString || q.Date || '').slice(0,10),
+      status: q.Status || '—',
+      total,
+      category: detectCategory(allDesc),
+      lineItems,
+      _raw: q
+    };
+  });
+
+  // Group by category
+  const byCategory = {};
+  enriched.forEach(q => {
+    if (!byCategory[q.category]) byCategory[q.category] = { quotes:[], total:0, amounts:[] };
+    byCategory[q.category].quotes.push(q);
+    byCategory[q.category].total += q.total;
+    byCategory[q.category].amounts.push(q.total);
+  });
+  const categories = Object.entries(byCategory)
+    .sort((a,b) => b[1].quotes.length - a[1].quotes.length)
+    .map(([cat, d]) => {
+      const sorted = d.amounts.filter(v=>v>0).sort((a,b)=>a-b);
+      return { cat, count: d.quotes.length, total: d.total,
+        avg: d.total / d.quotes.length,
+        min: sorted[0] || 0, max: sorted[sorted.length-1] || 0,
+        samples: d.quotes.slice(0,2).map(q => q.contact.split(' ')[0]).join(', ') };
+    });
+
+  const accepted = enriched.filter(q => ['INVOICED','ACCEPTED'].includes(q.status)).length;
+  const totalValue = enriched.reduce((a,q)=>a+q.total,0);
+  const avgValue = totalValue / (quotes.length||1);
+
+  const statusBadge = s => {
+    const map = {INVOICED:'badge-green',SENT:'badge-blue',ACCEPTED:'badge-green',DECLINED:'badge-red',DRAFT:'badge-gray',DELETED:'badge-gray'};
+    return `<span class="badge ${map[s]||'badge-gray'}">${s}</span>`;
+  };
+
+  const catRows = categories.map(c => `
+    <tr onclick="showCategoryDetail('${c.cat.replace(/'/g,"\\\'")}')" style="cursor:pointer">
+      <td><strong>${c.cat}</strong></td>
+      <td style="text-align:right">${c.count}</td>
+      <td class="amount" style="color:var(--ink-3);font-size:12px">${fmt(c.min)} – ${fmt(c.max)}</td>
+      <td class="amount" style="color:var(--navy);font-weight:700">${fmt(c.avg)}</td>
+      <td class="amount">${fmt(c.total)}</td>
+      <td style="font-size:11px;color:var(--ink-4)">${c.samples}</td>
+    </tr>`).join('');
+
+  const recentRows = enriched.slice().sort((a,b)=>b.date.localeCompare(a.date)).slice(0,60).map(q => `
+    <tr>
+      <td style="font-size:12px;color:var(--ink-3)">${q.number}</td>
+      <td style="font-size:12px">${q.date}</td>
+      <td>${q.contact}</td>
+      <td><span class="badge badge-gray" style="font-size:10px">${q.category}</span></td>
+      <td class="amount">${fmt(q.total)}</td>
+      <td>${statusBadge(q.status)}</td>
+    </tr>`).join('');
+
+  document.getElementById('quotes-content').innerHTML = `
+    <div class="kpi-grid">
+      ${kpi('Total Quotes', quotes.length, 'All time', 'highlight')}
+      ${kpi('Won / Invoiced', accepted, 'Accepted + Invoiced', 'good')}
+      ${kpi('Win Rate', pct(accepted/(quotes.length||1)*100), 'Of all quotes sent', '')}
+      ${kpi('Avg Quote Value', fmt(avgValue), 'Excl. GST', '')}
+      ${kpi('Total Quoted', fmt(totalValue), 'All time', '')}
+      ${kpi('Job Categories', categories.length, 'Auto-detected', '')}
+    </div>
+
+    <div class="section">
+      <div class="section-head">
+        <h2>Pricing Benchmarks by Job Type</h2>
+        <span style="font-size:11px;color:var(--ink-3)">↑ Click a row to see all quotes + line item patterns</span>
+      </div>
+      <table>
+        <thead><tr>
+          <th>Job Type</th>
+          <th style="text-align:right">Quotes</th>
+          <th style="text-align:right">Range</th>
+          <th style="text-align:right">Avg Value</th>
+          <th style="text-align:right">Total</th>
+          <th>Sample Clients</th>
+        </tr></thead>
+        <tbody>${catRows}</tbody>
+      </table>
+      <div style="padding:10px 18px;font-size:11px;color:var(--ink-4);background:var(--cream-2)">
+        ⓘ Categories auto-detected from line item descriptions. Click a row to see common line items and unit rates for that job type.
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-head"><h2>All Quotes — Most Recent 60</h2></div>
+      <table>
+        <thead><tr><th>Number</th><th>Date</th><th>Client</th><th>Job Type</th><th style="text-align:right">Amount</th><th>Status</th></tr></thead>
+        <tbody>${recentRows}</tbody>
+      </table>
+    </div>`;
+}
+
+function showCategoryDetail(cat) {
+  if (!QUOTES_DATA) return;
+
+  const catQuotes = QUOTES_DATA.map(q => {
+    const lineItems = (q.LineItems||[]).filter(li=>(li.Description||'').trim());
+    const allDesc = lineItems.map(li=>(li.Description||'')+(li.ItemCode||'')).join(' ');
+    return { ...q, _cat: detectCategory(allDesc), _total: Math.abs(q.SubTotal||q.Total||0), _lineItems: lineItems };
+  }).filter(q => q._cat === cat).sort((a,b) => b._total - a._total);
+
+  // Aggregate line item frequency and pricing
+  const freq = {};
+  catQuotes.forEach(q => {
+    (q._lineItems||[]).forEach(li => {
+      const desc = (li.Description||'').trim();
+      if (!desc || desc.length < 4) return;
+      if (!freq[desc]) freq[desc] = { count:0, unitAmounts:[], qtys:[], lineAmounts:[] };
+      freq[desc].count++;
+      if (li.UnitAmount != null) freq[desc].unitAmounts.push(Math.abs(li.UnitAmount));
+      if (li.Quantity != null) freq[desc].qtys.push(Math.abs(li.Quantity));
+      if (li.LineAmount != null) freq[desc].lineAmounts.push(Math.abs(li.LineAmount));
+    });
+  });
+
+  const topItems = Object.entries(freq)
+    .sort((a,b) => b[1].count - a[1].count)
+    .slice(0, 20);
+
+  const avg = arr => arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : null;
+
+  const itemRows = topItems.map(([desc, d]) => {
+    const avgUnit = avg(d.unitAmounts);
+    const avgQty = avg(d.qtys);
+    const avgLine = avg(d.lineAmounts);
+    return `<tr>
+      <td style="font-size:12px;max-width:260px;line-height:1.4">${desc}</td>
+      <td style="text-align:right;font-size:12px">${d.count}×</td>
+      <td class="amount" style="font-size:12px">${avgQty !== null ? avgQty.toFixed(1) : '—'}</td>
+      <td class="amount" style="color:var(--navy);font-weight:700">${avgUnit !== null ? fmt(avgUnit,2) : '—'}</td>
+      <td class="amount" style="font-size:12px">${avgLine !== null ? fmt(avgLine) : '—'}</td>
+    </tr>`;
+  }).join('');
+
+  const statusMap = {INVOICED:'badge-green',SENT:'badge-blue',ACCEPTED:'badge-green',DECLINED:'badge-red',DRAFT:'badge-gray'};
+  const quoteRows = catQuotes.slice(0,15).map(q => `<tr>
+    <td style="font-size:12px">${q.QuoteNumber||'—'}</td>
+    <td style="font-size:12px">${(q.DateString||'').slice(0,10)}</td>
+    <td>${q.Contact ? q.Contact.Name : '—'}</td>
+    <td class="amount">${fmt(q._total)}</td>
+    <td><span class="badge ${statusMap[q.Status]||'badge-gray'}">${q.Status}</span></td>
+  </tr>`).join('');
+
+  const vals = catQuotes.map(q=>q._total).filter(v=>v>0);
+  openModal(cat + ' — Pricing Intelligence', `
+    <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(110px,1fr));margin-bottom:20px">
+      ${kpi('Quotes', catQuotes.length, 'In this category', 'highlight')}
+      ${kpi('Avg Value', fmt(avg(vals)), 'Excl. GST', '')}
+      ${kpi('Min', fmt(Math.min(...vals)||0), 'Smallest', '')}
+      ${kpi('Max', fmt(Math.max(...vals)||0), 'Largest', '')}
+    </div>
+
+    ${topItems.length ? `
+    <div class="divider" style="margin-top:0">Common Line Items — Unit Rate Benchmarks</div>
+    <table>
+      <thead><tr>
+        <th>Description</th>
+        <th style="text-align:right">Used</th>
+        <th style="text-align:right">Avg Qty</th>
+        <th style="text-align:right">Avg Unit $</th>
+        <th style="text-align:right">Avg Line $</th>
+      </tr></thead>
+      <tbody>${itemRows}</tbody>
+    </table>
+    <div style="padding:10px;margin:8px 0 20px;background:var(--cream-2);border-radius:4px;font-size:11px;color:var(--ink-4);line-height:1.6">
+      ⓘ <strong>Avg Unit $</strong> = what you typically charge per unit (lm, m², each, hr). This is your pricing benchmark for future quotes in this category.
+    </div>` : ''}
+
+    <div class="divider">Quotes in This Category</div>
+    <table>
+      <thead><tr><th>Number</th><th>Date</th><th>Client</th><th style="text-align:right">Amount</th><th>Status</th></tr></thead>
+      <tbody>${quoteRows}</tbody>
+    </table>
+    ${catQuotes.length > 15 ? `<div style="padding:10px 14px;font-size:11px;color:var(--ink-4)">+ ${catQuotes.length-15} more quotes in this category</div>` : ''}`);
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+if (window.location.search.includes('xero=connected')) history.replaceState({}, '', '/');
 updateXeroBtn();
 loadData();
 </script>
