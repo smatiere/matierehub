@@ -45,7 +45,7 @@ async function handleCallback() {
   }
 
   try {
-    // Exchange code for tokens via our Netlify function
+    // Exchange code for tokens via Netlify function
     const res = await fetch('/.netlify/functions/xero-auth', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -61,6 +61,8 @@ async function handleCallback() {
     });
     const tenants = await tenantsRes.json();
     const tenant  = tenants[0];
+
+    if (!tenant) throw new Error('No Xero organisation found');
 
     // Store tokens in localStorage
     localStorage.setItem('xero_access_token',  tokens.access_token);
