@@ -2,20 +2,21 @@
   "meta": {
     "last_updated": "2026-05-28T00:00:00",
     "last_xero_sync": "2026-05-28",
-    "data_note": "FY26 = Jul 2025 to May 2026 (11 months YTD). KPIs auto-synced from Xero; timesheets/projects/expenses from data drops."
+    "data_note": "FY26 = Jul 2025 to May 2026 (11 months YTD). KPIs & invoices from Xero; timesheets/expenses from data drops."
   },
   "kpis": {
     "fy26_revenue": 159013.78,
     "fy26_materials": 53880.15,
-    "fy26_gross_profit": 104480.84,
-    "fy26_gp_margin": 65.7,
-    "fy26_opex": 2378.45,
+    "fy26_gross_profit": 105071.72,
+    "fy26_gp_margin": 66.1,
+    "fy26_opex": 20619.28,
     "fy26_owner_drawings": 57721.7,
     "fy26_wages": 11426.01,
+    "fy26_net_profit": 84452.44,
     "cash_balance": 11706.99,
-    "total_outstanding": 15899.70,
-    "overdue_xero": 15899.70,
-    "pipeline_total": 539000,
+    "total_outstanding": 9976.57,
+    "overdue_xero": 8013.07,
+    "pipeline_total": 198124.18,
     "total_revenue_alltime": 599248.5,
     "sebRate_per_hour": 100
   },
@@ -30,7 +31,8 @@
       "Jan",
       "Feb",
       "Mar",
-      "Apr"
+      "Apr",
+      "May"
     ],
     "periods": [
       "2025-07",
@@ -42,7 +44,8 @@
       "2026-01",
       "2026-02",
       "2026-03",
-      "2026-04"
+      "2026-04",
+      "2026-05"
     ],
     "revenue": [
       9340.38,
@@ -54,7 +57,8 @@
       23901.23,
       7976.61,
       17845.24,
-      7581.2
+      7581.2,
+      18170.35
     ],
     "materials": [
       2813.5,
@@ -66,131 +70,132 @@
       1596.68,
       6567.74,
       2911.39,
-      5483.51
+      5483.51,
+      5383.06
     ]
   },
   "top_customers": [
-    {
-      "name": "Pauline - French Forest",
-      "revenue": 45846.7
-    },
     {
       "name": "Serena - Manly Vale",
       "revenue": 36833.5
     },
     {
-      "name": "Beacon Hill Community Kindergarten",
-      "revenue": 28406.98
-    },
-    {
-      "name": "Tony - Balgowlah",
-      "revenue": 26596.78
+      "name": "Selvi - Seaforth",
+      "revenue": 23741.0
     },
     {
       "name": "Mark Shippen",
       "revenue": 22924.0
     },
     {
-      "name": "Selvi - Seaforth",
-      "revenue": 19981.5
-    },
-    {
-      "name": "Kate Melrose",
-      "revenue": 18140.15
-    },
-    {
       "name": "Peter Black",
-      "revenue": 16485.7
+      "revenue": 9225.7
+    },
+    {
+      "name": "Samantha Kirchner",
+      "revenue": 7249.0
+    },
+    {
+      "name": "Paul - Frenchs Forest",
+      "revenue": 6259.0
+    },
+    {
+      "name": "Annemay - Seaforth",
+      "revenue": 5547.3
+    },
+    {
+      "name": "Christi - Mosman",
+      "revenue": 5087.5
+    },
+    {
+      "name": "Rob - Balgowlah Heights",
+      "revenue": 5071.7
+    },
+    {
+      "name": "Mike - Seaforth",
+      "revenue": 4169.0
     }
   ],
   "open_invoices": [
     {
-      "invoice": "INV-0221",
-      "contact": "Ryan Broadbead",
-      "amount": 770.0,
-      "status": "Approved",
-      "date": "2025-04-02",
-      "days_old": 418
-    },
-    {
-      "invoice": "INV-0242",
-      "contact": "Nik - Collaroy",
-      "amount": 2461.25,
-      "status": "Approved",
-      "date": "2025-05-07",
-      "days_old": 383
-    },
-    {
-      "invoice": "INV-0245",
-      "contact": "Nik - Collaroy",
-      "amount": 3361.88,
-      "status": "Approved",
-      "date": "2025-05-13",
-      "days_old": 377
-    },
-    {
       "invoice": "INV-0257",
       "contact": "Mark - Queenscliff",
       "amount": 520.85,
-      "status": "Approved",
+      "status": "AUTHORISED",
       "date": "2025-08-18",
-      "days_old": 280
+      "days_old": 283
     },
     {
       "invoice": "INV-0280",
       "contact": "Paul - Frenchs Forest",
-      "amount": 1540.0,
-      "status": "Approved",
+      "amount": 1540,
+      "status": "AUTHORISED",
       "date": "2025-10-08",
-      "days_old": 229
+      "days_old": 232
     },
     {
       "invoice": "INV-0299",
       "contact": "Beth - Mosman",
       "amount": 126.5,
-      "status": "Approved",
+      "status": "AUTHORISED",
       "date": "2025-11-15",
-      "days_old": 191
+      "days_old": 194
     },
     {
       "invoice": "INV-0308",
       "contact": "Selvi - Seaforth",
-      "amount": 3759.5,
-      "status": "Approved",
+      "amount": 341.77,
+      "status": "AUTHORISED",
       "date": "2025-12-23",
-      "days_old": 153
-    },
-    {
-      "invoice": "INV-0318",
-      "contact": "Samantha Kirchner",
-      "amount": 3888.5,
-      "status": "Approved",
-      "date": "2026-02-16",
-      "days_old": 98
+      "days_old": 156
     },
     {
       "invoice": "INV-0319",
       "contact": "Samantha Kirchner",
       "amount": 3360.5,
-      "status": "Approved",
+      "status": "AUTHORISED",
       "date": "2026-02-16",
-      "days_old": 98
+      "days_old": 101
+    },
+    {
+      "invoice": "INV-0318",
+      "contact": "Samantha Kirchner",
+      "amount": 528.45,
+      "status": "AUTHORISED",
+      "date": "2026-02-16",
+      "days_old": 101
     },
     {
       "invoice": "INV-0330",
       "contact": "Bryan Dalton",
-      "amount": 1595.0,
-      "status": "Approved",
+      "amount": 1595,
+      "status": "AUTHORISED",
       "date": "2026-04-14",
-      "days_old": 41
+      "days_old": 44
     },
     {
       "invoice": "INV-0341",
       "contact": "Angela Ferlita",
-      "amount": 220.0,
-      "status": "Approved",
+      "amount": 220,
+      "status": "AUTHORISED",
       "date": "2026-05-13",
-      "days_old": 12
+      "days_old": 15
+    },
+    {
+      "invoice": "INV-0342",
+      "contact": "Neil",
+      "amount": 495,
+      "status": "AUTHORISED",
+      "date": "2026-05-25",
+      "days_old": 3
+    },
+    {
+      "invoice": "INV-0343",
+      "contact": "Ibathrooms and kitchen renovations pty Ltd",
+      "amount": 1248.5,
+      "status": "AUTHORISED",
+      "date": "2026-05-27",
+      "days_old": 1
     }
   ],
   "projects": [
@@ -205,6 +210,18 @@
       "status": "Active",
       "quoted": 2035,
       "notes": "Active project"
+    },
+    {
+      "name": "Josie - Mosman",
+      "status": "Active",
+      "quoted": null,
+      "notes": "Active \u2014 not yet quoted in Xero. Hours logged via data drops."
+    },
+    {
+      "name": "Neil - Balgowlah",
+      "status": "Active",
+      "quoted": 495,
+      "notes": "INV-0342 raised 2026-05-25"
     }
   ],
   "timesheets": [
@@ -302,7 +319,7 @@
       "description": "Bunnings - batteries (AAA Varta 24pk), pine structural MGP10 (x3), plasterboard CSR 13mm",
       "category": "Materials",
       "project": "Josie - Mosman",
-      "amount": 62.60
+      "amount": 62.6
     },
     {
       "date": "2026-05-25",
@@ -310,6 +327,148 @@
       "category": "Materials",
       "project": "Consumables",
       "amount": 73.65
+    }
+  ],
+  "active_quotes": [
+    {
+      "quote": "QU-0091",
+      "contact": "Beacon Hill Community Kindergarten",
+      "amount": 11566.5,
+      "status": "SENT",
+      "date": "2024-07-04"
+    },
+    {
+      "quote": "QU-0055",
+      "contact": "Joel - Stormer Music",
+      "amount": 11517,
+      "status": "SENT",
+      "date": "2024-02-02"
+    },
+    {
+      "quote": "QU-0106",
+      "contact": "Raquel",
+      "amount": 11478.5,
+      "status": "SENT",
+      "date": "2024-08-27"
+    },
+    {
+      "quote": "QU-0038",
+      "contact": "Tony - Balgowlah",
+      "amount": 10450,
+      "status": "SENT",
+      "date": "2023-11-13"
+    },
+    {
+      "quote": "QU-0051",
+      "contact": "James - Frenchs Forest",
+      "amount": 9625,
+      "status": "SENT",
+      "date": "2024-01-22"
+    },
+    {
+      "quote": "QU-0040",
+      "contact": "Ben - Balgowlah",
+      "amount": 9246.18,
+      "status": "SENT",
+      "date": "2023-11-27"
+    },
+    {
+      "quote": "QU-0041",
+      "contact": "Lauren - Frenchs Forest",
+      "amount": 9176.2,
+      "status": "SENT",
+      "date": "2023-11-28"
+    },
+    {
+      "quote": "QU-0093",
+      "contact": "Jacinta - Freshwater",
+      "amount": 8591,
+      "status": "SENT",
+      "date": "2024-07-31"
+    },
+    {
+      "quote": "QU-0082",
+      "contact": "Tina - Nth Balgowlah",
+      "amount": 8338,
+      "status": "SENT",
+      "date": "2024-04-22"
+    },
+    {
+      "quote": "QU-0018",
+      "contact": "Aaron - Manly Vale",
+      "amount": 7126.9,
+      "status": "SENT",
+      "date": "2023-05-03"
+    },
+    {
+      "quote": "QU-0044",
+      "contact": "Lauren - Frenchs Forest",
+      "amount": 6899.2,
+      "status": "SENT",
+      "date": "2023-11-30"
+    },
+    {
+      "quote": "QU-0037",
+      "contact": "Kelly - Beacon Hill",
+      "amount": 6682.5,
+      "status": "SENT",
+      "date": "2023-11-13"
+    },
+    {
+      "quote": "QU-0088",
+      "contact": "Luke - Sydney Habour Surf Club",
+      "amount": 5923.5,
+      "status": "SENT",
+      "date": "2024-05-06"
+    },
+    {
+      "quote": "QU-0057",
+      "contact": "Jim - Belrose",
+      "amount": 5335,
+      "status": "SENT",
+      "date": "2024-02-09"
+    },
+    {
+      "quote": "QU-0049",
+      "contact": "Kate Melrose",
+      "amount": 5170,
+      "status": "SENT",
+      "date": "2024-01-13"
+    },
+    {
+      "quote": "QU-0075",
+      "contact": "Samantha Kirchner",
+      "amount": 5116.1,
+      "status": "SENT",
+      "date": "2024-03-30"
+    },
+    {
+      "quote": "QU-0027",
+      "contact": "Mitch - GJ Gardner",
+      "amount": 4400,
+      "status": "SENT",
+      "date": "2023-06-02"
+    },
+    {
+      "quote": "QU-0002",
+      "contact": "James - Allambie Heights",
+      "amount": 4235,
+      "status": "SENT",
+      "date": "2023-02-22"
+    },
+    {
+      "quote": "QU-0102",
+      "contact": "Scarlett - Manly Vale",
+      "amount": 3888.5,
+      "status": "SENT",
+      "date": "2024-08-19"
+    },
+    {
+      "quote": "QU-0074",
+      "contact": "Marie - Roseville",
+      "amount": 3718,
+      "status": "SENT",
+      "date": "2024-03-29"
     }
   ]
 }
