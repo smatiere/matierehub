@@ -298,17 +298,17 @@
     },
     {
       "date": "2026-05-25",
-      "description": "Bunnings Warehouse - building materials (SPLIT NEEDED: deduct saw blades amount)",
+      "description": "Bunnings - batteries (AAA Varta 24pk), pine structural MGP10 (x3), plasterboard CSR 13mm",
       "category": "Materials",
       "project": "Josie - Mosman",
-      "amount": 136.25
+      "amount": 62.60
     },
     {
       "date": "2026-05-25",
-      "description": "Bunnings Warehouse - saw blades",
+      "description": "Bunnings - Makita wheel cut-off discs 125mm, circular saw blades 185mm & 165mm",
       "category": "Materials",
       "project": "Consumables",
-      "amount": 0
+      "amount": 73.65
     }
   ]
 }
