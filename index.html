@@ -136,6 +136,7 @@ tr:hover td{background:var(--cream-2)}
   <div style="display:flex;align-items:center;gap:12px">
     <div class="header-meta" id="header-meta"></div>
     <button id="xero-btn" class="btn-refresh">⚡ Connect Xero</button>
+    <button id="xero-sync-btn" class="btn-refresh" style="display:none" onclick="syncFromXero()">⬇ Sync Xero</button>
     <button class="btn-refresh" onclick="loadData()">↻ Refresh</button>
   </div>
 </div>
@@ -816,16 +817,97 @@ function updateXeroBtn() {
   if (!btn) return;
   const connected = !!localStorage.getItem('xero_access_token');
   const org = localStorage.getItem('xero_org_name') || 'Xero';
+  const syncBtn = document.getElementById('xero-sync-btn');
   if (connected) {
     btn.textContent = '⚡ ' + org;
     btn.style.borderColor = 'rgba(107,140,110,.7)';
     btn.style.color = '#a8d8ab';
     btn.onclick = () => { if (confirm('Disconnect from Xero?')) xeroDisconnect(); };
+    if (syncBtn) syncBtn.style.display = '';
   } else {
     btn.textContent = '⚡ Connect Xero';
     btn.style.borderColor = 'rgba(255,255,255,.2)';
     btn.style.color = '#fff';
     btn.onclick = xeroConnect;
+    if (syncBtn) syncBtn.style.display = 'none';
+  }
+}
+
+// ── Xero Full Sync ────────────────────────────────────────────────────────────
+async function syncFromXero() {
+  openModal('Syncing from Xero…', '<div style="text-align:center;padding:30px"><div class="spinner" style="margin:0 auto 16px"></div><div id="sync-status" style="color:var(--ink-3);font-size:13px">Connecting…</div></div>');
+
+  const status = t => { const el = document.getElementById('sync-status'); if (el) el.textContent = t; };
+  const results = { synced_at: new Date().toISOString() };
+
+  try {
+    // Invoices — FY26 customer invoices
+    status('Fetching invoices…');
+    const invRes = await xeroApiCall('Invoices?where=Type%3D%3D%22ACCREC%22%26%26Date%3E%3DDateTime(2025%2C7%2C1)&unitdp=2&summaryOnly=false');
+    results.invoices = invRes.Invoices || [];
+
+    // Quotes
+    status('Fetching quotes…');
+    const qtRes = await xeroApiCall('Quotes');
+    results.quotes = qtRes.Quotes || [];
+
+    // Contacts (customers)
+    status('Fetching contacts…');
+    const ctRes = await xeroApiCall('Contacts?where=IsCustomer%3D%3Dtrue');
+    results.contacts = ctRes.Contacts || [];
+
+    // P&L — May 2026
+    status('Fetching May 2026 P&L…');
+    const pnlMay = await xeroApiCall('Reports/ProfitAndLoss?fromDate=2026-05-01&toDate=2026-05-31');
+    results.pnl_may = pnlMay.Reports ? pnlMay.Reports[0] : pnlMay;
+
+    // P&L — FY26 full year
+    status('Fetching FY26 P&L…');
+    const pnlFY = await xeroApiCall('Reports/ProfitAndLoss?fromDate=2025-07-01&toDate=2026-05-31');
+    results.pnl_fy26 = pnlFY.Reports ? pnlFY.Reports[0] : pnlFY;
+
+    // Bank transactions — FY26 (expenses/materials)
+    status('Fetching bank transactions…');
+    const btRes = await xeroApiCall('BankTransactions?where=Date%3E%3DDateTime(2025%2C7%2C1)&unitdp=2');
+    results.bank_transactions = btRes.BankTransactions || [];
+
+    // Accounts
+    status('Fetching chart of accounts…');
+    const acRes = await xeroApiCall('Accounts?where=Status%3D%3D%22ACTIVE%22');
+    results.accounts = acRes.Accounts || [];
+
+    // Summary for modal
+    const summary = [
+      `✓ Invoices: ${results.invoices.length}`,
+      `✓ Quotes: ${results.quotes.length}`,
+      `✓ Contacts: ${results.contacts.length}`,
+      `✓ Bank transactions: ${results.bank_transactions.length}`,
+      `✓ P&L reports: 2 (May 2026 + FY26)`,
+    ].join('<br>');
+
+    // Download JSON for Claude to process
+    const blob = new Blob([JSON.stringify(results, null, 2)], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = 'xero_sync_' + new Date().toISOString().slice(0,10) + '.json'; a.click();
+    URL.revokeObjectURL(url);
+
+    document.getElementById('modal-body').innerHTML = `
+      <div style="padding:8px 0">
+        <div style="color:var(--sage);font-size:15px;font-weight:600;margin-bottom:16px">✓ Sync complete</div>
+        <div style="line-height:2;font-size:13px;color:var(--ink-2)">${summary}</div>
+        <div style="margin-top:20px;padding:14px;background:var(--cream-2);border-radius:4px;font-size:12px;color:var(--ink-3);line-height:1.7">
+          <strong>Next step:</strong> A file called <code>xero_sync_YYYY-MM-DD.json</code> has been downloaded.<br>
+          Upload it to Claude and ask: <em>"Merge this Xero sync into data.json"</em>
+        </div>
+      </div>`;
+
+  } catch(err) {
+    document.getElementById('modal-body').innerHTML = `
+      <div style="color:var(--rust);padding:16px 0">
+        <div style="font-weight:600;margin-bottom:8px">⚠ Sync failed</div>
+        <div style="font-size:12px;color:var(--ink-3)">${err.message}</div>
+      </div>`;
   }
 }
 
