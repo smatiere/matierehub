@@ -135,6 +135,7 @@ tr:hover td{background:var(--cream-2)}
   </div>
   <div style="display:flex;align-items:center;gap:12px">
     <div class="header-meta" id="header-meta"></div>
+    <button id="xero-btn" class="btn-refresh">⚡ Connect Xero</button>
     <button class="btn-refresh" onclick="loadData()">↻ Refresh</button>
   </div>
 </div>
@@ -756,7 +757,83 @@ function showMonthDetail(idx) {
   openModal(label + ' ' + period.slice(0, 4), html);
 }
 
+// ── Xero connection ───────────────────────────────────────────────────────────
+const XERO_CLIENT_ID = '3854892E5C3B490EAE24E3B1A79E668D';
+const XERO_REDIRECT_URI = 'https://matierehub2.netlify.app/xero-callback';
+const XERO_SCOPES = 'openid profile email offline_access accounting.transactions accounting.transactions.read accounting.contacts accounting.contacts.read accounting.attachments accounting.attachments.read accounting.invoices accounting.invoices.read accounting.settings.read';
+
+function xeroConnect() {
+  const state = Math.random().toString(36).substring(2);
+  localStorage.setItem('xero_state', state);
+  const url = 'https://login.xero.com/identity/connect/authorize'
+    + '?response_type=code'
+    + '&client_id=' + XERO_CLIENT_ID
+    + '&redirect_uri=' + encodeURIComponent(XERO_REDIRECT_URI)
+    + '&scope=' + encodeURIComponent(XERO_SCOPES)
+    + '&state=' + state;
+  window.location.href = url;
+}
+
+function xeroDisconnect() {
+  ['xero_access_token','xero_refresh_token','xero_tenant_id','xero_org_name','xero_token_expiry','xero_state'].forEach(k => localStorage.removeItem(k));
+  updateXeroBtn();
+}
+
+async function getXeroToken() {
+  const expiry = parseInt(localStorage.getItem('xero_token_expiry') || '0');
+  if (Date.now() < expiry - 60000) return localStorage.getItem('xero_access_token');
+  const refresh_token = localStorage.getItem('xero_refresh_token');
+  if (!refresh_token) return null;
+  try {
+    const res = await fetch('/.netlify/functions/xero-auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'refresh', refresh_token })
+    });
+    const tokens = await res.json();
+    if (tokens.error) throw new Error(JSON.stringify(tokens.error));
+    localStorage.setItem('xero_access_token', tokens.access_token);
+    if (tokens.refresh_token) localStorage.setItem('xero_refresh_token', tokens.refresh_token);
+    localStorage.setItem('xero_token_expiry', Date.now() + (tokens.expires_in * 1000));
+    return tokens.access_token;
+  } catch(e) { console.error('Xero token refresh failed:', e); return null; }
+}
+
+// Call any Xero API endpoint — used by Claude to read/write Xero data
+async function xeroApiCall(endpoint, method='GET', body=null) {
+  const token = await getXeroToken();
+  if (!token) throw new Error('Not connected to Xero');
+  const res = await fetch('/.netlify/functions/xero-api', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ endpoint, method, body, access_token: token, tenant_id: localStorage.getItem('xero_tenant_id') })
+  });
+  return res.json();
+}
+
+function updateXeroBtn() {
+  const btn = document.getElementById('xero-btn');
+  if (!btn) return;
+  const connected = !!localStorage.getItem('xero_access_token');
+  const org = localStorage.getItem('xero_org_name') || 'Xero';
+  if (connected) {
+    btn.textContent = '⚡ ' + org;
+    btn.style.borderColor = 'rgba(107,140,110,.7)';
+    btn.style.color = '#a8d8ab';
+    btn.onclick = () => { if (confirm('Disconnect from Xero?')) xeroDisconnect(); };
+  } else {
+    btn.textContent = '⚡ Connect Xero';
+    btn.style.borderColor = 'rgba(255,255,255,.2)';
+    btn.style.color = '#fff';
+    btn.onclick = xeroConnect;
+  }
+}
+
 // Boot
+if (window.location.search.includes('xero=connected')) {
+  history.replaceState({}, '', '/');
+}
+updateXeroBtn();
 loadData();
 </script>
 </body>
