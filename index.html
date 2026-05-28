@@ -760,7 +760,7 @@ function showMonthDetail(idx) {
 // ── Xero connection ───────────────────────────────────────────────────────────
 const XERO_CLIENT_ID = '3854892E5C3B490EAE24E3B1A79E668D';
 const XERO_REDIRECT_URI = 'https://matierehub2.netlify.app/xero-callback';
-const XERO_SCOPES = 'openid profile email offline_access accounting.transactions accounting.transactions.read accounting.contacts accounting.contacts.read accounting.attachments accounting.attachments.read accounting.invoices accounting.invoices.read accounting.settings.read';
+const XERO_SCOPES = 'openid profile email offline_access accounting.settings.read accounting.contacts accounting.contacts.read accounting.attachments accounting.attachments.read accounting.invoices accounting.invoices.read accounting.payments.read';
 
 function xeroConnect() {
   const state = Math.random().toString(36).substring(2);
