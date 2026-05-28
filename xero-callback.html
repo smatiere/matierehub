@@ -55,24 +55,19 @@ async function handleCallback() {
 
     if (tokens.error) throw new Error(JSON.stringify(tokens.error));
 
-    // Get tenant ID
-    const tenantsRes = await fetch('https://api.xero.com/connections', {
-      headers: { 'Authorization': `Bearer ${tokens.access_token}` }
-    });
-    const tenants = await tenantsRes.json();
-    const tenant  = tenants[0];
-
-    if (!tenant) throw new Error('No Xero organisation found');
+    // tenant_id and tenant_name are returned by the server-side function
+    // (no direct browser call to api.xero.com needed — avoids CORS)
+    if (!tokens.tenant_id) throw new Error('No Xero organisation found. Please try again.');
 
     // Store tokens in localStorage
     localStorage.setItem('xero_access_token',  tokens.access_token);
     localStorage.setItem('xero_refresh_token', tokens.refresh_token);
-    localStorage.setItem('xero_tenant_id',     tenant.tenantId);
-    localStorage.setItem('xero_org_name',      tenant.tenantName);
+    localStorage.setItem('xero_tenant_id',     tokens.tenant_id);
+    localStorage.setItem('xero_org_name',      tokens.tenant_name || 'Xero');
     localStorage.setItem('xero_token_expiry',  Date.now() + (tokens.expires_in * 1000));
 
     spin.style.display = 'none';
-    msg.innerHTML = `<div class="ok">✓ Connected to ${tenant.tenantName}</div><div class="status">Redirecting to MatiereHub…</div>`;
+    msg.innerHTML = `<div class="ok">✓ Connected to ${tokens.tenant_name || 'Xero'}</div><div class="status">Redirecting to MatiereHub…</div>`;
 
     setTimeout(() => window.location.href = '/?xero=connected', 1500);
 
