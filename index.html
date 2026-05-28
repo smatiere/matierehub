@@ -804,16 +804,16 @@ async function loadXeroQuotes() {
 function renderQuotesData(quotes) {
   quotes = quotes || [];
 
-  // Build enriched list
+  // Build enriched list — handles both compact data.json format (lowercase) and raw Xero API format (PascalCase)
   const enriched = quotes.map(q => {
-    const lineItems = (q.LineItems || []).filter(li => (li.Description||'').trim());
-    const allDesc = lineItems.map(li => (li.Description||'') + ' ' + (li.ItemCode||'')).join(' ');
-    const total = Math.abs(q.SubTotal || q.Total || 0);
+    const lineItems = (q.line_items || q.LineItems || []).filter(li => (li.desc || li.Description||'').trim());
+    const allDesc = lineItems.map(li => (li.desc || li.Description||'') + ' ' + (li.ItemCode||'')).join(' ');
+    const total = Math.abs(q.total || q.SubTotal || q.Total || 0);
     return {
-      number: q.QuoteNumber || '—',
-      contact: q.Contact ? q.Contact.Name : '—',
-      date: (q.DateString || q.Date || '').slice(0,10),
-      status: q.Status || '—',
+      number: q.number || q.QuoteNumber || '—',
+      contact: q.contact || (q.Contact ? q.Contact.Name : '—'),
+      date: (q.date || q.DateString || q.Date || '').slice(0,10),
+      status: q.status || q.Status || '—',
       total,
       category: detectCategory(allDesc),
       lineItems,
@@ -913,22 +913,25 @@ function showCategoryDetail(cat) {
   if (!quotesSource) return;
 
   const catQuotes = quotesSource.map(q => {
-    const lineItems = (q.LineItems||[]).filter(li=>(li.Description||'').trim());
-    const allDesc = lineItems.map(li=>(li.Description||'')+(li.ItemCode||'')).join(' ');
-    return { ...q, _cat: detectCategory(allDesc), _total: Math.abs(q.SubTotal||q.Total||0), _lineItems: lineItems };
+    const lineItems = (q.line_items || q.LineItems||[]).filter(li=>(li.desc || li.Description||'').trim());
+    const allDesc = lineItems.map(li=>(li.desc || li.Description||'')+(li.ItemCode||'')).join(' ');
+    return { ...q, _cat: detectCategory(allDesc), _total: Math.abs(q.total || q.SubTotal||q.Total||0), _lineItems: lineItems };
   }).filter(q => q._cat === cat).sort((a,b) => b._total - a._total);
 
   // Aggregate line item frequency and pricing
   const freq = {};
   catQuotes.forEach(q => {
     (q._lineItems||[]).forEach(li => {
-      const desc = (li.Description||'').trim();
+      const desc = (li.desc || li.Description||'').trim();
       if (!desc || desc.length < 4) return;
       if (!freq[desc]) freq[desc] = { count:0, unitAmounts:[], qtys:[], lineAmounts:[] };
       freq[desc].count++;
-      if (li.UnitAmount != null) freq[desc].unitAmounts.push(Math.abs(li.UnitAmount));
-      if (li.Quantity != null) freq[desc].qtys.push(Math.abs(li.Quantity));
-      if (li.LineAmount != null) freq[desc].lineAmounts.push(Math.abs(li.LineAmount));
+      const unit = li.unit != null ? li.unit : li.UnitAmount;
+      const qty  = li.qty  != null ? li.qty  : li.Quantity;
+      const line = li.total != null ? li.total : li.LineAmount;
+      if (unit != null) freq[desc].unitAmounts.push(Math.abs(unit));
+      if (qty  != null) freq[desc].qtys.push(Math.abs(qty));
+      if (line != null) freq[desc].lineAmounts.push(Math.abs(line));
     });
   });
 
@@ -952,13 +955,19 @@ function showCategoryDetail(cat) {
   }).join('');
 
   const statusMap = {INVOICED:'badge-green',SENT:'badge-blue',ACCEPTED:'badge-green',DECLINED:'badge-red',DRAFT:'badge-gray'};
-  const quoteRows = catQuotes.slice(0,15).map(q => `<tr>
-    <td style="font-size:12px">${q.QuoteNumber||'—'}</td>
-    <td style="font-size:12px">${(q.DateString||'').slice(0,10)}</td>
-    <td>${q.Contact ? q.Contact.Name : '—'}</td>
+  const quoteRows = catQuotes.slice(0,15).map(q => {
+    const num    = q.number || q.QuoteNumber || '—';
+    const date   = (q.date || q.DateString || '').slice(0,10);
+    const client = q.contact || (q.Contact ? q.Contact.Name : '—');
+    const st     = q.status || q.Status || '—';
+    return `<tr>
+    <td style="font-size:12px">${num}</td>
+    <td style="font-size:12px">${date}</td>
+    <td>${client}</td>
     <td class="amount">${fmt(q._total)}</td>
-    <td><span class="badge ${statusMap[q.Status]||'badge-gray'}">${q.Status}</span></td>
-  </tr>`).join('');
+    <td><span class="badge ${statusMap[st]||'badge-gray'}">${st}</span></td>
+  </tr>`;
+  }).join('');
 
   const vals = catQuotes.map(q=>q._total).filter(v=>v>0);
   openModal(cat + ' — Pricing Intelligence', `
