@@ -1,6 +1,8 @@
 {
-  "name": "matierehub-xero",
+  "name": "matierehub",
   "version": "1.0.0",
-  "description": "MatiereHub — Xero API bridge",
-  "dependencies": {}
+  "description": "Matière Hub — Netlify functions dependencies",
+  "dependencies": {
+    "@netlify/blobs": "^8.1.0"
+  }
 }
