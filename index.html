@@ -73,7 +73,7 @@ tr:hover td{background:var(--cream-2)}
 
 /* Two col layout */
 .two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-@media(max-width:640px){.two-col{grid-template-columns:1fr}.kpi-value{font-size:22py}}
+@media(max-width:640px){.two-col{grid-template-columns:1fr}.kpi-value{font-size:22px}}
 
 /* Divider label */
 .divider{font-size:10px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:var(--ink-4);margin:20px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--cream-3)}
@@ -156,7 +156,7 @@ let charts = {};
 
 async function loadData() {
   try {
-    const r = await fetch('data.json?t=' + Date.now());
+    const r = await fetch('https://raw.githubusercontent.com/smatiere/matierehub/main/data.json?t=' + Date.now());
     if (!r.ok) throw new Error('HTTP ' + r.status);
     D = await r.json();
     document.getElementById('loading').style.display = 'none';
