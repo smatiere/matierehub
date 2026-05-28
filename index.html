@@ -653,9 +653,7 @@ async function syncFromXero() {
       qp++; if (qp > 10) break;
     }
     results.quotes = allQ;
-    // Also persist quotes locally so the Quotes & Pricing tab survives reload
-    QUOTES_DATA = allQ;
-    saveQuotesToStorage(allQ);
+    QUOTES_LIVE = allQ; // available this session; permanent storage happens when Claude merges into data.json
 
     status('Fetching contacts…');
     const ctRes = await xeroApiCall('Contacts?where=IsCustomer%3D%3Dtrue');
@@ -702,30 +700,10 @@ async function syncFromXero() {
 }
 
 // ── Quotes & Pricing Intelligence ─────────────────────────────────────────────
-let QUOTES_DATA = null;
-
-function quotesLastFetched() {
-  const ts = localStorage.getItem('matiere_quotes_fetched');
-  if (!ts) return null;
-  return new Date(ts).toLocaleDateString('en-AU', {day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
-}
-
-function saveQuotesToStorage(quotes) {
-  try {
-    localStorage.setItem('matiere_quotes', JSON.stringify(quotes));
-    localStorage.setItem('matiere_quotes_fetched', new Date().toISOString());
-  } catch(e) {
-    console.warn('Could not save quotes to localStorage (may be too large):', e);
-  }
-}
-
-function loadQuotesFromStorage() {
-  try {
-    const saved = localStorage.getItem('matiere_quotes');
-    if (saved) return JSON.parse(saved);
-  } catch(e) { console.warn('Could not parse saved quotes:', e); }
-  return null;
-}
+// Quotes live in data.json (D.quotes) — same as invoices, projects, etc.
+// They are updated when Seb runs Sync Xero → uploads JSON to Claude → Claude merges into data.json → push to GitHub.
+// No localStorage, no per-browser state. Any device sees the same data.
+let QUOTES_LIVE = null; // only populated if user manually triggers a live Xero fetch this session
 
 // Keyword-based job category detector — improve over time as patterns emerge
 function detectCategory(text) {
@@ -747,44 +725,53 @@ function detectCategory(text) {
 
 function renderQuotes() {
   const connected = !!localStorage.getItem('xero_access_token');
+  // Primary source: data.json (D.quotes) — loaded at startup, same as all other data
+  // Fallback: QUOTES_LIVE if user has done a live fetch this session
+  const quotes = (D && D.quotes && D.quotes.length) ? D.quotes : QUOTES_LIVE;
+  const lastSync = D && D.meta && D.meta.quotes_synced_at
+    ? new Date(D.meta.quotes_synced_at).toLocaleDateString('en-AU', {day:'numeric',month:'short',year:'numeric'})
+    : null;
 
-  // Restore from localStorage on first visit (survives page reloads)
-  if (!QUOTES_DATA) {
-    const saved = loadQuotesFromStorage();
-    if (saved && saved.length) QUOTES_DATA = saved;
-  }
-
-  const lastFetched = quotesLastFetched();
-  const statusMsg = QUOTES_DATA
-    ? `<span style="color:var(--sage)">✓ ${QUOTES_DATA.length} quotes loaded · last fetched ${lastFetched}</span>`
-    : connected
-      ? 'Connected · fetches all quotes with line items — takes ~20–30s for 280 quotes'
-      : '⚠ Connect Xero first using the ⚡ button in the top right corner';
+  const syncNote = lastSync
+    ? `<span style="color:var(--sage)">✓ ${quotes ? quotes.length : 0} quotes · last synced ${lastSync}</span>`
+    : quotes
+      ? `<span style="color:var(--sage)">✓ ${quotes.length} quotes loaded this session</span>`
+      : connected
+        ? 'Quotes not yet in data.json — run <strong>Sync Xero</strong> above to populate'
+        : '⚠ Connect Xero first, then use the Sync Xero button to populate quotes';
 
   document.getElementById('page-quotes').innerHTML = `
     <div class="divider">Quotes & Pricing Intelligence</div>
-    <div class="load-bar">
-      <button class="btn-primary" id="load-quotes-btn" onclick="loadXeroQuotes()">
-        ${QUOTES_DATA ? '↻ Refresh Quotes from Xero' : '⬇ Load All Quotes from Xero'}
-      </button>
-      <div id="quotes-status" style="font-size:12px;color:var(--ink-3)">${statusMsg}</div>
+    <div class="load-bar" style="justify-content:space-between;flex-wrap:wrap">
+      <div id="quotes-status" style="font-size:12px;color:var(--ink-3)">${syncNote}</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
+        <span style="font-size:11px;color:var(--ink-4)">Need fresher data?</span>
+        <button class="btn-primary" id="load-quotes-btn" onclick="loadXeroQuotes()" style="padding:7px 14px;font-size:12px">
+          ⬇ Live fetch from Xero
+        </button>
+      </div>
     </div>
-    <div id="quotes-content">
-      <div class="section"><div class="section-body">
-        <div class="empty">
-          <div class="empty-icon">📋</div>
-          <div style="margin-bottom:8px;font-weight:500">Click <em>Load All Quotes from Xero</em> to get started</div>
-          <div style="font-size:12px">Pulls all 280+ quotes with full line items directly from Xero.<br>
-          Auto-detects job categories · builds pricing benchmarks · click any category for detail.</div>
+    ${!quotes ? `
+    <div class="section"><div class="section-body">
+      <div class="empty">
+        <div class="empty-icon">📋</div>
+        <div style="margin-bottom:8px;font-weight:500">Quotes live in data.json — one sync populates this forever</div>
+        <div style="font-size:12px;line-height:1.7">
+          1. Click <strong>⬇ Sync Xero</strong> in the header<br>
+          2. Upload the downloaded file to Claude<br>
+          3. Say <em>"Merge this Xero sync into data.json"</em><br>
+          4. Quotes will appear here on every device, permanently
         </div>
-      </div></div>
-    </div>`;
+      </div>
+    </div></div>` : ''}
+    <div id="quotes-content"></div>`;
 
-  // Render immediately if we have data (from memory or localStorage)
-  if (QUOTES_DATA) renderQuotesData();
+  if (quotes && quotes.length) renderQuotesData(quotes);
 }
 
 async function loadXeroQuotes() {
+  // Live fetch from Xero — session only.
+  // For permanent storage: use Sync Xero → upload to Claude → Claude merges into data.json.
   const statusEl = document.getElementById('quotes-status');
   const btn = document.getElementById('load-quotes-btn');
   if (!localStorage.getItem('xero_access_token')) {
@@ -804,20 +791,18 @@ async function loadXeroQuotes() {
       if (batch.length < 100) break;
       page++; if (page > 10) break;
     }
-    QUOTES_DATA = allQuotes;
-    saveQuotesToStorage(allQuotes);
-    if (statusEl) statusEl.innerHTML = `<span style="color:var(--sage)">✓ ${allQuotes.length} quotes loaded (${page} page${page>1?'s':''}) · saved locally</span>`;
+    QUOTES_LIVE = allQuotes;
+    if (statusEl) statusEl.innerHTML = `<span style="color:var(--sage)">✓ ${allQuotes.length} quotes loaded live · <em>run Sync Xero to save permanently to data.json</em></span>`;
     btn.disabled = false;
-    btn.textContent = '↻ Refresh Quotes from Xero';
-    renderQuotesData();
+    renderQuotesData(allQuotes);
   } catch(err) {
     if (statusEl) statusEl.innerHTML = `<span style="color:var(--rust)">⚠ ${err.message}</span>`;
     btn.disabled = false;
   }
 }
 
-function renderQuotesData() {
-  const quotes = QUOTES_DATA || [];
+function renderQuotesData(quotes) {
+  quotes = quotes || [];
 
   // Build enriched list
   const enriched = quotes.map(q => {
@@ -924,9 +909,10 @@ function renderQuotesData() {
 }
 
 function showCategoryDetail(cat) {
-  if (!QUOTES_DATA) return;
+  const quotesSource = (D && D.quotes && D.quotes.length) ? D.quotes : QUOTES_LIVE;
+  if (!quotesSource) return;
 
-  const catQuotes = QUOTES_DATA.map(q => {
+  const catQuotes = quotesSource.map(q => {
     const lineItems = (q.LineItems||[]).filter(li=>(li.Description||'').trim());
     const allDesc = lineItems.map(li=>(li.Description||'')+(li.ItemCode||'')).join(' ');
     return { ...q, _cat: detectCategory(allDesc), _total: Math.abs(q.SubTotal||q.Total||0), _lineItems: lineItems };
