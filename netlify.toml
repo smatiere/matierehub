@@ -4,4 +4,6 @@
 
 [functions]
   node_bundler = "esbuild"
-  included_files = ["netlify/functions/**"]
+  included_files = []
+
+# @netlify/blobs is built into Netlify's function runtime — no package.json needed
