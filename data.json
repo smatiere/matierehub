@@ -304,6 +304,16 @@
       "value": 300,
       "employee": "Seb",
       "notes": ""
+    },
+    {
+      "id": "TS-009",
+      "date": "2026-05-28",
+      "project": "Admin",
+      "hours": 8,
+      "rate": 100,
+      "value": 800,
+      "employee": "Seb",
+      "notes": ""
     }
   ],
   "expense_log": [
