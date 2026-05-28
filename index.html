@@ -97,6 +97,24 @@ tr:hover td{background:var(--cream-2)}
 .log-amount{font-weight:600;white-space:nowrap;color:var(--ink)}
 .empty{text-align:center;padding:40px 20px;color:var(--ink-4);font-size:13px}
 .empty-icon{font-size:32px;margin-bottom:8px}
+
+/* Modal */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(26,24,20,.55);z-index:1000;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto}
+.modal-overlay.open{display:flex}
+.modal{background:#fff;border-radius:8px;width:100%;max-width:660px;margin:auto;box-shadow:0 12px 48px rgba(0,0,0,.22);animation:modalIn .18s ease}
+@keyframes modalIn{from{transform:translateY(14px);opacity:0}to{transform:translateY(0);opacity:1}}
+.modal-head{padding:16px 20px;border-bottom:1px solid var(--cream-3);display:flex;align-items:center;justify-content:space-between;background:var(--navy);border-radius:8px 8px 0 0}
+.modal-head h3{font-size:14px;font-weight:600;color:#fff;letter-spacing:.02em}
+.modal-close{background:rgba(255,255,255,.15);border:none;font-size:16px;cursor:pointer;color:#fff;line-height:1;padding:4px 9px;border-radius:var(--r)}
+.modal-close:hover{background:rgba(255,255,255,.25)}
+.modal-body{padding:20px;max-height:72vh;overflow-y:auto}
+.modal-body .kpi{padding:12px}
+.modal-body .kpi-value{font-size:20px}
+.modal-body tfoot td{background:var(--cream-2);font-size:12px}
+
+/* Clickable rows */
+.project-row{cursor:pointer}
+.chart-clickable-hint{font-size:10px;color:var(--ink-4);letter-spacing:.04em}
 </style>
 </head>
 <body>
@@ -147,6 +165,17 @@ tr:hover td{background:var(--cream-2)}
 
 <!-- LOG -->
 <div class="page" id="page-log"></div>
+
+<!-- MODAL -->
+<div id="modal-overlay" class="modal-overlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="modal-title"></h3>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
 
 </div><!-- #app -->
 
@@ -227,7 +256,7 @@ function renderOverview(k, m) {
       ${kpi('Owner Drawings', fmt(k.fy26_owner_drawings), 'FY26 paid to Seb', '')}
     </div>
     <div class="section">
-      <div class="section-head"><h2>Monthly Revenue — FY2026</h2></div>
+      <div class="section-head"><h2>Monthly Revenue — FY2026</h2><span class="chart-clickable-hint">↑ Click a bar for month detail</span></div>
       <div class="section-body"><div class="chart-wrap"><canvas id="chart-overview-rev"></canvas></div></div>
     </div>
     <div class="two-col">
@@ -264,7 +293,8 @@ function renderOverview(k, m) {
         data: m.revenue,
         backgroundColor: '#c9a84c',
         borderRadius: 3,
-        borderSkipped: false
+        borderSkipped: false,
+        hoverBackgroundColor: '#e8c97a'
       }]
     },
     options: {
@@ -273,7 +303,9 @@ function renderOverview(k, m) {
       scales: {
         y: { ticks: { callback: v => '$' + (v/1000).toFixed(0) + 'k', font:{size:11} }, grid:{color:'#f0ebe4'} },
         x: { ticks: { font:{size:11} }, grid:{display:false} }
-      }
+      },
+      onClick: (event, elements) => { if (elements.length > 0) showMonthDetail(elements[0].index); },
+      onHover: (event, elements) => { event.native.target.style.cursor = elements.length > 0 ? 'pointer' : 'default'; }
     }
   });
 
@@ -458,52 +490,89 @@ function renderMaterials(k, m) {
 }
 
 function renderProjects(k) {
-  const projects = D.projects || [];
+  const definedProjects = D.projects || [];
   const timesheets = D.timesheets || [];
+  const expenses = D.expense_log || [];
+  const rate = k.sebRate_per_hour || 100;
 
-  // Hours by project
-  const hoursByProject = {};
+  // Map of explicitly defined projects
+  const definedNames = new Set(definedProjects.map(p => p.name));
+  const definedMap = {};
+  definedProjects.forEach(p => definedMap[p.name] = p);
+
+  // Collect ALL unique project names from activity logs
+  const allNames = new Set(definedProjects.map(p => p.name));
+  timesheets.forEach(t => t.project && allNames.add(t.project));
+  expenses.forEach(e => e.project && allNames.add(e.project));
+
+  // Build per-project aggregates
+  const pData = {};
+  allNames.forEach(name => {
+    const def = definedMap[name] || {};
+    pData[name] = { name, status: def.status || 'Active', quoted: def.quoted != null ? def.quoted : null, hours: 0, laborValue: 0, expenses: 0 };
+  });
   timesheets.forEach(t => {
-    if (!hoursByProject[t.project]) hoursByProject[t.project] = 0;
-    hoursByProject[t.project] += (t.hours || 0);
+    if (t.project && pData[t.project]) {
+      pData[t.project].hours += (t.hours || 0);
+      pData[t.project].laborValue += (t.hours || 0) * rate;
+    }
+  });
+  expenses.forEach(e => {
+    if (e.project && pData[e.project]) {
+      pData[e.project].expenses += (e.amount || 0);
+    }
   });
 
-  const projectRows = projects.map(p => {
-    const hrs = hoursByProject[p.name] || 0;
-    const laborValue = hrs * k.sebRate_per_hour;
-    const remaining = p.quoted - laborValue;
-    return `<tr>
+  // Sort: defined projects first, then alpha
+  const sorted = Object.values(pData).sort((a, b) => {
+    const aD = definedNames.has(a.name) ? 0 : 1;
+    const bD = definedNames.has(b.name) ? 0 : 1;
+    if (aD !== bD) return aD - bD;
+    return a.name.localeCompare(b.name);
+  });
+
+  const projectRows = sorted.map(p => {
+    const remaining = p.quoted != null ? p.quoted - p.laborValue - p.expenses : null;
+    const safeName = p.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    return `<tr class="project-row" onclick="showProjectDetail('${safeName}')">
       <td><strong>${p.name}</strong></td>
       <td><span class="badge ${p.status==='Active'?'badge-green':'badge-gray'}">${p.status}</span></td>
-      <td class="amount">${fmt(p.quoted)}</td>
-      <td class="amount">${hrs > 0 ? hrs + 'h' : '—'}</td>
-      <td class="amount">${hrs > 0 ? fmt(laborValue) : '—'}</td>
-      <td class="amount" style="color:${remaining>0?'var(--sage)':'var(--rust)'}">${hrs > 0 ? fmt(remaining) : '—'}</td>
+      <td class="amount">${p.quoted != null ? fmt(p.quoted) : '<span style="color:var(--ink-4)">TBD</span>'}</td>
+      <td class="amount">${p.hours > 0 ? p.hours + 'h' : '—'}</td>
+      <td class="amount">${p.laborValue > 0 ? fmt(p.laborValue) : '—'}</td>
+      <td class="amount" style="color:var(--rust)">${p.expenses > 0 ? fmt(p.expenses) : '—'}</td>
+      <td class="amount" style="color:${remaining===null?'var(--ink-4)':remaining>=0?'var(--sage)':'var(--rust)'}">
+        ${remaining !== null ? fmt(remaining) : '—'}
+      </td>
     </tr>`;
   }).join('');
 
-  const recentHours = timesheets.slice(-10).reverse();
+  const recentHours = timesheets.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'')).slice(0,10);
   const hoursRows = recentHours.length ? recentHours.map(t => `<tr>
     <td>${t.date || '—'}</td>
     <td>${t.project || '—'}</td>
-    <td>${t.description || '—'}</td>
+    <td>${t.notes || '—'}</td>
     <td class="amount">${t.hours}h</td>
-    <td class="amount">${fmt(t.hours * k.sebRate_per_hour)}</td>
+    <td class="amount">${fmt(t.hours * rate)}</td>
   </tr>`).join('') : '<tr><td colspan="5"><div class="empty">No hours logged yet. Tell Claude to log your hours.</div></td></tr>';
 
+  const totalQuoted = definedProjects.reduce((a,p) => a + (p.quoted||0), 0);
+  const totalHoursAll = timesheets.reduce((a,t) => a + (t.hours||0), 0);
+  const totalExpensesAll = expenses.reduce((a,e) => a + (e.amount||0), 0);
+
   document.getElementById('page-projects').innerHTML = `
-    <div class="divider">Active Projects</div>
+    <div class="divider">Projects — All Active</div>
     <div class="kpi-grid">
-      ${kpi('Active Projects', projects.filter(p=>p.status==='Active').length, 'Currently running', 'highlight')}
-      ${kpi('Total Quoted', fmt(projects.reduce((a,p)=>a+p.quoted,0)), 'Active projects', '')}
-      ${kpi('Pipeline', fmt(k.pipeline_total), 'Quotes outstanding', 'highlight')}
-      ${kpi('Hours Logged', timesheets.reduce((a,t)=>a+t.hours,0) + 'h', 'All projects', '')}
+      ${kpi('Tracked Projects', sorted.length, 'From logs + defined', 'highlight')}
+      ${kpi('Total Quoted', fmt(totalQuoted), 'Defined projects only', '')}
+      ${kpi('Hours Logged', totalHoursAll + 'h', 'All projects', '')}
+      ${kpi('Expenses Logged', fmt(totalExpensesAll), 'All projects', 'warn')}
     </div>
     <div class="section">
-      <div class="section-head"><h2>Project Overview</h2></div>
+      <div class="section-head"><h2>Project Overview</h2><span class="chart-clickable-hint">↑ Click a row for details</span></div>
       <table>
-        <thead><tr><th>Project</th><th>Status</th><th style="text-align:right">Quoted</th><th style="text-align:right">Hours</th><th style="text-align:right">Labour Value</th><th style="text-align:right">Remaining</th></tr></thead>
-        <tbody>${projectRows || '<tr><td colspan="6"><div class="empty">No projects</div></td></tr>'}</tbody>
+        <thead><tr><th>Project</th><th>Status</th><th style="text-align:right">Quoted</th><th style="text-align:right">Hours</th><th style="text-align:right">Labour</th><th style="text-align:right">Expenses</th><th style="text-align:right">Remaining</th></tr></thead>
+        <tbody>${projectRows || '<tr><td colspan="7"><div class="empty">No projects yet</div></td></tr>'}</tbody>
       </table>
     </div>
     <div class="section">
@@ -552,6 +621,139 @@ function renderLog() {
       <div class="section-head"><h2>Activity Feed</h2></div>
       <div class="section-body">${entries}</div>
     </div>`;
+}
+
+// ── Modal helpers ──────────────────────────────────────────────────────────────
+function openModal(title, bodyHtml) {
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-body').innerHTML = bodyHtml;
+  document.getElementById('modal-overlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+  document.body.style.overflow = '';
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+// ── Project detail modal ────────────────────────────────────────────────────────
+function showProjectDetail(name) {
+  const k = D.kpis;
+  const rate = k.sebRate_per_hour || 100;
+  const ts = (D.timesheets || []).filter(t => t.project === name).sort((a,b) => (b.date||'').localeCompare(a.date||''));
+  const exp = (D.expense_log || []).filter(e => e.project === name).sort((a,b) => (b.date||'').localeCompare(a.date||''));
+
+  const totalHours = ts.reduce((a,t) => a + (t.hours||0), 0);
+  const laborValue = totalHours * rate;
+  const totalExpenses = exp.reduce((a,e) => a + (e.amount||0), 0);
+  const defined = (D.projects || []).find(p => p.name === name);
+  const quoted = defined && defined.quoted != null ? defined.quoted : null;
+  const remaining = quoted != null ? quoted - laborValue - totalExpenses : null;
+
+  const tsRows = ts.length ? ts.map(t => `<tr>
+    <td>${t.date||'—'}</td>
+    <td>${t.employee||'Seb'}</td>
+    <td style="color:var(--ink-3)">${t.notes||'—'}</td>
+    <td class="amount">${t.hours}h</td>
+    <td class="amount">${fmt(t.hours * rate)}</td>
+  </tr>`).join('') + `<tr style="font-weight:600;background:var(--cream-2)"><td colspan="3" style="font-size:12px">Total</td><td class="amount">${totalHours}h</td><td class="amount">${fmt(laborValue)}</td></tr>`
+  : `<tr><td colspan="5" style="text-align:center;color:var(--ink-4);padding:16px 0">No timesheet entries</td></tr>`;
+
+  const expRows = exp.length ? exp.map(e => `<tr>
+    <td>${e.date||'—'}</td>
+    <td style="color:var(--ink-3)">${e.description||'—'}</td>
+    <td>${e.category||'—'}</td>
+    <td class="amount">${fmt(e.amount)}</td>
+  </tr>`).join('') + `<tr style="font-weight:600;background:var(--cream-2)"><td colspan="3" style="font-size:12px">Total</td><td class="amount">${fmt(totalExpenses)}</td></tr>`
+  : `<tr><td colspan="4" style="text-align:center;color:var(--ink-4);padding:16px 0">No expenses logged</td></tr>`;
+
+  const html = `
+    <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:20px">
+      ${kpi('Quoted', quoted != null ? fmt(quoted) : 'TBD', '', quoted ? 'highlight' : '')}
+      ${kpi('Labour', fmt(laborValue), totalHours + 'h @ $' + rate + '/hr', '')}
+      ${kpi('Expenses', totalExpenses > 0 ? fmt(totalExpenses) : '$0', 'Materials & costs', '')}
+      ${kpi('Remaining', remaining !== null ? fmt(remaining) : '—', 'Budget left', remaining === null ? '' : remaining >= 0 ? 'good' : 'warn')}
+    </div>
+    <div style="margin-bottom:20px">
+      <div class="divider" style="margin-top:0">Timesheets</div>
+      <table>
+        <thead><tr><th>Date</th><th>By</th><th>Notes</th><th style="text-align:right">Hours</th><th style="text-align:right">Value</th></tr></thead>
+        <tbody>${tsRows}</tbody>
+      </table>
+    </div>
+    <div>
+      <div class="divider">Expenses</div>
+      <table>
+        <thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right">Amount</th></tr></thead>
+        <tbody>${expRows}</tbody>
+      </table>
+    </div>`;
+
+  openModal(name, html);
+}
+
+// ── Month detail modal ─────────────────────────────────────────────────────────
+function showMonthDetail(idx) {
+  const m = D.monthly;
+  const label = m.labels[idx];
+  const period = m.periods[idx]; // e.g. "2025-07"
+  const revenue = m.revenue[idx] || 0;
+  const materials = (m.materials && m.materials[idx]) || 0;
+  const gp = revenue - materials;
+  const gpm = revenue > 0 ? gp / revenue * 100 : 0;
+  const rate = D.kpis.sebRate_per_hour || 100;
+
+  // Filter logged entries to this month
+  const monthTs = (D.timesheets || []).filter(t => t.date && t.date.startsWith(period)).sort((a,b) => (b.date||'').localeCompare(a.date||''));
+  const monthExp = (D.expense_log || []).filter(e => e.date && e.date.startsWith(period)).sort((a,b) => (b.date||'').localeCompare(a.date||''));
+
+  const tsSection = monthTs.length ? `
+    <div style="margin-bottom:20px">
+      <div class="divider" style="margin-top:0">Hours Logged</div>
+      <table>
+        <thead><tr><th>Date</th><th>Project</th><th>Notes</th><th style="text-align:right">Hours</th><th style="text-align:right">Value</th></tr></thead>
+        <tbody>${monthTs.map(t => `<tr>
+          <td>${t.date}</td><td>${t.project||'—'}</td><td style="color:var(--ink-3)">${t.notes||'—'}</td>
+          <td class="amount">${t.hours}h</td><td class="amount">${fmt(t.hours*rate)}</td>
+        </tr>`).join('')}
+        <tr style="font-weight:600;background:var(--cream-2)"><td colspan="3" style="font-size:12px">Total</td>
+          <td class="amount">${monthTs.reduce((a,t)=>a+(t.hours||0),0)}h</td>
+          <td class="amount">${fmt(monthTs.reduce((a,t)=>a+(t.hours||0),0)*rate)}</td>
+        </tr></tbody>
+      </table>
+    </div>` : '';
+
+  const expSection = monthExp.length ? `
+    <div>
+      <div class="divider">Expenses Logged</div>
+      <table>
+        <thead><tr><th>Date</th><th>Project</th><th>Description</th><th style="text-align:right">Amount</th></tr></thead>
+        <tbody>${monthExp.map(e => `<tr>
+          <td>${e.date}</td><td>${e.project||'—'}</td><td style="color:var(--ink-3)">${e.description||'—'}</td>
+          <td class="amount">${fmt(e.amount)}</td>
+        </tr>`).join('')}
+        <tr style="font-weight:600;background:var(--cream-2)"><td colspan="3" style="font-size:12px">Total</td>
+          <td class="amount">${fmt(monthExp.reduce((a,e)=>a+(e.amount||0),0))}</td>
+        </tr></tbody>
+      </table>
+    </div>` : '';
+
+  const noData = !monthTs.length && !monthExp.length ? `
+    <div class="empty" style="padding:28px 0">
+      <div class="empty-icon">📅</div>
+      <div>No Claude-logged entries for this month.</div>
+      <div style="font-size:12px;margin-top:6px;color:var(--ink-4)">Historical data lives in Xero — only hours & expenses you've logged here appear.</div>
+    </div>` : '';
+
+  const html = `
+    <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:20px">
+      ${kpi('Revenue', fmt(revenue), 'Cash received (Xero)', 'highlight')}
+      ${kpi('Materials', fmt(materials), 'Direct costs (Xero)', '')}
+      ${kpi('Gross Profit', fmt(gp), pct(gpm) + ' margin', gp >= 0 ? 'good' : 'warn')}
+    </div>
+    ${tsSection}${expSection}${noData}`;
+
+  openModal(label + ' ' + period.slice(0, 4), html);
 }
 
 // Boot
