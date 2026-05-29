@@ -113,15 +113,24 @@ If you cannot parse the input: {"action":"unclear","message":"brief reason"}`;
 
     // Parse JSON from response
     let rawText = claudeData.content[0].text.trim();
+    console.log('INPUT:', text.trim());
+    console.log('MODEL OUTPUT:', rawText);
+
     rawText = rawText.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim();
     let parsed;
     try {
       parsed = JSON.parse(rawText);
     } catch(e) {
-      const match = rawText.match(/\{[\s\S]*?\}/);
-      if (match) parsed = JSON.parse(match[0]);
-      else throw new Error(`Bad JSON from model: ${rawText.slice(0, 200)}`);
+      // Greedy match — handles nested objects e.g. {"changes":{"notes":"text"}}
+      const match = rawText.match(/\{[\s\S]*\}/);
+      if (match) {
+        try { parsed = JSON.parse(match[0]); }
+        catch(e2) { throw new Error(`Bad JSON from model: ${rawText.slice(0, 200)}`); }
+      } else {
+        throw new Error(`Bad JSON from model: ${rawText.slice(0, 200)}`);
+      }
     }
+    console.log('PARSED ACTION:', JSON.stringify(parsed));
 
     if (parsed.action === 'unclear') {
       return { statusCode: 200, headers, body: JSON.stringify({ status: 'unclear', message: parsed.message }) };
