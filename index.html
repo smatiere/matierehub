@@ -1114,43 +1114,38 @@ async function claudeBarSend() {
 
     if (data.status === 'success') {
       inp.value = '';
-      const e = data.entry;
-      const t = data.type || (e && e.type) || '';
+      const action = data.action || '';
       let msg = '';
-      if (t === 'timesheet')        msg = `✓ Logged ${e.hours}h · ${e.project} · ${e.date}`;
-      else if (t === 'expense')     msg = `✓ Logged $${e.amount} · ${e.description.slice(0,35)}`;
-      else if (t === 'delete_timesheet' || t === 'delete_expense') msg = `🗑 Deleted · ${data.label}`;
-      else if (t === 'edit_timesheet' || t === 'edit_timesheets' || t === 'edit_by_date' || t === 'edit_by_date_multi') msg = `✏ Updated · ${data.label}`;
+      if (action === 'new' && data.entry) {
+        const e = data.entry;
+        msg = data.type === 'timesheet'
+          ? `✓ Logged ${e.hours}h · ${e.project} · ${e.date}`
+          : `✓ Logged $${e.amount} · ${(e.description||'').slice(0,35)}`;
+      } else if (action === 'edit')   msg = `✏ ${data.label}`;
+      else if (action === 'delete')   msg = `🗑 ${data.label}`;
       else msg = `✓ ${data.label || 'Done'}`;
       claudeToast(msg, 'success');
 
-      // Optimistic update: apply entry directly to in-memory D and re-render immediately.
-      // No need to wait and re-fetch — the function already confirmed the commit.
+      // Optimistic in-memory update — no re-fetch needed
       if (D) {
-        if (t === 'timesheet') {
-          D.timesheets = D.timesheets || [];
-          D.timesheets.push(e);
-        } else if (t === 'expense') {
-          D.expense_log = D.expense_log || [];
-          D.expense_log.push(e);
-        } else if (t === 'delete_timesheet' && data.deleted) {
-          D.timesheets = (D.timesheets||[]).filter(ts => ts.id !== data.deleted.id);
-        } else if (t === 'delete_expense' && data.deleted) {
-          // Remove by matching key fields since we don't have a stable id
-          D.expense_log = (D.expense_log||[]).filter(ex =>
-            !(ex.date === data.deleted.date && ex.description === data.deleted.description && ex.amount === data.deleted.amount));
-        } else if (t === 'edit_timesheet' && data.updated) {
-          const idx = (D.timesheets||[]).findIndex(ts => ts.id === data.updated.id);
-          if (idx !== -1) D.timesheets[idx] = data.updated;
-        } else if ((t === 'edit_timesheets' || t === 'edit_by_date' || t === 'edit_by_date_multi') && data.updated) {
+        if (action === 'new' && data.entry) {
+          if (data.type === 'timesheet') {
+            D.timesheets = D.timesheets || [];
+            D.timesheets.push(data.entry);
+          } else {
+            D.expense_log = D.expense_log || [];
+            D.expense_log.push(data.entry);
+          }
+        } else if (action === 'edit' && data.updated) {
           const updatedArr = Array.isArray(data.updated) ? data.updated : [data.updated];
           updatedArr.forEach(u => {
             const idx = (D.timesheets||[]).findIndex(ts => ts.id === u.id);
             if (idx !== -1) D.timesheets[idx] = u;
           });
+        } else if (action === 'delete' && data.deleted) {
+          D.timesheets = (D.timesheets||[]).filter(ts => ts.id !== data.deleted.id);
         }
         renderAll();
-        // Also re-render timesheet tab if it's active, since renderAll doesn't always call it
         if (document.getElementById('page-timesheet').classList.contains('active')) renderTimesheet();
       }
 
