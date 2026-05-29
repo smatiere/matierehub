@@ -1,6 +1,6 @@
 {
   "meta": {
-    "last_updated": "2026-05-28T00:00:00",
+    "last_updated": "2026-05-29T03:24:53.218Z",
     "last_xero_sync": "2026-05-28",
     "quotes_synced_at": null,
     "data_note": "FY26 = Jul 2025 to May 2026 (11 months YTD). KPIs & invoices from Xero; timesheets/expenses from data drops."
@@ -54,7 +54,7 @@
       23612.05,
       26017.4,
       16695.25,
-      14389.0,
+      14389,
       23901.23,
       7976.61,
       17845.24,
@@ -82,11 +82,11 @@
     },
     {
       "name": "Selvi - Seaforth",
-      "revenue": 23741.0
+      "revenue": 23741
     },
     {
       "name": "Mark Shippen",
-      "revenue": 22924.0
+      "revenue": 22924
     },
     {
       "name": "Peter Black",
@@ -94,11 +94,11 @@
     },
     {
       "name": "Samantha Kirchner",
-      "revenue": 7249.0
+      "revenue": 7249
     },
     {
       "name": "Paul - Frenchs Forest",
-      "revenue": 6259.0
+      "revenue": 6259
     },
     {
       "name": "Annemay - Seaforth",
@@ -114,7 +114,7 @@
     },
     {
       "name": "Mike - Seaforth",
-      "revenue": 4169.0
+      "revenue": 4169
     }
   ],
   "open_invoices": [
@@ -215,8 +215,8 @@
     {
       "name": "IBK - Mosman",
       "status": "Active",
-      "quoted": 1248.50,
-      "notes": "IBK (Ibathrooms and kitchen renovations pty Ltd). INV-0343 raised 2026-05-27 \u2014 $1,248.50 AUTHORISED. Hours logged via data drops."
+      "quoted": 1248.5,
+      "notes": "IBK (Ibathrooms and kitchen renovations pty Ltd). INV-0343 raised 2026-05-27 — $1,248.50 AUTHORISED. Hours logged via data drops."
     },
     {
       "name": "Neil - Balgowlah",
@@ -315,6 +315,17 @@
       "value": 800,
       "employee": "Seb",
       "notes": ""
+    },
+    {
+      "type": "timesheet",
+      "date": "2026-05-28",
+      "project": "Admin",
+      "hours": 2,
+      "employee": "Seb",
+      "notes": "",
+      "id": "TS-010",
+      "rate": 100,
+      "value": 200
     }
   ],
   "expense_log": [
