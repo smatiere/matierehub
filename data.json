@@ -1,6 +1,6 @@
 {
   "meta": {
-    "last_updated": "2026-05-29T03:28:24.218Z",
+    "last_updated": "2026-05-29T05:08:24.535Z",
     "last_xero_sync": "2026-05-28",
     "quotes_synced_at": null,
     "data_note": "FY26 = Jul 2025 to May 2026 (11 months YTD). KPIs & invoices from Xero; timesheets/expenses from data drops."
@@ -326,17 +326,6 @@
       "id": "TS-010",
       "rate": 100,
       "value": 200
-    },
-    {
-      "type": "timesheet",
-      "date": "2026-05-26",
-      "project": "Mark - Nth Balgowlah",
-      "hours": 4,
-      "employee": "Seb",
-      "notes": "Saturday work",
-      "id": "TS-011",
-      "rate": 100,
-      "value": 400
     }
   ],
   "expense_log": [
