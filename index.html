@@ -1705,7 +1705,7 @@ function pnlToggleCompare() {
 // ══════════════════════════════════════════════════════════════════════════════
 const XERO_CLIENT_ID    = '3854892E5C3B490EAE24E3B1A79E668D';
 const XERO_REDIRECT_URI = 'https://matierehub2.netlify.app/xero-callback';
-const XERO_SCOPES = 'openid profile email offline_access accounting.settings accounting.settings.read accounting.contacts accounting.contacts.read accounting.attachments accounting.attachments.read accounting.budgets.read accounting.payments accounting.payments.read accounting.invoices accounting.invoices.read accounting.banktransactions accounting.banktransactions.read accounting.manualjournals accounting.manualjournals.read accounting.reports.aged.read accounting.reports.balancesheet.read accounting.reports.banksummary.read accounting.reports.budgetsummary.read accounting.reports.executivesummary.read accounting.reports.profitandloss.read accounting.reports.trialbalance.read accounting.reports.taxreports.read accounting.reports.tenninetynine.read files files.read assets assets.read projects projects.read';
+const XERO_SCOPES = 'openid profile email offline_access accounting.settings accounting.settings.read accounting.contacts accounting.contacts.read accounting.attachments accounting.attachments.read accounting.budgets.read accounting.payments accounting.payments.read accounting.invoices accounting.invoices.read accounting.banktransactions accounting.banktransactions.read accounting.journals.read accounting.manualjournals accounting.manualjournals.read accounting.reports.aged.read accounting.reports.balancesheet.read accounting.reports.banksummary.read accounting.reports.budgetsummary.read accounting.reports.executivesummary.read accounting.reports.profitandloss.read accounting.reports.trialbalance.read accounting.reports.taxreports.read accounting.reports.tenninetynine.read files files.read assets assets.read projects projects.read';
 
 function xeroConnect() {
   const state = Math.random().toString(36).substring(2);
@@ -1776,55 +1776,121 @@ async function syncFromXero() {
   openModal('Syncing from Xero…', '<div style="text-align:center;padding:30px"><div class="spinner" style="margin:0 auto 16px"></div><div id="sync-status" style="color:var(--ink-4);font-size:13px">Connecting…</div></div>');
   const status = t => { const el = document.getElementById('sync-status'); if (el) el.textContent = t; };
   const results = { synced_at: new Date().toISOString() };
-  try {
-    status('Fetching invoices…');
-    const invRes = await xeroApiCall('Invoices?where=Type%3D%3D%22ACCREC%22%26%26Date%3E%3DDateTime(2025%2C7%2C1)&unitdp=2&summaryOnly=false');
-    results.invoices = invRes.Invoices || [];
-    let allQ = []; let qp = 1;
+
+  // Helper: paginate any Xero list endpoint
+  async function fetchAllPages(baseEndpoint, arrayKey, label, maxPages=20) {
+    let all = [], page = 1;
     while (true) {
-      status('Fetching quotes page ' + qp + ' (' + allQ.length + ' so far)…');
-      const qtRes = await xeroApiCall('Quotes?page=' + qp);
-      const batch = qtRes.Quotes || [];
-      allQ = allQ.concat(batch);
+      status(`${label} — page ${page} (${all.length} so far)…`);
+      const sep = baseEndpoint.includes('?') ? '&' : '?';
+      const res = await xeroApiCall(baseEndpoint + sep + 'page=' + page);
+      const batch = res[arrayKey] || [];
+      all = all.concat(batch);
       if (batch.length < 100) break;
-      qp++; if (qp > 10) break;
+      page++; if (page > maxPages) break;
     }
-    results.quotes = allQ;
-    QUOTES_LIVE = allQ;
+    return all;
+  }
+
+  try {
+    // ── Sales invoices — 3 years ──────────────────────────────────────────────
+    status('Fetching sales invoices (3 years)…');
+    results.invoices = await fetchAllPages(
+      'Invoices?where=Type%3D%3D%22ACCREC%22%26%26Date%3E%3DDateTime(2023%2C7%2C1)&unitdp=2&summaryOnly=false',
+      'Invoices', 'Sales invoices'
+    );
+
+    // ── Purchase invoices / bills — 3 years ───────────────────────────────────
+    status('Fetching bills / purchase invoices (3 years)…');
+    results.bills = await fetchAllPages(
+      'Invoices?where=Type%3D%3D%22ACCPAY%22%26%26Date%3E%3DDateTime(2023%2C7%2C1)&unitdp=2&summaryOnly=false',
+      'Invoices', 'Bills'
+    );
+
+    // ── Quotes — all pages ─────────────────────────────────────────────────────
+    results.quotes = await fetchAllPages('Quotes', 'Quotes', 'Quotes');
+    QUOTES_LIVE = results.quotes;
+
+    // ── Contacts ──────────────────────────────────────────────────────────────
     status('Fetching contacts…');
-    const ctRes = await xeroApiCall('Contacts?where=IsCustomer%3D%3Dtrue');
+    const ctRes = await xeroApiCall('Contacts');
     results.contacts = ctRes.Contacts || [];
-    status('Fetching May 2026 P&L…');
-    const pnlMay = await xeroApiCall('Reports/ProfitAndLoss?fromDate=2026-05-01&toDate=2026-05-31');
-    results.pnl_may = pnlMay.Reports ? pnlMay.Reports[0] : pnlMay;
-    status('Fetching FY26 P&L…');
-    const pnlFY = await xeroApiCall('Reports/ProfitAndLoss?fromDate=2025-07-01&toDate=2026-05-31');
-    results.pnl_fy26 = pnlFY.Reports ? pnlFY.Reports[0] : pnlFY;
-    status('Fetching bank transactions…');
-    const btRes = await xeroApiCall('BankTransactions?where=Date%3E%3DDateTime(2025%2C7%2C1)&unitdp=2');
-    results.bank_transactions = btRes.BankTransactions || [];
+
+    // ── Bank transactions — paginated, 3 years ────────────────────────────────
+    results.bank_transactions = await fetchAllPages(
+      'BankTransactions?where=Date%3E%3DDateTime(2023%2C7%2C1)&unitdp=2',
+      'BankTransactions', 'Bank transactions'
+    );
+
+    // ── Accounts chart ────────────────────────────────────────────────────────
     status('Fetching accounts…');
     const acRes = await xeroApiCall('Accounts?where=Status%3D%3D%22ACTIVE%22');
     results.accounts = acRes.Accounts || [];
+
+    // ── P&L reports ───────────────────────────────────────────────────────────
+    // 3-year monthly breakdown (the key one for P&L tab)
+    status('Fetching monthly P&L — 3 years…');
+    const pnl3y = await xeroApiCall('Reports/ProfitAndLoss?fromDate=2023-07-01&toDate=2026-06-30&periods=36&timeframe=MONTH');
+    results.pnl_monthly_3y = pnl3y.Reports ? pnl3y.Reports[0] : pnl3y;
+
+    // Annual summaries per FY
+    status('Fetching FY24 P&L…');
+    const pnl24 = await xeroApiCall('Reports/ProfitAndLoss?fromDate=2023-07-01&toDate=2024-06-30');
+    results.pnl_fy24 = pnl24.Reports ? pnl24.Reports[0] : pnl24;
+
+    status('Fetching FY25 P&L…');
+    const pnl25 = await xeroApiCall('Reports/ProfitAndLoss?fromDate=2024-07-01&toDate=2025-06-30');
+    results.pnl_fy25 = pnl25.Reports ? pnl25.Reports[0] : pnl25;
+
+    status('Fetching FY26 P&L (YTD)…');
+    const pnl26 = await xeroApiCall('Reports/ProfitAndLoss?fromDate=2025-07-01&toDate=2026-06-30');
+    results.pnl_fy26 = pnl26.Reports ? pnl26.Reports[0] : pnl26;
+
+    // Balance sheet
+    status('Fetching balance sheet…');
+    const bs = await xeroApiCall('Reports/BalanceSheet');
+    results.balance_sheet = bs.Reports ? bs.Reports[0] : bs;
+
+    // Trial balance
+    status('Fetching trial balance…');
+    const tb = await xeroApiCall('Reports/TrialBalance');
+    results.trial_balance = tb.Reports ? tb.Reports[0] : tb;
+
+    // ── Journals — full general ledger, 3 years ───────────────────────────────
+    // (requires accounting.journals.read scope — reconnect Xero if this fails)
+    try {
+      status('Fetching journals (general ledger)…');
+      results.journals = await fetchAllPages('Journals?offset=0', 'Journals', 'Journals', 50);
+    } catch(e) {
+      results.journals = [];
+      results.journals_error = e.message;
+    }
+
+    // ── Summary ───────────────────────────────────────────────────────────────
     const summary = [
-      `✓ Invoices: ${results.invoices.length}`,
-      `✓ Quotes: ${results.quotes.length} (${qp} page${qp>1?'s':''})`,
+      `✓ Sales invoices: ${results.invoices.length} (from Jul 2023)`,
+      `✓ Bills / purchase invoices: ${results.bills.length} (from Jul 2023)`,
+      `✓ Quotes: ${results.quotes.length}`,
       `✓ Contacts: ${results.contacts.length}`,
-      `✓ Bank transactions: ${results.bank_transactions.length}`,
-      `✓ P&L reports: 2 (May 2026 + FY26)`,
+      `✓ Bank transactions: ${results.bank_transactions.length} (from Jul 2023)`,
+      `✓ Journals: ${results.journals.length}${results.journals_error?' ⚠ '+results.journals_error:''}`,
+      `✓ P&L reports: monthly 3-year + FY24 + FY25 + FY26`,
+      `✓ Balance sheet + trial balance`,
     ].join('<br>');
+
     const blob = new Blob([JSON.stringify(results,null,2)], {type:'application/json'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href=url; a.download='xero_sync_'+new Date().toISOString().slice(0,10)+'.json'; a.click();
     URL.revokeObjectURL(url);
+
     document.getElementById('modal-body').innerHTML = `
       <div style="padding:8px 0">
-        <div style="color:var(--sage);font-size:15px;font-weight:700;margin-bottom:16px">✓ Sync complete</div>
-        <div style="line-height:2;font-size:13px;color:var(--ink-2)">${summary}</div>
-        <div style="margin-top:20px;padding:14px;background:var(--bg-3);border-radius:5px;font-size:12px;color:var(--ink-3);line-height:1.7">
-          <strong style="color:var(--ink-2)">Next step:</strong> A file <code>xero_sync_YYYY-MM-DD.json</code> has been downloaded.<br>
-          Upload it to Claude and ask: <em>"Merge this Xero sync into data.json"</em>
+        <div style="color:var(--sage);font-size:15px;font-weight:700;margin-bottom:16px">✓ Full sync complete</div>
+        <div style="line-height:2.2;font-size:13px;color:var(--ink-2)">${summary}</div>
+        ${results.journals_error ? `<div style="margin-top:12px;padding:10px 14px;background:rgba(255,190,11,.08);border:1px solid rgba(255,190,11,.2);border-radius:5px;font-size:12px;color:var(--amber);line-height:1.7">⚠ Journals failed — reconnect Xero to grant <code>accounting.journals.read</code> scope, then sync again.</div>` : ''}
+        <div style="margin-top:16px;padding:14px;background:var(--bg-3);border-radius:5px;font-size:12px;color:var(--ink-3);line-height:1.7">
+          <strong style="color:var(--ink-2)">Next step:</strong> Upload the downloaded <code>xero_sync_YYYY-MM-DD.json</code> to Claude and say <em>"Merge this Xero sync into data.json"</em>
         </div>
       </div>`;
   } catch(err) {
