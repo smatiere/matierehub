@@ -1,6 +1,6 @@
 {
   "meta": {
-    "last_updated": "2026-05-29T23:44:29.423Z",
+    "last_updated": "2026-05-29T23:45:25.432Z",
     "quotes_synced_at": "2026-05-29T12:21:26.216Z",
     "source": "Xero sync 2026-05-29 (3yr history)",
     "invoice_count": 261,
@@ -6863,16 +6863,6 @@
     }
   ],
   "timesheets": [
-    {
-      "id": "TS-001",
-      "date": "2026-05-25",
-      "project": "Admin",
-      "hours": 6,
-      "rate": 100,
-      "value": 600,
-      "employee": "Seb",
-      "notes": ""
-    },
     {
       "id": "TS-002",
       "date": "2026-05-25",
