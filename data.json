@@ -1,6 +1,6 @@
 {
   "meta": {
-    "last_updated": "2026-05-29T06:17:39.061Z",
+    "last_updated": "2026-05-29T06:18:09.964Z",
     "last_xero_sync": "2026-05-28",
     "quotes_synced_at": null,
     "data_note": "FY26 = Jul 2025 to May 2026 (11 months YTD). KPIs & invoices from Xero; timesheets/expenses from data drops."
@@ -324,7 +324,7 @@
       "project": "Admin",
       "hours": 2,
       "employee": "Seb",
-      "notes": "",
+      "notes": "MatiereHub",
       "id": "TS-010",
       "rate": 100,
       "value": 200
@@ -335,7 +335,7 @@
       "project": "Admin",
       "hours": 8,
       "employee": "Seb",
-      "notes": "",
+      "notes": "MatiereHub",
       "id": "TS-011",
       "rate": 100,
       "value": 800
