@@ -1324,12 +1324,13 @@ let pnlCompare   = false;
 let pnlCustomFrom = null;
 let pnlCustomTo   = null;
 
-const PNL_COST_CATEGORIES = ['Materials', 'Wages & PAYG', 'Owner Drawings', 'Operating'];
+const PNL_COST_CATEGORIES = ['Materials', 'Wages & PAYG', 'Motor Vehicles', 'Subcontractors', 'Operating'];
 const PNL_CAT_COLORS = {
-  'Materials':      '#FB5607',
-  'Wages & PAYG':   '#8338EC',
-  'Owner Drawings': '#FF006E',
-  'Operating':      '#3A86FF',
+  'Materials':       '#FB5607',
+  'Wages & PAYG':    '#8338EC',
+  'Motor Vehicles':  '#3A86FF',
+  'Subcontractors':  '#FF006E',
+  'Operating':       '#888888',
 };
 
 function normalizePnLCat(cat, desc) {
@@ -1375,48 +1376,39 @@ function buildPnLData(fromD, toD) {
     matMap[p] = (D.monthly.materials&&D.monthly.materials[i])||0;
   });
 
-  // FY26 cost totals from KPIs — distribute evenly across FY26 months present in monthly data
-  const k = D.kpis;
-  const fy26Months = new Set((D.monthly.periods||[]).filter(p=>p>='2025-07'&&p<='2026-06'));
-  const fy26n = fy26Months.size || 12;
-  const wagesPerMo    = (k.fy26_wages||0) / fy26n;
-  const drawingsPerMo = (k.fy26_owner_drawings||0) / fy26n;
-  const opexPerMo     = (k.fy26_opex||0) / fy26n;
-
-  // Manual expense_log entries (small top-ups logged via Claude chat)
-  const expMap = {};
-  (D.expense_log||[]).forEach(e => {
-    if (!e.date) return;
-    const month = e.date.slice(0,7);
-    const cat = normalizePnLCat(e.category, e.description);
-    if (cat==='Materials') return;
-    if (!expMap[month]) expMap[month] = {};
-    expMap[month][cat] = (expMap[month][cat]||0) + (e.amount||0);
+  // Cost arrays — now sourced directly from data.json monthly breakdown
+  const m = D.monthly;
+  const wagesMap  = {}, motorMap = {}, subconMap = {}, opMap = {};
+  (m.periods||[]).forEach((p,i) => {
+    wagesMap[p]  = (m.wages&&m.wages[i])          || 0;
+    motorMap[p]  = (m.motor_vehicles&&m.motor_vehicles[i]) || 0;
+    subconMap[p] = (m.subcontractors&&m.subcontractors[i]) || 0;
+    opMap[p]     = (m.operating&&m.operating[i])   || 0;
   });
 
   return months.map(month => {
-    const label    = new Date(month+'-01').toLocaleDateString('en-AU',{month:'short',year:'2-digit'});
-    const revenue  = revMap[month]||0;
-    const materials= matMap[month]||0;
-    const inFY26   = fy26Months.has(month);
-    const me       = expMap[month]||{};
-    const wages    = (inFY26 ? wagesPerMo : 0)    + (me['Wages & PAYG']||0);
-    const drawings = (inFY26 ? drawingsPerMo : 0)  + (me['Owner Drawings']||0);
-    const operating= (inFY26 ? opexPerMo : 0)      + (me['Operating']||0);
-    const totalCosts = materials+wages+drawings+operating;
-    const profit   = revenue - totalCosts;
-    return { month, label, revenue, materials, wages, drawings, operating, totalCosts, profit };
+    const label         = new Date(month+'-01').toLocaleDateString('en-AU',{month:'short',year:'2-digit'});
+    const revenue       = revMap[month]||0;
+    const materials     = matMap[month]||0;
+    const wages         = wagesMap[month]||0;
+    const motor_vehicles= motorMap[month]||0;
+    const subcontractors= subconMap[month]||0;
+    const operating     = opMap[month]||0;
+    const totalCosts    = materials+wages+motor_vehicles+subcontractors+operating;
+    const profit        = revenue - totalCosts;
+    return { month, label, revenue, materials, wages, motor_vehicles, subcontractors, operating, totalCosts, profit };
   });
 }
 
 function aggPnL(data) {
   return {
-    revenue:   data.reduce((a,d)=>a+d.revenue,0),
-    materials: data.reduce((a,d)=>a+d.materials,0),
-    wages:     data.reduce((a,d)=>a+d.wages,0),
-    drawings:  data.reduce((a,d)=>a+d.drawings,0),
-    operating: data.reduce((a,d)=>a+d.operating,0),
-    profit:    data.reduce((a,d)=>a+d.profit,0),
+    revenue:        data.reduce((a,d)=>a+d.revenue,0),
+    materials:      data.reduce((a,d)=>a+d.materials,0),
+    wages:          data.reduce((a,d)=>a+d.wages,0),
+    motor_vehicles: data.reduce((a,d)=>a+d.motor_vehicles,0),
+    subcontractors: data.reduce((a,d)=>a+d.subcontractors,0),
+    operating:      data.reduce((a,d)=>a+d.operating,0),
+    profit:         data.reduce((a,d)=>a+d.profit,0),
   };
 }
 
@@ -1469,7 +1461,7 @@ function renderPnL() {
           <h2>Revenue vs Costs — Monthly</h2>
           <span class="chart-clickable-hint">click bars for detail · hover profit line for value</span>
         </div>
-        <div style="font-size:10px;color:var(--ink-4);letter-spacing:.03em">Materials: monthly Xero data · Wages, drawings &amp; opex: FY26 totals spread evenly — sync Xero monthly for exact breakdown</div>
+        <div style="font-size:10px;color:var(--ink-4);letter-spacing:.03em">Source: Xero bank transactions · 3 years (Jul 2023 – May 2026)</div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
           <span class="ts-range-label">Costs</span>${catBtns}
         </div>
@@ -1511,7 +1503,7 @@ function renderPnLChart(data) {
     }
   ];
 
-  const keyMap = { 'Materials':'materials','Wages & PAYG':'wages','Owner Drawings':'drawings','Operating':'operating' };
+  const keyMap = { 'Materials':'materials','Wages & PAYG':'wages','Motor Vehicles':'motor_vehicles','Subcontractors':'subcontractors','Operating':'operating' };
   PNL_COST_CATEGORIES.forEach(cat => {
     if (!pnlActiveCats.has(cat)) return;
     datasets.push({
@@ -1527,7 +1519,8 @@ function renderPnLChart(data) {
     let costs = 0;
     if (pnlActiveCats.has('Materials'))      costs += d.materials;
     if (pnlActiveCats.has('Wages & PAYG'))   costs += d.wages;
-    if (pnlActiveCats.has('Owner Drawings')) costs += d.drawings;
+    if (pnlActiveCats.has('Motor Vehicles')) costs += d.motor_vehicles;
+    if (pnlActiveCats.has('Subcontractors')) costs += d.subcontractors;
     if (pnlActiveCats.has('Operating'))      costs += d.operating;
     return d.revenue - costs;
   });
@@ -1611,7 +1604,7 @@ function renderPnLTable(data, fromD, toD) {
     </tr></thead>
     <tbody>
       ${row('Revenue', cur.revenue, prev?.revenue)}
-      ${row('Materials', cur.materials, prev?.materials, true, true)}
+      ${row('Materials & Cost of Sales', cur.materials, prev?.materials, true, true)}
       <tr style="font-weight:600">
         <td>Gross Profit</td>
         <td class="amount">${fmt(gpCur)} <span style="font-weight:400;font-size:11px;color:var(--ink-4)">${pct(cur.revenue>0?gpCur/cur.revenue*100:0)}</span></td>
@@ -1619,7 +1612,8 @@ function renderPnLTable(data, fromD, toD) {
         ${prev?`<td class="amount">${fmtDiff(gpCur,gpPrev)}</td>`:''}
       </tr>
       ${row('Wages & PAYG', cur.wages, prev?.wages, true, true)}
-      ${row('Owner Drawings', cur.drawings, prev?.drawings, true, true)}
+      ${row('Motor Vehicles', cur.motor_vehicles, prev?.motor_vehicles, true, true)}
+      ${row('Subcontractors', cur.subcontractors, prev?.subcontractors, true, true)}
       ${row('Operating Expenses', cur.operating, prev?.operating, true, true)}
       <tr style="font-weight:700;border-top:2px solid var(--border-2)">
         <td>Net Profit</td>
@@ -1647,10 +1641,11 @@ function showPnLRevPopup(d) {
 
 function showPnLCostPopup(d) {
   const cats = [
-    {name:'Materials',     val:d.materials},
-    {name:'Wages & PAYG',  val:d.wages},
-    {name:'Owner Drawings',val:d.drawings},
-    {name:'Operating',     val:d.operating},
+    {name:'Materials',      val:d.materials},
+    {name:'Wages & PAYG',   val:d.wages},
+    {name:'Motor Vehicles', val:d.motor_vehicles},
+    {name:'Subcontractors', val:d.subcontractors},
+    {name:'Operating',      val:d.operating},
   ].filter(c=>c.val>0).sort((a,b)=>b.val-a.val);
   const total = cats.reduce((a,c)=>a+c.val,0)||1;
   const bars  = cats.map(c=>{
