@@ -1,6 +1,6 @@
 {
   "meta": {
-    "last_updated": "2026-05-29T06:40:17.087Z",
+    "last_updated": "2026-05-29T06:41:00.449Z",
     "last_xero_sync": "2026-05-28",
     "quotes_synced_at": null,
     "data_note": "FY26 = Jul 2025 to May 2026 (11 months YTD). KPIs & invoices from Xero; timesheets/expenses from data drops."
@@ -328,6 +328,16 @@
       "id": "TS-011",
       "rate": 100,
       "value": 800
+    },
+    {
+      "id": "TS-011",
+      "date": "2026-05-28",
+      "project": "Admin",
+      "hours": 6,
+      "employee": "Seb",
+      "notes": "",
+      "rate": 100,
+      "value": 600
     }
   ],
   "expense_log": [
