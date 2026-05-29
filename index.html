@@ -1120,7 +1120,7 @@ async function claudeBarSend() {
       if (t === 'timesheet')        msg = `✓ Logged ${e.hours}h · ${e.project} · ${e.date}`;
       else if (t === 'expense')     msg = `✓ Logged $${e.amount} · ${e.description.slice(0,35)}`;
       else if (t === 'delete_timesheet' || t === 'delete_expense') msg = `🗑 Deleted · ${data.label}`;
-      else if (t === 'edit_timesheet' || t === 'edit_timesheets') msg = `✏ Updated · ${data.label}`;
+      else if (t === 'edit_timesheet' || t === 'edit_timesheets' || t === 'edit_by_date' || t === 'edit_by_date_multi') msg = `✏ Updated · ${data.label}`;
       else msg = `✓ ${data.label || 'Done'}`;
       claudeToast(msg, 'success');
 
@@ -1142,7 +1142,7 @@ async function claudeBarSend() {
         } else if (t === 'edit_timesheet' && data.updated) {
           const idx = (D.timesheets||[]).findIndex(ts => ts.id === data.updated.id);
           if (idx !== -1) D.timesheets[idx] = data.updated;
-        } else if (t === 'edit_timesheets' && data.updated) {
+        } else if ((t === 'edit_timesheets' || t === 'edit_by_date' || t === 'edit_by_date_multi') && data.updated) {
           const updatedArr = Array.isArray(data.updated) ? data.updated : [data.updated];
           updatedArr.forEach(u => {
             const idx = (D.timesheets||[]).findIndex(ts => ts.id === u.id);
