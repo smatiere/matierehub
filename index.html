@@ -206,9 +206,9 @@ body{padding-bottom:62px}
 <div class="header">
   <div class="header-brand">
     <img src="https://raw.githubusercontent.com/smatiere/matierehub/main/logo.png"
-         alt="Matiere" height="30"
+         alt="Matiere" height="22"
          style="display:block;filter:invert(1);image-rendering:crisp-edges">
-    <span style="font-size:12px;font-weight:700;letter-spacing:.28em;color:rgba(255,255,255,0.2);text-transform:uppercase;align-self:flex-end;padding-bottom:2px;margin-left:1px">HUB</span>
+    <span style="font-size:12px;font-weight:700;letter-spacing:.28em;color:rgba(255,255,255,0.2);text-transform:uppercase;align-self:center;margin-left:4px">HUB</span>
   </div>
   <div style="display:flex;align-items:center;gap:10px">
     <div class="header-meta" id="header-meta"></div>
@@ -727,11 +727,24 @@ let tsRangeFrom  = null;
 let tsRangeTo    = null;
 
 function ds(d) {
-  // Use local date to avoid UTC offset shifting the date for Australian users
+  // Use local date parts — avoids UTC offset shifting the date
   const y = d.getFullYear();
   const m = String(d.getMonth()+1).padStart(2,'0');
   const day = String(d.getDate()).padStart(2,'0');
   return `${y}-${m}-${day}`;
+}
+
+// Returns today's date string in Sydney timezone (AEST/AEDT)
+// More reliable than new Date() which can shift at day boundaries
+function todayStrSydney() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
+  // en-CA locale returns YYYY-MM-DD format
+}
+
+// Returns a Date object for the start of today in local/Sydney time
+function todayMidnight() {
+  const s = todayStrSydney();
+  return new Date(s + 'T00:00:00');
 }
 
 function isWeekend(d) { const w=d.getDay(); return w===0||w===6; }
@@ -749,7 +762,7 @@ function buildColorMap(timesheets, projects) {
 }
 
 function getRange() {
-  const today = new Date(); today.setHours(0,0,0,0);
+  const today = todayMidnight();
   let from, to = new Date(today);
   if (tsRangeMode==='2w')      { from=new Date(today); from.setDate(from.getDate()-14); }
   else if (tsRangeMode==='1m') { from=new Date(today); from.setMonth(from.getMonth()-1); }
@@ -763,7 +776,7 @@ function renderTimesheet() {
   if (!D) return;
   buildColorMap(D.timesheets, D.projects);
 
-  const today = new Date(); today.setHours(0,0,0,0);
+  const today = todayMidnight();
   const twoWeeksAgo = new Date(today); twoWeeksAgo.setDate(twoWeeksAgo.getDate()-14);
   const twelveMonthsAgo = new Date(today); twelveMonthsAgo.setFullYear(today.getFullYear()-1);
 
@@ -857,7 +870,7 @@ function renderTimesheet() {
 
 // ── Calendar ──────────────────────────────────────────────────────────────────
 function renderTsCalendar() {
-  const today = new Date(); today.setHours(0,0,0,0);
+  const today = todayMidnight();
   const y = tsCalMonth.getFullYear(), mo = tsCalMonth.getMonth();
 
   const playerTs = (D.timesheets||[]).filter(t=>(t.employee||'Seb')===tsPlayer);
