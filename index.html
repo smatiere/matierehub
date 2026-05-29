@@ -1324,13 +1324,14 @@ let pnlCompare   = false;
 let pnlCustomFrom = null;
 let pnlCustomTo   = null;
 
-const PNL_COST_CATEGORIES = ['Materials', 'Wages & PAYG', 'Motor Vehicles', 'Subcontractors', 'Operating'];
+const PNL_COST_CATEGORIES = ['Materials', 'Wages & Owner Pay', 'Motor Vehicles', 'Subcontractors', 'Tax & BAS', 'Operating'];
 const PNL_CAT_COLORS = {
-  'Materials':       '#FB5607',
-  'Wages & PAYG':    '#8338EC',
-  'Motor Vehicles':  '#3A86FF',
-  'Subcontractors':  '#FF006E',
-  'Operating':       '#888888',
+  'Materials':        '#FB5607',
+  'Wages & Owner Pay':'#8338EC',
+  'Motor Vehicles':   '#3A86FF',
+  'Subcontractors':   '#FF006E',
+  'Tax & BAS':        '#FFBE0B',
+  'Operating':        '#888888',
 };
 
 function normalizePnLCat(cat, desc) {
@@ -1378,25 +1379,27 @@ function buildPnLData(fromD, toD) {
 
   // Cost arrays — now sourced directly from data.json monthly breakdown
   const m = D.monthly;
-  const wagesMap  = {}, motorMap = {}, subconMap = {}, opMap = {};
+  const wagesMap  = {}, motorMap = {}, subconMap = {}, taxMap = {}, opMap = {};
   (m.periods||[]).forEach((p,i) => {
-    wagesMap[p]  = (m.wages&&m.wages[i])          || 0;
-    motorMap[p]  = (m.motor_vehicles&&m.motor_vehicles[i]) || 0;
-    subconMap[p] = (m.subcontractors&&m.subcontractors[i]) || 0;
-    opMap[p]     = (m.operating&&m.operating[i])   || 0;
+    wagesMap[p]  = (m.wages_owner&&m.wages_owner[i])           || 0;
+    motorMap[p]  = (m.motor_vehicles&&m.motor_vehicles[i])     || 0;
+    subconMap[p] = (m.subcontractors&&m.subcontractors[i])     || 0;
+    taxMap[p]    = (m.tax_bas&&m.tax_bas[i])                   || 0;
+    opMap[p]     = (m.operating&&m.operating[i])               || 0;
   });
 
   return months.map(month => {
-    const label         = new Date(month+'-01').toLocaleDateString('en-AU',{month:'short',year:'2-digit'});
-    const revenue       = revMap[month]||0;
-    const materials     = matMap[month]||0;
-    const wages         = wagesMap[month]||0;
-    const motor_vehicles= motorMap[month]||0;
-    const subcontractors= subconMap[month]||0;
-    const operating     = opMap[month]||0;
-    const totalCosts    = materials+wages+motor_vehicles+subcontractors+operating;
-    const profit        = revenue - totalCosts;
-    return { month, label, revenue, materials, wages, motor_vehicles, subcontractors, operating, totalCosts, profit };
+    const label          = new Date(month+'-01').toLocaleDateString('en-AU',{month:'short',year:'2-digit'});
+    const revenue        = revMap[month]||0;
+    const materials      = matMap[month]||0;
+    const wages_owner    = wagesMap[month]||0;
+    const motor_vehicles = motorMap[month]||0;
+    const subcontractors = subconMap[month]||0;
+    const tax_bas        = taxMap[month]||0;
+    const operating      = opMap[month]||0;
+    const totalCosts     = materials+wages_owner+motor_vehicles+subcontractors+tax_bas+operating;
+    const profit         = revenue - totalCosts;
+    return { month, label, revenue, materials, wages_owner, motor_vehicles, subcontractors, tax_bas, operating, totalCosts, profit };
   });
 }
 
@@ -1404,9 +1407,10 @@ function aggPnL(data) {
   return {
     revenue:        data.reduce((a,d)=>a+d.revenue,0),
     materials:      data.reduce((a,d)=>a+d.materials,0),
-    wages:          data.reduce((a,d)=>a+d.wages,0),
+    wages_owner:    data.reduce((a,d)=>a+d.wages_owner,0),
     motor_vehicles: data.reduce((a,d)=>a+d.motor_vehicles,0),
     subcontractors: data.reduce((a,d)=>a+d.subcontractors,0),
+    tax_bas:        data.reduce((a,d)=>a+d.tax_bas,0),
     operating:      data.reduce((a,d)=>a+d.operating,0),
     profit:         data.reduce((a,d)=>a+d.profit,0),
   };
@@ -1503,7 +1507,7 @@ function renderPnLChart(data) {
     }
   ];
 
-  const keyMap = { 'Materials':'materials','Wages & PAYG':'wages','Motor Vehicles':'motor_vehicles','Subcontractors':'subcontractors','Operating':'operating' };
+  const keyMap = { 'Materials':'materials','Wages & Owner Pay':'wages_owner','Motor Vehicles':'motor_vehicles','Subcontractors':'subcontractors','Tax & BAS':'tax_bas','Operating':'operating' };
   PNL_COST_CATEGORIES.forEach(cat => {
     if (!pnlActiveCats.has(cat)) return;
     datasets.push({
@@ -1517,11 +1521,12 @@ function renderPnLChart(data) {
   // Profit line — only deduct active cost cats
   const profitData = data.map(d => {
     let costs = 0;
-    if (pnlActiveCats.has('Materials'))      costs += d.materials;
-    if (pnlActiveCats.has('Wages & PAYG'))   costs += d.wages;
-    if (pnlActiveCats.has('Motor Vehicles')) costs += d.motor_vehicles;
-    if (pnlActiveCats.has('Subcontractors')) costs += d.subcontractors;
-    if (pnlActiveCats.has('Operating'))      costs += d.operating;
+    if (pnlActiveCats.has('Materials'))         costs += d.materials;
+    if (pnlActiveCats.has('Wages & Owner Pay')) costs += d.wages_owner;
+    if (pnlActiveCats.has('Motor Vehicles'))    costs += d.motor_vehicles;
+    if (pnlActiveCats.has('Subcontractors'))    costs += d.subcontractors;
+    if (pnlActiveCats.has('Tax & BAS'))         costs += d.tax_bas;
+    if (pnlActiveCats.has('Operating'))         costs += d.operating;
     return d.revenue - costs;
   });
   datasets.push({
@@ -1611,9 +1616,10 @@ function renderPnLTable(data, fromD, toD) {
         ${prev?`<td class="amount" style="opacity:.7">${fmt(gpPrev)}</td>`:''}
         ${prev?`<td class="amount">${fmtDiff(gpCur,gpPrev)}</td>`:''}
       </tr>
-      ${row('Wages & PAYG', cur.wages, prev?.wages, true, true)}
+      ${row('Wages & Owner Pay', cur.wages_owner, prev?.wages_owner, true, true)}
       ${row('Motor Vehicles', cur.motor_vehicles, prev?.motor_vehicles, true, true)}
       ${row('Subcontractors', cur.subcontractors, prev?.subcontractors, true, true)}
+      ${row('Tax & BAS', cur.tax_bas, prev?.tax_bas, true, true)}
       ${row('Operating Expenses', cur.operating, prev?.operating, true, true)}
       <tr style="font-weight:700;border-top:2px solid var(--border-2)">
         <td>Net Profit</td>
@@ -1641,11 +1647,12 @@ function showPnLRevPopup(d) {
 
 function showPnLCostPopup(d) {
   const cats = [
-    {name:'Materials',      val:d.materials},
-    {name:'Wages & PAYG',   val:d.wages},
-    {name:'Motor Vehicles', val:d.motor_vehicles},
-    {name:'Subcontractors', val:d.subcontractors},
-    {name:'Operating',      val:d.operating},
+    {name:'Materials',         val:d.materials},
+    {name:'Wages & Owner Pay', val:d.wages_owner},
+    {name:'Motor Vehicles',    val:d.motor_vehicles},
+    {name:'Subcontractors',    val:d.subcontractors},
+    {name:'Tax & BAS',         val:d.tax_bas},
+    {name:'Operating',         val:d.operating},
   ].filter(c=>c.val>0).sort((a,b)=>b.val-a.val);
   const total = cats.reduce((a,c)=>a+c.val,0)||1;
   const bars  = cats.map(c=>{
