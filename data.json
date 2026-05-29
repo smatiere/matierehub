@@ -1,6 +1,6 @@
 {
   "meta": {
-    "last_updated": "2026-05-29T06:41:47.640Z",
+    "last_updated": "2026-05-29T11:30:03.047Z",
     "last_xero_sync": "2026-05-28",
     "quotes_synced_at": null,
     "data_note": "FY26 = Jul 2025 to May 2026 (11 months YTD). KPIs & invoices from Xero; timesheets/expenses from data drops."
@@ -216,7 +216,7 @@
       "name": "IBK - Mosman",
       "status": "Active",
       "quoted": 1248.5,
-      "notes": "IBK (Ibathrooms and kitchen renovations pty Ltd). INV-0343 raised 2026-05-27 \u2014 $1,248.50 AUTHORISED. Hours logged via data drops."
+      "notes": "IBK (Ibathrooms and kitchen renovations pty Ltd). INV-0343 raised 2026-05-27 — $1,248.50 AUTHORISED. Hours logged via data drops."
     },
     {
       "name": "Neil - Balgowlah",
@@ -316,6 +316,16 @@
       "notes": "MatiereHub",
       "rate": 100,
       "value": 600
+    },
+    {
+      "id": "TS-010",
+      "date": "2026-05-29",
+      "project": "Admin",
+      "hours": 8,
+      "employee": "Seb",
+      "notes": "MariereHub",
+      "rate": 100,
+      "value": 800
     }
   ],
   "expense_log": [
