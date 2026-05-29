@@ -216,7 +216,7 @@
       "name": "IBK - Mosman",
       "status": "Active",
       "quoted": 1248.5,
-      "notes": "IBK (Ibathrooms and kitchen renovations pty Ltd). INV-0343 raised 2026-05-27 — $1,248.50 AUTHORISED. Hours logged via data drops."
+      "notes": "IBK (Ibathrooms and kitchen renovations pty Ltd). INV-0343 raised 2026-05-27 \u2014 $1,248.50 AUTHORISED. Hours logged via data drops."
     },
     {
       "name": "Neil - Balgowlah",
@@ -227,7 +227,7 @@
   ],
   "timesheets": [
     {
-      "id": "TS-002",
+      "id": "TS-001",
       "date": "2026-05-25",
       "project": "Neil - Balgowlah",
       "hours": 3,
@@ -237,7 +237,7 @@
       "notes": ""
     },
     {
-      "id": "TS-003",
+      "id": "TS-002",
       "date": "2026-05-21",
       "project": "Mark - Nth Balgowlah",
       "hours": 8,
@@ -247,7 +247,7 @@
       "notes": ""
     },
     {
-      "id": "TS-004",
+      "id": "TS-003",
       "date": "2026-05-20",
       "project": "Mark - Nth Balgowlah",
       "hours": 8,
@@ -257,7 +257,7 @@
       "notes": ""
     },
     {
-      "id": "TS-005",
+      "id": "TS-004",
       "date": "2026-05-25",
       "project": "Admin",
       "hours": 6,
@@ -267,7 +267,7 @@
       "notes": ""
     },
     {
-      "id": "TS-006",
+      "id": "TS-005",
       "date": "2026-05-26",
       "project": "IBK - Mosman",
       "hours": 8,
@@ -277,7 +277,7 @@
       "notes": ""
     },
     {
-      "id": "TS-007",
+      "id": "TS-006",
       "date": "2026-05-27",
       "project": "IBK - Mosman",
       "hours": 6,
@@ -287,7 +287,7 @@
       "notes": ""
     },
     {
-      "id": "TS-008",
+      "id": "TS-007",
       "date": "2026-05-27",
       "project": "Wasted Time",
       "hours": 3,
@@ -298,39 +298,17 @@
     },
     {
       "type": "timesheet",
-      "date": "2026-05-29",
-      "project": "Admin",
-      "hours": 8,
-      "employee": "Seb",
-      "notes": "MatiereHub",
-      "id": "TS-010",
-      "rate": 100,
-      "value": 800
-    },
-    {
-      "type": "timesheet",
       "date": "2026-05-28",
       "project": "Admin",
       "hours": 2,
       "employee": "Seb",
       "notes": "MatiereHub",
-      "id": "TS-010",
+      "id": "TS-008",
       "rate": 100,
       "value": 200
     },
     {
-      "type": "timesheet",
-      "date": "2026-05-29",
-      "project": "Admin",
-      "hours": 8,
-      "employee": "Seb",
-      "notes": "MatiereHub",
-      "id": "TS-011",
-      "rate": 100,
-      "value": 800
-    },
-    {
-      "id": "TS-011",
+      "id": "TS-009",
       "date": "2026-05-28",
       "project": "Admin",
       "hours": 6,
