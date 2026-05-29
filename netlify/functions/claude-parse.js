@@ -34,9 +34,10 @@ exports.handler = async (event) => {
     const sha     = ghData.sha;
 
     // ── 2. Build context ────────────────────────────────────────────────────
-    const sydneyNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'Australia/Sydney' }));
-    const todayStr  = sydneyNow.toISOString().slice(0, 10);
-    const yesterdayStr = new Date(new Date(todayStr).getTime() - 86400000).toISOString().slice(0, 10);
+    // en-CA locale returns YYYY-MM-DD directly — no UTC round-trip, no date shifting
+    const todayStr     = new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
+    const yesterdayStr = new Date(new Date(todayStr + 'T12:00:00').getTime() - 86400000)
+                           .toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
 
     const projectNames = (current.projects || []).map(p => p.name);
     const projectList  = projectNames.join(' | ');
