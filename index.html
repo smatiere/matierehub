@@ -174,18 +174,26 @@ tr:hover td{background:var(--bg-3)}
 .ts-legend-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
 
 /* ── Floating Claude input bar ── */
-#claude-bar{position:fixed;bottom:0;left:0;right:0;z-index:500;background:rgba(0,0,0,.92);border-top:1px solid var(--border-2);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);padding:10px 16px;display:flex;align-items:center;gap:10px}
-#claude-bar-input{flex:1;background:var(--bg-3);border:1px solid var(--border-2);color:var(--ink);padding:9px 14px;border-radius:24px;font-size:13px;outline:none;transition:border-color .2s}
+#claude-bar{position:fixed;bottom:0;left:0;right:0;z-index:500;background:rgba(0,0,0,.94);border-top:1px solid var(--border-2);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);padding:10px 14px;display:flex;align-items:center;gap:8px}
+#claude-bar-input{flex:1;background:var(--bg-3);border:1px solid var(--border-2);color:var(--ink);padding:9px 14px;border-radius:24px;font-size:13px;outline:none;transition:border-color .2s;min-width:0}
 #claude-bar-input:focus{border-color:var(--amber)}
 #claude-bar-input::placeholder{color:var(--ink-4)}
-#claude-bar-btn{background:var(--amber);color:#000;border:none;padding:9px 18px;border-radius:24px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;letter-spacing:.04em;transition:background .15s;flex-shrink:0}
-#claude-bar-btn:hover{background:var(--gold-2)}
-#claude-bar-label{font-size:9px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:var(--ink-4);white-space:nowrap;flex-shrink:0}
+#claude-bar-input:disabled{opacity:.5}
+#claude-mic-btn{width:38px;height:38px;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;transition:all .2s;background:var(--bg-3);border:1px solid var(--border-2)}
+#claude-mic-btn:hover{border-color:var(--ink-4)}
+#claude-mic-btn.listening{background:var(--pink);border-color:var(--pink);animation:pulse .9s infinite}
+#claude-mic-btn.processing{background:var(--bg-3);border-color:var(--border-2);pointer-events:none}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(255,0,110,.4)}50%{box-shadow:0 0 0 8px rgba(255,0,110,0)}}
+#claude-send-btn{background:var(--amber);color:#000;border:none;padding:9px 16px;border-radius:24px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;letter-spacing:.04em;transition:all .15s;flex-shrink:0}
+#claude-send-btn:hover:not(:disabled){background:var(--gold-2)}
+#claude-send-btn:disabled{opacity:.4;cursor:not-allowed}
+#claude-bar-status{font-size:10px;color:var(--ink-4);white-space:nowrap;flex-shrink:0;letter-spacing:.06em;min-width:60px;text-align:right;display:none}
 /* toast */
-#claude-toast{position:fixed;bottom:70px;left:50%;transform:translateX(-50%);background:var(--sage);color:#000;font-size:12px;font-weight:700;padding:8px 18px;border-radius:24px;z-index:600;opacity:0;transition:opacity .2s;pointer-events:none;letter-spacing:.04em;white-space:nowrap}
-#claude-toast.show{opacity:1}
-/* push page content up so bar doesn't overlap */
-body{padding-bottom:58px}
+#claude-toast{position:fixed;bottom:66px;left:50%;transform:translateX(-50%);font-size:12px;font-weight:700;padding:9px 20px;border-radius:24px;z-index:600;opacity:0;transition:opacity .25s;pointer-events:none;letter-spacing:.04em;white-space:nowrap;max-width:90vw;text-align:center}
+#claude-toast.success{background:var(--sage);color:#000;opacity:1}
+#claude-toast.error{background:var(--pink);color:#fff;opacity:1}
+#claude-toast.unclear{background:var(--amber);color:#000;opacity:1}
+body{padding-bottom:62px}
 </style>
 </head>
 <body>
@@ -241,11 +249,12 @@ body{padding-bottom:58px}
 
 <!-- Floating Claude input bar -->
 <div id="claude-bar">
-  <span id="claude-bar-label">Tell Claude</span>
-  <input id="claude-bar-input" type="text" placeholder='e.g. "Log 4h Mark Nth Balgowlah today" or "Add $180 Bunnings expense"' autocomplete="off">
-  <button id="claude-bar-btn" onclick="claudeBarSend()">Copy ↗</button>
+  <button id="claude-mic-btn" onclick="claudeMicToggle()" title="Hold to speak">🎤</button>
+  <input id="claude-bar-input" type="text" placeholder='e.g. "4h Mark Nth Balgowlah" or "$280 Bunnings materials"' autocomplete="off">
+  <span id="claude-bar-status"></span>
+  <button id="claude-send-btn" onclick="claudeBarSend()">Log</button>
 </div>
-<div id="claude-toast">✓ Copied — paste into Claude chat</div>
+<div id="claude-toast"></div>
 
 <script>
 let D = null;
@@ -1003,37 +1012,130 @@ function tsSubmitEntry(dStr) {
   copyToClaudeBar(msg);
 }
 
-// ── Claude bar ────────────────────────────────────────────────────────────────
-function copyToClaudeBar(prefill) {
-  // If prefill provided, put it in the bar input ready to copy
-  if (prefill) {
-    const inp = document.getElementById('claude-bar-input');
-    if (inp) { inp.value = prefill; inp.focus(); inp.select(); }
+// ── Claude bar — voice + text → Netlify function → data.json ─────────────────
+let recognition = null;
+let micActive   = false;
+
+function claudeSetState(state) {
+  // states: idle | listening | processing
+  const mic    = document.getElementById('claude-mic-btn');
+  const inp    = document.getElementById('claude-bar-input');
+  const btn    = document.getElementById('claude-send-btn');
+  const status = document.getElementById('claude-bar-status');
+  mic.className = '';
+  if (state === 'listening') {
+    mic.classList.add('listening');
+    mic.textContent = '⏹';
+    inp.disabled = true;
+    btn.disabled = true;
+    status.style.display = 'block';
+    status.textContent = 'Listening…';
+  } else if (state === 'processing') {
+    mic.classList.add('processing');
+    mic.textContent = '⏳';
+    inp.disabled = true;
+    btn.disabled = true;
+    status.style.display = 'block';
+    status.textContent = 'Parsing…';
+  } else {
+    mic.textContent = '🎤';
+    inp.disabled = false;
+    btn.disabled = false;
+    status.style.display = 'none';
+    status.textContent = '';
   }
-  // Copy to clipboard
-  const text = prefill || (document.getElementById('claude-bar-input')||{}).value || '';
-  if (!text.trim()) return;
-  navigator.clipboard.writeText(text).then(() => showToast()).catch(() => {
-    // fallback for older browsers
-    const ta = document.createElement('textarea');
-    ta.value = text; ta.style.position='fixed'; ta.style.opacity='0';
-    document.body.appendChild(ta); ta.focus(); ta.select();
-    document.execCommand('copy'); document.body.removeChild(ta);
-    showToast();
-  });
 }
 
-function claudeBarSend() {
-  copyToClaudeBar();
+function claudeMicToggle() {
+  if (micActive) { recognition && recognition.stop(); return; }
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    claudeToast('Microphone not supported in this browser', 'error'); return;
+  }
+
+  recognition = new SpeechRecognition();
+  recognition.lang = 'en-AU';
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+
+  recognition.onstart = () => { micActive = true; claudeSetState('listening'); };
+
+  recognition.onresult = (e) => {
+    const transcript = e.results[0][0].transcript;
+    document.getElementById('claude-bar-input').value = transcript;
+    micActive = false;
+    claudeBarSend();
+  };
+
+  recognition.onerror = (e) => {
+    micActive = false;
+    claudeSetState('idle');
+    if (e.error !== 'aborted') claudeToast('Mic error: ' + e.error, 'error');
+  };
+
+  recognition.onend = () => { micActive = false; };
+
+  recognition.start();
 }
 
-function showToast() {
+async function claudeBarSend() {
+  const inp  = document.getElementById('claude-bar-input');
+  const text = inp.value.trim();
+  if (!text) return;
+
+  claudeSetState('processing');
+
+  try {
+    const res = await fetch('/.netlify/functions/claude-parse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    });
+    const data = await res.json();
+
+    claudeSetState('idle');
+
+    if (data.status === 'success') {
+      inp.value = '';
+      const e = data.entry;
+      let msg = '';
+      if (e.type === 'timesheet') msg = `✓ Logged ${e.hours}h · ${e.project} · ${e.date}`;
+      else if (e.type === 'expense') msg = `✓ Logged $${e.amount} · ${e.description.slice(0,35)}`;
+      claudeToast(msg, 'success');
+      // Auto-refresh data after short delay (Netlify rebuild not needed — data refreshes from GitHub)
+      setTimeout(() => loadData(), 3500);
+
+    } else if (data.status === 'unclear') {
+      claudeToast('❓ ' + (data.message || 'Could not understand — try again'), 'unclear');
+    } else {
+      claudeToast('⚠ ' + (data.message || 'Something went wrong'), 'error');
+    }
+
+  } catch (err) {
+    claudeSetState('idle');
+    claudeToast('⚠ Connection error — try again', 'error');
+  }
+}
+
+function claudeToast(msg, type='success') {
   const t = document.getElementById('claude-toast');
-  t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 2200);
+  t.textContent = msg;
+  t.className = type;
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => { t.className = ''; }, type === 'success' ? 3000 : 4500);
 }
 
-// Enter key on claude bar
+// Also wire up popup "Add" to send directly (not copy)
+function tsSubmitEntry(dStr) {
+  const val = (document.getElementById('ts-input')||{}).value||'';
+  if (!val.trim()) return;
+  tsDismissPopup();
+  document.getElementById('claude-bar-input').value = `${val.trim()} on ${dStr}`;
+  claudeBarSend();
+}
+
+// Enter key on bar
 document.addEventListener('DOMContentLoaded', () => {
   const inp = document.getElementById('claude-bar-input');
   if (inp) inp.addEventListener('keydown', e => { if (e.key==='Enter') claudeBarSend(); });
