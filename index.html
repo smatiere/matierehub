@@ -1130,7 +1130,30 @@ async function claudeBarSend() {
       else if (t === 'edit_timesheet')  msg = `✏ Updated · ${data.label}`;
       else msg = `✓ ${data.label || 'Done'}`;
       claudeToast(msg, 'success');
-      setTimeout(() => loadData(), 3500);
+
+      // Optimistic update: apply entry directly to in-memory D and re-render immediately.
+      // No need to wait and re-fetch — the function already confirmed the commit.
+      if (D) {
+        if (t === 'timesheet') {
+          D.timesheets = D.timesheets || [];
+          D.timesheets.push(e);
+        } else if (t === 'expense') {
+          D.expense_log = D.expense_log || [];
+          D.expense_log.push(e);
+        } else if (t === 'delete_timesheet' && data.deleted) {
+          D.timesheets = (D.timesheets||[]).filter(ts => ts.id !== data.deleted.id);
+        } else if (t === 'delete_expense' && data.deleted) {
+          // Remove by matching key fields since we don't have a stable id
+          D.expense_log = (D.expense_log||[]).filter(ex =>
+            !(ex.date === data.deleted.date && ex.description === data.deleted.description && ex.amount === data.deleted.amount));
+        } else if (t === 'edit_timesheet' && data.updated) {
+          const idx = (D.timesheets||[]).findIndex(ts => ts.id === data.updated.id);
+          if (idx !== -1) D.timesheets[idx] = data.updated;
+        }
+        renderAll();
+        // Also re-render timesheet tab if it's active, since renderAll doesn't always call it
+        if (document.getElementById('page-timesheet').classList.contains('active')) renderTimesheet();
+      }
 
     } else if (data.status === 'unclear') {
       claudeToast('❓ ' + (data.message || 'Could not understand — try again'), 'unclear');
