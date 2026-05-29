@@ -172,6 +172,20 @@ tr:hover td{background:var(--bg-3)}
 .ts-legend{display:flex;flex-wrap:wrap;gap:6px 16px;padding:10px 16px;border-bottom:1px solid var(--border)}
 .ts-legend-item{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--ink-3)}
 .ts-legend-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+
+/* ── Floating Claude input bar ── */
+#claude-bar{position:fixed;bottom:0;left:0;right:0;z-index:500;background:rgba(0,0,0,.92);border-top:1px solid var(--border-2);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);padding:10px 16px;display:flex;align-items:center;gap:10px}
+#claude-bar-input{flex:1;background:var(--bg-3);border:1px solid var(--border-2);color:var(--ink);padding:9px 14px;border-radius:24px;font-size:13px;outline:none;transition:border-color .2s}
+#claude-bar-input:focus{border-color:var(--amber)}
+#claude-bar-input::placeholder{color:var(--ink-4)}
+#claude-bar-btn{background:var(--amber);color:#000;border:none;padding:9px 18px;border-radius:24px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;letter-spacing:.04em;transition:background .15s;flex-shrink:0}
+#claude-bar-btn:hover{background:var(--gold-2)}
+#claude-bar-label{font-size:9px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:var(--ink-4);white-space:nowrap;flex-shrink:0}
+/* toast */
+#claude-toast{position:fixed;bottom:70px;left:50%;transform:translateX(-50%);background:var(--sage);color:#000;font-size:12px;font-weight:700;padding:8px 18px;border-radius:24px;z-index:600;opacity:0;transition:opacity .2s;pointer-events:none;letter-spacing:.04em;white-space:nowrap}
+#claude-toast.show{opacity:1}
+/* push page content up so bar doesn't overlap */
+body{padding-bottom:58px}
 </style>
 </head>
 <body>
@@ -223,7 +237,15 @@ tr:hover td{background:var(--bg-3)}
   <div id="ts-popup" class="ts-popup"></div>
 </div>
 
+</div><!-- end #app -->
+
+<!-- Floating Claude input bar -->
+<div id="claude-bar">
+  <span id="claude-bar-label">Tell Claude</span>
+  <input id="claude-bar-input" type="text" placeholder='e.g. "Log 4h Mark Nth Balgowlah today" or "Add $180 Bunnings expense"' autocomplete="off">
+  <button id="claude-bar-btn" onclick="claudeBarSend()">Copy ↗</button>
 </div>
+<div id="claude-toast">✓ Copied — paste into Claude chat</div>
 
 <script>
 let D = null;
@@ -977,12 +999,45 @@ function tsSubmitEntry(dStr) {
   const val = (document.getElementById('ts-input')||{}).value||'';
   if (!val.trim()) return;
   tsDismissPopup();
-  if (window.sendPrompt) {
-    window.sendPrompt(`Log timesheet for ${dStr}: ${val.trim()}`);
-  } else {
-    alert(`Tell Claude in chat:\n"Log timesheet for ${dStr}: ${val.trim()}"`);
-  }
+  const msg = `Log timesheet for ${dStr}: ${val.trim()}`;
+  copyToClaudeBar(msg);
 }
+
+// ── Claude bar ────────────────────────────────────────────────────────────────
+function copyToClaudeBar(prefill) {
+  // If prefill provided, put it in the bar input ready to copy
+  if (prefill) {
+    const inp = document.getElementById('claude-bar-input');
+    if (inp) { inp.value = prefill; inp.focus(); inp.select(); }
+  }
+  // Copy to clipboard
+  const text = prefill || (document.getElementById('claude-bar-input')||{}).value || '';
+  if (!text.trim()) return;
+  navigator.clipboard.writeText(text).then(() => showToast()).catch(() => {
+    // fallback for older browsers
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+    showToast();
+  });
+}
+
+function claudeBarSend() {
+  copyToClaudeBar();
+}
+
+function showToast() {
+  const t = document.getElementById('claude-toast');
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+// Enter key on claude bar
+document.addEventListener('DOMContentLoaded', () => {
+  const inp = document.getElementById('claude-bar-input');
+  if (inp) inp.addEventListener('keydown', e => { if (e.key==='Enter') claudeBarSend(); });
+});
 
 function tsNavMonth(dir) {
   tsCalMonth = new Date(tsCalMonth.getFullYear(), tsCalMonth.getMonth()+dir, 1);
