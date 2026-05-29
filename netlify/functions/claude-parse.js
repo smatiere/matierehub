@@ -42,10 +42,10 @@ exports.handler = async (event) => {
     const projectList  = projectNames.join(' | ');
     const tsCount      = (current.timesheets || []).length;
 
-    // Build a short list of recent timesheet entries for delete/edit context
+    // Build a list of recent timesheet entries with notes for delete/edit context
     const tsAll = current.timesheets || [];
-    const recentTs = tsAll.slice(-20)
-      .map(t => `  ID:${t.id} date:${t.date} project:"${t.project}" hours:${t.hours}`).join('\n');
+    const recentTs = tsAll.slice(-30)
+      .map(t => `  ID:${t.id} date:${t.date} project:"${t.project}" hours:${t.hours} notes:"${t.notes||''}"`).join('\n');
     const expAll = current.expense_log || [];
     const recentExp = expAll.slice(-10)
       .map((e, i) => `  EXP_IDX:${expAll.length - 10 + i} date:${e.date} desc:"${e.description}" amount:${e.amount}`).join('\n');
@@ -60,23 +60,25 @@ PROJECTS: ${projectList}
 NON-BILLABLE NAMES: Admin | Office | Wasted time | Holidays | Sick days | Carer days
 SEB'S RATE: $100/hr ex GST
 
-RECENT TIMESHEET ENTRIES (for delete/edit matching):
+RECENT TIMESHEET ENTRIES (for delete/edit/note matching — scan ALL of these when editing):
 ${recentTs || '  (none)'}
 
-RECENT EXPENSE ENTRIES (for delete/edit matching):
+RECENT EXPENSE ENTRIES:
 ${recentExp || '  (none)'}
 
 INTENT DETECTION:
 - "delete", "remove", "undo", "cancel that" → delete intent
-- "fix", "edit", "change", "update", "correct", "it was X not Y" → edit intent
+- "fix", "edit", "change", "update", "correct", "it was X not Y" → edit_timesheet intent
+- "add note", "add a note", "note that", "clarify", "clarifying", "annotate", "label" → edit intent on notes field
 - Everything else → log intent (timesheet or expense)
 
 DATE PARSING (critical — follow strictly):
 1. If input starts with "DATE:YYYY-MM-DD" (e.g. DATE:2026-05-22), use that exact date, ignore all other date hints
 2. If input contains a bare date like "2026-05-22" or "on 2026-05-22", use that exact date
 3. "yesterday" → ${yesterdayStr}
-4. Day names like "Monday", "last Tuesday" → calculate back from today ${todayStr}
-5. No date mentioned → use today ${todayStr}
+4. "past two days" / "last two days" → ${yesterdayStr} AND ${todayStr}
+5. Day names like "Monday", "last Tuesday" → calculate back from today ${todayStr}
+6. No date mentioned → use today ${todayStr}
 
 FUZZY PROJECT MATCHING:
   "nth balgo" / "north balgowlah" / "mark" → "Mark - Nth Balgowlah"
@@ -91,6 +93,13 @@ EXPENSE CATEGORIES: Materials | Vehicle | Subcontractor | Equipment | Office | O
 
 Employee is always "Seb" unless stated otherwise.
 
+BULK EDIT RULES:
+- If the request targets multiple entries (e.g. "past two days", "all admin this week", "yesterday's entries"),
+  use type "edit_timesheets" (plural) with an "edits" array — one object per matching entry ID.
+- Match entries from the RECENT TIMESHEET ENTRIES list above by date range AND project name.
+- For note updates: set changes.notes to the note text. Extract the note text from phrases like
+  "clarifying X", "note that X", "add note X", "annotating as X".
+
 OUTPUT: Return ONLY a raw JSON object — no markdown, no explanation, no code fences.
 
 --- LOG TIMESHEET ---
@@ -99,14 +108,17 @@ OUTPUT: Return ONLY a raw JSON object — no markdown, no explanation, no code f
 --- LOG EXPENSE ---
 {"type":"expense","date":"YYYY-MM-DD","description":"clean description","category":"Materials","project":"project name","amount":125.50}
 
---- DELETE TIMESHEET (match from RECENT TIMESHEET ENTRIES above) ---
+--- DELETE TIMESHEET ---
 {"type":"delete_timesheet","id":"TS-007","reason":"matched: 2h Admin 2026-05-22"}
 
---- DELETE EXPENSE (match from RECENT EXPENSE ENTRIES above) ---
+--- DELETE EXPENSE ---
 {"type":"delete_expense","idx":5,"reason":"matched: $250 Bunnings materials"}
 
---- EDIT TIMESHEET (only include fields that change) ---
-{"type":"edit_timesheet","id":"TS-007","changes":{"hours":3},"reason":"changed hours from 4 to 3"}
+--- EDIT SINGLE TIMESHEET (only include fields that change) ---
+{"type":"edit_timesheet","id":"TS-007","changes":{"hours":3,"notes":"MatiereHub"},"reason":"changed hours from 4 to 3"}
+
+--- EDIT MULTIPLE TIMESHEETS (use when request targets more than one entry) ---
+{"type":"edit_timesheets","edits":[{"id":"TS-009","changes":{"notes":"MatiereHub"}},{"id":"TS-010","changes":{"notes":"MatiereHub"}}],"reason":"added note to past 2 days admin entries"}
 
 --- CANNOT PARSE ---
 {"type":"unclear","message":"brief explanation"}`;
@@ -200,6 +212,27 @@ OUTPUT: Return ONLY a raw JSON object — no markdown, no explanation, no code f
       }
       entryLabel = `Updated ${ts.id}: ${ts.hours}h on ${ts.project} (${ts.date})`;
       responseExtra = { updated: ts };
+
+    } else if (parsed.type === 'edit_timesheets') {
+      // Bulk edit — apply each change in the edits array
+      const edits = parsed.edits || [];
+      const updated = [];
+      for (const edit of edits) {
+        const ts = (current.timesheets||[]).find(t => t.id === edit.id);
+        if (!ts) continue;
+        const changes = edit.changes || {};
+        Object.assign(ts, changes);
+        if (changes.hours) {
+          ts.hours  = parseFloat(ts.hours);
+          ts.value  = Math.round(ts.hours * (ts.rate||100) * 100) / 100;
+        }
+        updated.push(ts);
+      }
+      if (!updated.length) {
+        return { statusCode: 200, headers, body: JSON.stringify({ status: 'unclear', message: 'No matching entries found to update' }) };
+      }
+      entryLabel = `Updated ${updated.length} entr${updated.length>1?'ies':'y'}: ${updated.map(t=>t.id).join(', ')}`;
+      responseExtra = { updated };
 
     } else {
       return { statusCode: 200, headers, body: JSON.stringify({ status: 'unclear', message: 'Unknown entry type returned by parser.' }) };
