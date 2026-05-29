@@ -1375,7 +1375,15 @@ function buildPnLData(fromD, toD) {
     matMap[p] = (D.monthly.materials&&D.monthly.materials[i])||0;
   });
 
-  // Other costs from expense_log (skip material-category items — covered above)
+  // FY26 cost totals from KPIs — distribute evenly across FY26 months present in monthly data
+  const k = D.kpis;
+  const fy26Months = new Set((D.monthly.periods||[]).filter(p=>p>='2025-07'&&p<='2026-06'));
+  const fy26n = fy26Months.size || 12;
+  const wagesPerMo    = (k.fy26_wages||0) / fy26n;
+  const drawingsPerMo = (k.fy26_owner_drawings||0) / fy26n;
+  const opexPerMo     = (k.fy26_opex||0) / fy26n;
+
+  // Manual expense_log entries (small top-ups logged via Claude chat)
   const expMap = {};
   (D.expense_log||[]).forEach(e => {
     if (!e.date) return;
@@ -1387,13 +1395,14 @@ function buildPnLData(fromD, toD) {
   });
 
   return months.map(month => {
-    const label   = new Date(month+'-01').toLocaleDateString('en-AU',{month:'short',year:'2-digit'});
+    const label    = new Date(month+'-01').toLocaleDateString('en-AU',{month:'short',year:'2-digit'});
     const revenue  = revMap[month]||0;
     const materials= matMap[month]||0;
+    const inFY26   = fy26Months.has(month);
     const me       = expMap[month]||{};
-    const wages    = me['Wages & PAYG']||0;
-    const drawings = me['Owner Drawings']||0;
-    const operating= me['Operating']||0;
+    const wages    = (inFY26 ? wagesPerMo : 0)    + (me['Wages & PAYG']||0);
+    const drawings = (inFY26 ? drawingsPerMo : 0)  + (me['Owner Drawings']||0);
+    const operating= (inFY26 ? opexPerMo : 0)      + (me['Operating']||0);
     const totalCosts = materials+wages+drawings+operating;
     const profit   = revenue - totalCosts;
     return { month, label, revenue, materials, wages, drawings, operating, totalCosts, profit };
@@ -1460,6 +1469,7 @@ function renderPnL() {
           <h2>Revenue vs Costs — Monthly</h2>
           <span class="chart-clickable-hint">click bars for detail · hover profit line for value</span>
         </div>
+        <div style="font-size:10px;color:var(--ink-4);letter-spacing:.03em">Materials: monthly Xero data · Wages, drawings &amp; opex: FY26 totals spread evenly — sync Xero monthly for exact breakdown</div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
           <span class="ts-range-label">Costs</span>${catBtns}
         </div>
