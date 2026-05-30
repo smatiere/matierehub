@@ -1529,28 +1529,55 @@ function renderPnLChart(data) {
     if (pnlActiveCats.has('Operating'))         costs += d.operating;
     return d.revenue - costs;
   });
+  // Plugin: draw profit line with precise color split at zero crossing
+  const profitLinePlugin = {
+    id: 'profitLine',
+    afterDatasetsDraw(chart) {
+      const dsIdx = chart.data.datasets.findIndex(d => d.label === 'Profit');
+      if (dsIdx < 0) return;
+      const meta = chart.getDatasetMeta(dsIdx);
+      if (!meta.visible) return;
+      const raw = chart.data.datasets[dsIdx].data;
+      const pts = meta.data;
+      const zero = chart.scales['y2'].getPixelForValue(0);
+      const c = chart.ctx;
+      c.save(); c.lineWidth = 2.5; c.lineJoin = 'round'; c.lineCap = 'round';
+      for (let i = 0; i < pts.length - 1; i++) {
+        const v0 = raw[i] ?? 0, v1 = raw[i+1] ?? 0;
+        const x0 = pts[i].x, y0 = pts[i].y, x1 = pts[i+1].x, y1 = pts[i+1].y;
+        const pos0 = v0 >= 0, pos1 = v1 >= 0;
+        if (pos0 === pos1) {
+          c.beginPath(); c.strokeStyle = pos0 ? '#05C46B' : '#FF006E';
+          c.moveTo(x0,y0); c.lineTo(x1,y1); c.stroke();
+        } else {
+          const t = Math.abs(v0) / (Math.abs(v0) + Math.abs(v1));
+          const xMid = x0 + t*(x1-x0);
+          c.beginPath(); c.strokeStyle = pos0 ? '#05C46B' : '#FF006E';
+          c.moveTo(x0,y0); c.lineTo(xMid,zero); c.stroke();
+          c.beginPath(); c.strokeStyle = pos1 ? '#05C46B' : '#FF006E';
+          c.moveTo(xMid,zero); c.lineTo(x1,y1); c.stroke();
+        }
+      }
+      c.restore();
+    }
+  };
+
   datasets.push({
     type:'line', label:'Profit',
     data: profitData,
-    borderColor:'#05C46B',
-    backgroundColor: ctx => {
-      const chart = ctx.chart; const {ctx:c, chartArea} = chart;
-      if (!chartArea) return 'transparent';
-      const g = c.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
-      g.addColorStop(0, 'rgba(5,196,107,0.10)'); g.addColorStop(1, 'rgba(255,0,110,0.10)');
-      return g;
-    },
-    fill: 'origin',
-    segment: {
-      borderColor: ctx => ctx.p1.parsed.y < 0 ? '#FF006E' : '#05C46B',
-    },
+    borderColor:'transparent',
+    backgroundColor:'transparent',
+    fill: false,
+    showLine: false,
     pointBackgroundColor: ctx => (ctx.raw||0) < 0 ? '#FF006E' : '#05C46B',
-    tension:0.4, pointRadius:3,
-    borderWidth:2, yAxisID:'y2', order:1,
+    pointBorderColor: 'transparent',
+    tension:0, pointRadius:3,
+    borderWidth:0, yAxisID:'y2', order:1,
   });
 
   charts['pnl-main'] = new Chart(ctx, {
     type:'bar',
+    plugins: [profitLinePlugin],
     data:{ labels, datasets },
     options:{
       responsive:true, maintainAspectRatio:false,
