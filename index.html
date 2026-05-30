@@ -1532,8 +1532,20 @@ function renderPnLChart(data) {
   datasets.push({
     type:'line', label:'Profit',
     data: profitData,
-    borderColor:'#05C46B', backgroundColor:'rgba(5,196,107,0.06)',
-    fill:false, tension:0.4, pointRadius:3, pointBackgroundColor:'#05C46B',
+    borderColor:'#05C46B',
+    backgroundColor: ctx => {
+      const chart = ctx.chart; const {ctx:c, chartArea} = chart;
+      if (!chartArea) return 'transparent';
+      const g = c.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+      g.addColorStop(0, 'rgba(5,196,107,0.10)'); g.addColorStop(1, 'rgba(255,0,110,0.10)');
+      return g;
+    },
+    fill: 'origin',
+    segment: {
+      borderColor: ctx => ctx.p1.parsed.y < 0 ? '#FF006E' : '#05C46B',
+    },
+    pointBackgroundColor: ctx => (ctx.raw||0) < 0 ? '#FF006E' : '#05C46B',
+    tension:0.4, pointRadius:3,
     borderWidth:2, yAxisID:'y2', order:1,
   });
 
@@ -1563,11 +1575,40 @@ function renderPnLChart(data) {
   });
 }
 
+// Track expanded categories in P&L table
+const pnlExpandedCats = new Set();
+
+function pnlToggleExpand(cat) {
+  if (pnlExpandedCats.has(cat)) pnlExpandedCats.delete(cat);
+  else pnlExpandedCats.add(cat);
+  const { fromD, toD } = getPnLDateRange();
+  renderPnLTable(buildPnLData(fromD, toD), fromD, toD);
+}
+
+function getCatDetailForPeriod(cat, months) {
+  // months: array of 'YYYY-MM' strings
+  if (!D.cost_detail_monthly || !D.account_categories) return [];
+  const periods = D.monthly.periods || [];
+  const result = {};
+  for (const [acc, accCat] of Object.entries(D.account_categories)) {
+    if (accCat !== cat) continue;
+    const arr = D.cost_detail_monthly[acc] || [];
+    let total = 0;
+    for (const m of months) {
+      const idx = periods.indexOf(m);
+      if (idx >= 0) total += arr[idx] || 0;
+    }
+    if (total > 0) result[acc] = total;
+  }
+  return Object.entries(result).sort((a,b) => b[1]-a[1]);
+}
+
 function renderPnLTable(data, fromD, toD) {
   const el = document.getElementById('pnl-table-wrap');
   if (!el) return;
 
   const cur = aggPnL(data);
+  const months = data.map(d => d.month);
 
   let prev = null;
   if (pnlCompare) {
@@ -1584,17 +1625,40 @@ function renderPnLTable(data, fromD, toD) {
   const fromLbl = fromD.toLocaleDateString('en-AU',{month:'short',year:'numeric'});
   const toLbl   = toD.toLocaleDateString('en-AU',{month:'short',year:'numeric'});
 
-  const row = (label, curV, prevV, isNeg=false, indented=false, isSummary=false) => {
-    const s1 = isSummary ? 'font-weight:700;border-top:1px solid var(--border-2)' : '';
-    const s2 = indented  ? 'padding-left:24px;color:var(--ink-4)' : '';
+  const row = (label, curV, prevV, isNeg=false, indented=false) => {
+    const s2 = indented ? 'padding-left:24px;color:var(--ink-4)' : '';
     const vc = isNeg ? 'color:var(--orange)' : '';
     const fv = v => isNeg && v > 0 ? `(${fmt(v)})` : fmt(v);
-    return `<tr style="${s1}">
+    return `<tr>
       <td style="${s2}">${label}</td>
       <td class="amount" style="${vc}">${fv(curV)}</td>
       ${prev?`<td class="amount" style="${vc};opacity:.7">${fv(prevV||0)}</td>`:''}
       ${prev?`<td class="amount">${fmtDiff(curV,prevV||0)}</td>`:''}
     </tr>`;
+  };
+
+  // Expandable category row + sub-rows
+  const catRow = (label, catKey, curV, prevV) => {
+    const expanded = pnlExpandedCats.has(catKey);
+    const chevron = `<span style="display:inline-block;transition:transform .2s;transform:rotate(${expanded?'90deg':'0deg'});margin-right:6px;font-size:10px;opacity:.6">▶</span>`;
+    const detail = expanded ? getCatDetailForPeriod(catKey, months) : [];
+    const detailRows = detail.map(([acc, total]) =>
+      `<tr style="background:var(--bg-2)">
+        <td style="padding-left:44px;color:var(--ink-4);font-size:11px">${acc}</td>
+        <td class="amount" style="color:var(--orange);font-size:11px">(${fmt(total)})</td>
+        ${prev?`<td></td>`:''}${prev?`<td></td>`:''}
+      </tr>`
+    ).join('');
+    // Tax & BAS note
+    const taxNote = (catKey === 'Tax & BAS' && expanded)
+      ? `<tr style="background:var(--bg-2)"><td colspan="${prev?4:2}" style="padding-left:44px;font-size:11px;color:var(--ink-4);padding-top:2px;padding-bottom:8px">⚠ FY26 shows $0 — BAS payments not yet entered in Xero for this period.</td></tr>`
+      : '';
+    return `<tr style="cursor:pointer" onclick="pnlToggleExpand('${catKey}')">
+      <td style="padding-left:24px;color:var(--ink-4)">${chevron}${label}</td>
+      <td class="amount" style="color:var(--orange)">(${fmt(curV)})</td>
+      ${prev?`<td class="amount" style="color:var(--orange);opacity:.7">(${fmt(prevV||0)})</td>`:''}
+      ${prev?`<td class="amount">${fmtDiff(curV,prevV||0)}</td>`:''}
+    </tr>${detailRows}${taxNote}`;
   };
 
   const gpCur  = cur.revenue - cur.materials;
@@ -1609,18 +1673,18 @@ function renderPnLTable(data, fromD, toD) {
     </tr></thead>
     <tbody>
       ${row('Revenue', cur.revenue, prev?.revenue)}
-      ${row('Materials & Cost of Sales', cur.materials, prev?.materials, true, true)}
-      <tr style="font-weight:600">
+      ${catRow('Materials & Cost of Sales', 'Materials', cur.materials, prev?.materials)}
+      <tr style="font-weight:600;border-top:1px solid var(--border-2)">
         <td>Gross Profit</td>
         <td class="amount">${fmt(gpCur)} <span style="font-weight:400;font-size:11px;color:var(--ink-4)">${pct(cur.revenue>0?gpCur/cur.revenue*100:0)}</span></td>
         ${prev?`<td class="amount" style="opacity:.7">${fmt(gpPrev)}</td>`:''}
         ${prev?`<td class="amount">${fmtDiff(gpCur,gpPrev)}</td>`:''}
       </tr>
-      ${row('Wages & Owner Pay', cur.wages_owner, prev?.wages_owner, true, true)}
-      ${row('Motor Vehicles', cur.motor_vehicles, prev?.motor_vehicles, true, true)}
-      ${row('Subcontractors', cur.subcontractors, prev?.subcontractors, true, true)}
-      ${row('Tax & BAS', cur.tax_bas, prev?.tax_bas, true, true)}
-      ${row('Operating Expenses', cur.operating, prev?.operating, true, true)}
+      ${catRow('Wages & Owner Pay', 'Wages & Owner Pay', cur.wages_owner, prev?.wages_owner)}
+      ${catRow('Motor Vehicles', 'Motor Vehicles', cur.motor_vehicles, prev?.motor_vehicles)}
+      ${catRow('Subcontractors', 'Subcontractors', cur.subcontractors, prev?.subcontractors)}
+      ${catRow('Tax & BAS', 'Tax & BAS', cur.tax_bas, prev?.tax_bas)}
+      ${catRow('Operating Expenses', 'Operating', cur.operating, prev?.operating)}
       <tr style="font-weight:700;border-top:2px solid var(--border-2)">
         <td>Net Profit</td>
         <td class="amount" style="color:${cur.profit>=0?'var(--sage)':'var(--pink)'}">${fmt(cur.profit)} <span style="font-weight:400;font-size:11px;color:var(--ink-4)">${pct(cur.revenue>0?cur.profit/cur.revenue*100:0)}</span></td>
