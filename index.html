@@ -1529,7 +1529,7 @@ function renderPnLChart(data) {
     if (pnlActiveCats.has('Operating'))         costs += d.operating;
     return d.revenue - costs;
   });
-  // Plugin: draw profit line with precise color split at zero crossing
+  // Plugin: draw profit line as smooth bezier with precise color split at zero crossing
   const profitLinePlugin = {
     id: 'profitLine',
     afterDatasetsDraw(chart) {
@@ -1541,21 +1541,51 @@ function renderPnLChart(data) {
       const pts = meta.data;
       const zero = chart.scales['y2'].getPixelForValue(0);
       const c = chart.ctx;
-      c.save(); c.lineWidth = 2.5; c.lineJoin = 'round'; c.lineCap = 'round';
-      for (let i = 0; i < pts.length - 1; i++) {
-        const v0 = raw[i] ?? 0, v1 = raw[i+1] ?? 0;
-        const x0 = pts[i].x, y0 = pts[i].y, x1 = pts[i+1].x, y1 = pts[i+1].y;
-        const pos0 = v0 >= 0, pos1 = v1 >= 0;
-        if (pos0 === pos1) {
-          c.beginPath(); c.strokeStyle = pos0 ? '#05C46B' : '#FF006E';
-          c.moveTo(x0,y0); c.lineTo(x1,y1); c.stroke();
+
+      const lp = (a,b,t) => a + t*(b-a);
+      const byY = (y0,c1,c2,y3,t) => { const u=1-t; return u*u*u*y0+3*u*u*t*c1+3*u*t*t*c2+t*t*t*y3; };
+      // Bisection: find t where bezier y = target
+      function findT(y0,c1,c2,y3,target) {
+        let lo=0,hi=1;
+        for (let n=0;n<52;n++) {
+          const m=(lo+hi)/2, v=byY(y0,c1,c2,y3,m)-target;
+          if (Math.abs(v)<0.01) return m;
+          if ((byY(y0,c1,c2,y3,lo)-target)*v<0) hi=m; else lo=m;
+        }
+        return (lo+hi)/2;
+      }
+      // De Casteljau split at t — returns [firstHalf, secondHalf] each as [p0,p1,p2,p3]
+      function split(p0,p1,p2,p3,t) {
+        const a={x:lp(p0.x,p1.x,t),y:lp(p0.y,p1.y,t)};
+        const b={x:lp(p1.x,p2.x,t),y:lp(p1.y,p2.y,t)};
+        const cc={x:lp(p2.x,p3.x,t),y:lp(p2.y,p3.y,t)};
+        const d={x:lp(a.x,b.x,t),y:lp(a.y,b.y,t)};
+        const e={x:lp(b.x,cc.x,t),y:lp(b.y,cc.y,t)};
+        const f={x:lp(d.x,e.x,t),y:lp(d.y,e.y,t)};
+        return [[p0,a,d,f],[f,e,cc,p3]];
+      }
+      function drawB(q,col) {
+        c.beginPath(); c.strokeStyle=col;
+        c.moveTo(q[0].x,q[0].y);
+        c.bezierCurveTo(q[1].x,q[1].y,q[2].x,q[2].y,q[3].x,q[3].y);
+        c.stroke();
+      }
+
+      c.save(); c.lineWidth=2.5; c.lineJoin='round'; c.lineCap='round';
+      for (let i=0; i<pts.length-1; i++) {
+        const v0=raw[i]??0, v1=raw[i+1]??0;
+        const p0={x:pts[i].x,   y:pts[i].y};
+        const p1={x:pts[i].cp2x??lp(pts[i].x,pts[i+1].x,1/3), y:pts[i].cp2y??lp(pts[i].y,pts[i+1].y,1/3)};
+        const p2={x:pts[i+1].cp1x??lp(pts[i].x,pts[i+1].x,2/3), y:pts[i+1].cp1y??lp(pts[i].y,pts[i+1].y,2/3)};
+        const p3={x:pts[i+1].x, y:pts[i+1].y};
+        const pos0=v0>=0, pos1=v1>=0;
+        if (pos0===pos1) {
+          drawB([p0,p1,p2,p3], pos0?'#05C46B':'#FF006E');
         } else {
-          const t = Math.abs(v0) / (Math.abs(v0) + Math.abs(v1));
-          const xMid = x0 + t*(x1-x0);
-          c.beginPath(); c.strokeStyle = pos0 ? '#05C46B' : '#FF006E';
-          c.moveTo(x0,y0); c.lineTo(xMid,zero); c.stroke();
-          c.beginPath(); c.strokeStyle = pos1 ? '#05C46B' : '#FF006E';
-          c.moveTo(xMid,zero); c.lineTo(x1,y1); c.stroke();
+          const t=findT(p0.y,p1.y,p2.y,p3.y,zero);
+          const [first,second]=split(p0,p1,p2,p3,t);
+          drawB(first,  pos0?'#05C46B':'#FF006E');
+          drawB(second, pos1?'#05C46B':'#FF006E');
         }
       }
       c.restore();
@@ -1571,7 +1601,7 @@ function renderPnLChart(data) {
     showLine: false,
     pointBackgroundColor: ctx => (ctx.raw||0) < 0 ? '#FF006E' : '#05C46B',
     pointBorderColor: 'transparent',
-    tension:0, pointRadius:3,
+    tension:0.4, pointRadius:3,
     borderWidth:0, yAxisID:'y2', order:1,
   });
 
