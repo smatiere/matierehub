@@ -299,28 +299,84 @@ If you cannot confidently parse the input: {"action":"unclear","message":"brief 
     current.meta              = current.meta || {};
     current.meta.last_updated = new Date().toISOString();
 
-    // ── 6. Push to GitHub ───────────────────────────────────────────────────
-    const newContent = Buffer.from(JSON.stringify(current, null, 2)).toString('base64');
-    const pushRes = await fetch(
-      `https://api.github.com/repos/${GITHUB_REPO}/contents/${GITHUB_FILE}`,
-      {
-        method: 'PUT',
-        headers: {
-          'Authorization': `token ${GITHUB_TOKEN}`,
-          'Content-Type': 'application/json',
-          'User-Agent': 'MatiereHub'
-        },
-        body: JSON.stringify({
-          message: `Hub: ${entryLabel}`,
-          content: newContent,
-          sha,
-          branch: 'main'
-        })
-      }
-    );
+    // ── 6. Push to GitHub (with retry on SHA conflict) ──────────────────────
+    let pushData;
+    let currentForPush = current;
+    let shaForPush = sha;
 
-    const pushData = await pushRes.json();
-    if (!pushRes.ok) throw new Error(`GitHub push failed: ${pushData.message}`);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const newContent = Buffer.from(JSON.stringify(currentForPush, null, 2)).toString('base64');
+      const pushRes = await fetch(
+        `https://api.github.com/repos/${GITHUB_REPO}/contents/${GITHUB_FILE}`,
+        {
+          method: 'PUT',
+          headers: {
+            'Authorization': `token ${GITHUB_TOKEN}`,
+            'Content-Type': 'application/json',
+            'User-Agent': 'MatiereHub'
+          },
+          body: JSON.stringify({
+            message: `Hub: ${entryLabel}`,
+            content: newContent,
+            sha: shaForPush,
+            branch: 'main'
+          })
+        }
+      );
+
+      pushData = await pushRes.json();
+
+      if (pushRes.ok) break; // success
+
+      // 409 or 422 = SHA conflict — someone else pushed between our read and write.
+      // GitHub returns 422 "sha does not match" for stale SHAs (not 409).
+      // Re-fetch the latest version, re-apply our action on top of it, then retry.
+      if ((pushRes.status === 409 || pushRes.status === 422) && attempt < 2) {
+        console.log(`SHA conflict on attempt ${attempt + 1}, re-fetching and retrying...`);
+        const ghRetry = await fetch(
+          `https://api.github.com/repos/${GITHUB_REPO}/contents/${GITHUB_FILE}`,
+          { headers: { 'Authorization': `token ${GITHUB_TOKEN}`, 'User-Agent': 'MatiereHub' } }
+        );
+        if (!ghRetry.ok) throw new Error(`GitHub re-fetch failed: ${ghRetry.status}`);
+        const ghRetryData = await ghRetry.json();
+        const freshData = JSON.parse(Buffer.from(ghRetryData.content, 'base64').toString('utf-8'));
+        shaForPush = ghRetryData.sha;
+
+        // Re-apply our action onto the fresh copy
+        if (parsed.action === 'new' && parsed.type === 'timesheet') {
+          freshData.timesheets = freshData.timesheets || [];
+          // Avoid duplicate if somehow already applied
+          if (!freshData.timesheets.find(t => t.id === responseExtra.entry?.id)) {
+            freshData.timesheets.push(responseExtra.entry);
+          }
+        } else if (parsed.action === 'new' && parsed.type === 'expense') {
+          freshData.expense_log = freshData.expense_log || [];
+          freshData.expense_log.push(responseExtra.entry);
+        } else if (parsed.action === 'delete') {
+          const idx = (freshData.timesheets || []).findIndex(t => t.id === parsed.id);
+          if (idx !== -1) freshData.timesheets.splice(idx, 1);
+        } else if (parsed.action === 'edit') {
+          for (const ts of (freshData.timesheets || [])) {
+            if (ts.date !== parsed.date) continue;
+            if (parsed.project && ts.project !== parsed.project) continue;
+            Object.assign(ts, parsed.changes || {});
+            if (parsed.changes?.hours) {
+              ts.hours = parseFloat(ts.hours);
+              ts.value = Math.round(ts.hours * (ts.rate || 100) * 100) / 100;
+            }
+          }
+        }
+        freshData.meta = freshData.meta || {};
+        freshData.meta.last_updated = new Date().toISOString();
+        currentForPush = freshData;
+        continue; // retry loop
+      }
+
+      // Any other error — bail out
+      throw new Error(`GitHub push failed: ${pushData.message}`);
+    }
+
+    if (!pushData?.commit) throw new Error(`GitHub push failed after retries: ${pushData?.message}`);
 
     return {
       statusCode: 200,
