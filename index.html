@@ -419,8 +419,10 @@ function renderOverview(k, m) {
 // ── Cash & Invoices ───────────────────────────────────────────────────────────
 function renderCash(k) {
   const invoices = D.open_invoices || [];
+  const today = new Date(); today.setHours(0,0,0,0);
   const rows = invoices.map(inv => {
-    const age = inv.days_old;
+    const invoiceDate = new Date(inv.date + 'T00:00:00');
+    const age = Math.floor((today - invoiceDate) / 86400000);
     const badge = age > 60 ? 'badge-red' : age > 30 ? 'badge-amber' : 'badge-blue';
     const ageLabel = age > 60 ? 'Overdue 60+d' : age > 30 ? 'Overdue 30+d' : age + 'd old';
     return `<tr><td>${inv.invoice}</td><td>${inv.contact}</td><td>${inv.date}</td>
