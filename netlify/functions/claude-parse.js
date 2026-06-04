@@ -126,7 +126,7 @@ ${recentTs || '(none yet)'}
 
 ## PROJECT MATCHING
 - Match against ACTIVE PROJECTS list using common sense (abbreviations, first names, suburbs)
-- "mark" or "nth balgo" → first project containing "Mark" or "Balgowlah"
+- "mark", "nth balgo", "mark shippen" → first project containing "Mark Shippen" (not "Walkway")
 - "rob" → first project containing "Rob"
 - "ibk" or "mosman" → first project containing "IBK" or "Mosman"
 - "neil" → first project containing "Neil"
