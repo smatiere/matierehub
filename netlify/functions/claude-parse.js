@@ -88,12 +88,15 @@ DATE RULES:
 - day name e.g. "Monday" → calculate from today ${todayStr}
 - no date mentioned → ${todayStr}
 
-PROJECT MATCHING (fuzzy):
-"nth balgo" or "mark" → "Mark - Nth Balgowlah"
-"rob" or "rob balgo" → "Rob - Balgowlah"
-"ibk" or "mosman" → "IBK - Mosman"
-"neil" → "Neil - Balgowlah"
-"admin" or "office" → "Admin"
+PROJECT MATCHING:
+- If the input contains "new project" followed by a name → set "new_project":true and use the name EXACTLY as given (preserve capitalisation, spacing, everything)
+- Otherwise fuzzy-match against the PROJECTS list above
+- "nth balgo" or "mark" (no other qualifier) → "Mark - Nth Balgowlah"
+- "rob" or "rob balgo" → "Rob - Balgowlah"
+- "ibk" or "mosman" → "IBK - Mosman"
+- "neil" → "Neil - Balgowlah"
+- "admin" or "office" → "Admin"
+- If "new project" is stated, add "new_project":true to the JSON so the server creates it
 
 HOURS: "4h"=4, "half day"=4, "full day"=8, "3 and a half"=3.5
 EXPENSE CATEGORIES: Materials, Vehicle, Subcontractor, Equipment, Office, Other
@@ -145,20 +148,40 @@ If you cannot parse the input: {"action":"unclear","message":"brief reason"}`;
     }
 
     // ── Server-side project validation ──────────────────────────────────────
-    // Non-billable categories that are always valid even if not in projects list
     const NON_BILLABLE = ['Admin', 'Office', 'Wasted time', 'Holidays', 'Sick days', 'Carer days'];
     if (parsed.action === 'new' && parsed.type === 'timesheet' && parsed.project) {
       const validProjects = [...projectList, ...NON_BILLABLE];
-      const isValid = validProjects.some(p => p.toLowerCase() === parsed.project.toLowerCase());
-      if (!isValid) {
-        return { statusCode: 200, headers, body: JSON.stringify({
-          status: 'unclear',
-          message: `Unknown project "${parsed.project}". Valid projects: ${projectList.join(', ')}`
-        })};
+
+      if (parsed.new_project) {
+        // "new project" intent — create it if not already in the list
+        const alreadyExists = validProjects.some(p => p.toLowerCase() === parsed.project.toLowerCase());
+        if (!alreadyExists) {
+          current.projects = current.projects || [];
+          current.projects.push({
+            name: parsed.project,
+            status: 'Active',
+            quoted: 0,
+            notes: `Created ${new Date().toISOString().slice(0,10)}`
+          });
+          // Refresh projectList after adding
+          projectList.push(parsed.project);
+        }
+        // Use the exact name as given (or normalise to existing if duplicate)
+        const canonical = [...projectList, ...NON_BILLABLE].find(p => p.toLowerCase() === parsed.project.toLowerCase());
+        if (canonical) parsed.project = canonical;
+      } else {
+        // Normal fuzzy match — must exist
+        const isValid = validProjects.some(p => p.toLowerCase() === parsed.project.toLowerCase());
+        if (!isValid) {
+          return { statusCode: 200, headers, body: JSON.stringify({
+            status: 'unclear',
+            message: `Unknown project "${parsed.project}". Valid projects: ${projectList.join(', ')}`
+          })};
+        }
+        // Normalise casing
+        const match = validProjects.find(p => p.toLowerCase() === parsed.project.toLowerCase());
+        if (match) parsed.project = match;
       }
-      // Normalise casing to match the stored project name exactly
-      const match = validProjects.find(p => p.toLowerCase() === parsed.project.toLowerCase());
-      if (match) parsed.project = match;
     }
 
     // ── 5. Apply action ─────────────────────────────────────────────────────
