@@ -134,6 +134,7 @@ ${recentTs || '(none yet)'}
 
 ## PROJECT MATCHING — ALWAYS pick from ACTIVE PROJECTS list above
 - If unsure, pick the closest name from ACTIVE PROJECTS. Do NOT invent a new name.
+- "mark walkway", "walkway", "balgo walkway" → project containing "Walkway"
 - "mark", "nth balgo", "mark shippen", "balgowlah" (without "walkway") → "${exampleProject}"
 - "rob" → project containing "Rob"
 - "ibk", "mosman" → project containing "IBK" or "Mosman"
