@@ -10,6 +10,15 @@ Format: **[Status]** Description → Fix applied
 
 ---
 
+## Fixed (2026-06-05)
+
+**[FIXED]** Time Distribution treemap showed false "Not logged" hours for today
+- **Problem:** The treemap's available-hours loop ran `d <= to` where `to = today`. This added 8h to `avail` for today (an in-progress day), while today's partial hours were subtracted from it, surfacing a "Not logged Xh" block even though the KPI tile correctly showed 0 missing days.
+- **Root cause:** The KPI tile loop uses `d < today` (excludes today). The treemap loop used `d <= to` (included today). Inconsistent boundary.
+- **Fix:** Added `&& ds(d) < todayStr` to the treemap's avail loop so today is excluded from available hours — matching the KPI tile's logic that an in-progress day is not a gap.
+
+---
+
 ## Fixed (2026-06-04)
 
 **[FIXED]** Timesheet ID collision after delete
