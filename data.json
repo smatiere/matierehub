@@ -6864,6 +6864,26 @@
   ],
   "timesheets": [
     {
+      "id": "TS-004",
+      "date": "2026-05-20",
+      "project": "Mark Shippen \u2013 Nth Balgowlah",
+      "hours": 8,
+      "rate": 100,
+      "value": 800,
+      "employee": "Seb",
+      "notes": ""
+    },
+    {
+      "id": "TS-003",
+      "date": "2026-05-21",
+      "project": "Mark Shippen \u2013 Nth Balgowlah",
+      "hours": 8,
+      "rate": 100,
+      "value": 800,
+      "employee": "Seb",
+      "notes": ""
+    },
+    {
       "id": "TS-001",
       "date": "2026-05-25",
       "project": "Admin",
@@ -6880,26 +6900,6 @@
       "hours": 3,
       "rate": 100,
       "value": 300,
-      "employee": "Seb",
-      "notes": ""
-    },
-    {
-      "id": "TS-003",
-      "date": "2026-05-21",
-      "project": "Mark Shippen – Nth Balgowlah",
-      "hours": 8,
-      "rate": 100,
-      "value": 800,
-      "employee": "Seb",
-      "notes": ""
-    },
-    {
-      "id": "TS-004",
-      "date": "2026-05-20",
-      "project": "Mark Shippen – Nth Balgowlah",
-      "hours": 8,
-      "rate": 100,
-      "value": 800,
       "employee": "Seb",
       "notes": ""
     },
@@ -6936,6 +6936,16 @@
     {
       "id": "TS-009",
       "date": "2026-05-28",
+      "project": "Admin",
+      "hours": 8,
+      "rate": 100,
+      "value": 800,
+      "employee": "Seb",
+      "notes": ""
+    },
+    {
+      "id": "TS-010",
+      "date": "2026-05-29",
       "project": "Admin",
       "hours": 8,
       "rate": 100,
@@ -6981,6 +6991,16 @@
       "hours": 8,
       "rate": 100,
       "total_ex_gst": 800,
+      "notes": ""
+    },
+    {
+      "id": "TS-011",
+      "date": "2026-06-04",
+      "project": "Mark - Nth Balgo Walkway",
+      "hours": 8,
+      "rate": 100,
+      "value": 800,
+      "employee": "Seb",
       "notes": ""
     }
   ],
