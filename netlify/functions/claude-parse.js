@@ -52,7 +52,13 @@ exports.handler = async (event) => {
       .map(t => `${t.id} | ${t.date} | ${t.project} | ${t.hours}h | notes: "${t.notes||''}"`)
       .join('\n');
 
-    // ── 3. Prompt ───────────────────────────────────────────────────────────
+    // ── 3. Prompt — build dynamic examples from live project list ───────────
+    // Use the first active project as the "mark" example so examples never go stale
+    const exampleProject = projectList[0] || 'Mark Shippen – Nth Balgowlah';
+    const exampleProject2 = projectList.find(p => p.toLowerCase().includes('rob')) || projectList[1] || exampleProject;
+    const exampleProject3 = projectList.find(p => p.toLowerCase().includes('ibk') || p.toLowerCase().includes('mosman')) || projectList[2] || exampleProject;
+    const exampleProject4 = projectList.find(p => p.toLowerCase().includes('neil')) || projectList[3] || exampleProject;
+
     const systemPrompt = `You are a data entry parser for a carpentry business. Output ONE JSON object only — no explanation, no markdown, no extra text.
 
 TODAY: ${todayStr}
@@ -60,17 +66,19 @@ YESTERDAY: ${yesterdayStr}
 ACTIVE PROJECTS: ${projectNames}
 NON-BILLABLE: Admin, Office, Wasted time, Holidays, Sick days, Carer days
 
+CRITICAL: You MUST use project names EXACTLY as they appear in ACTIVE PROJECTS above. Do NOT invent or abbreviate project names.
+
 ---
 ## ACTION 1 — Log hours (timesheet entry)
 
 Schema: {"action":"new","type":"timesheet","date":"YYYY-MM-DD","project":"Exact Project Name","hours":4,"notes":"","employee":"Seb"}
 
-Examples:
-"4h mark today"                    → {"action":"new","type":"timesheet","date":"${todayStr}","project":"Mark - Nth Balgowlah","hours":4,"notes":"","employee":"Seb"}
-"logged 6 hours on ibk yesterday"  → {"action":"new","type":"timesheet","date":"${yesterdayStr}","project":"IBK - Mosman","hours":6,"notes":"","employee":"Seb"}
-"full day rob balgo"               → {"action":"new","type":"timesheet","date":"${todayStr}","project":"Rob - Balgowlah","hours":8,"notes":"","employee":"Seb"}
+Examples (project names taken from ACTIVE PROJECTS above):
+"4h mark today"                    → {"action":"new","type":"timesheet","date":"${todayStr}","project":"${exampleProject}","hours":4,"notes":"","employee":"Seb"}
+"logged 6 hours on ibk yesterday"  → {"action":"new","type":"timesheet","date":"${yesterdayStr}","project":"${exampleProject3}","hours":6,"notes":"","employee":"Seb"}
+"full day rob balgo"               → {"action":"new","type":"timesheet","date":"${todayStr}","project":"${exampleProject2}","hours":8,"notes":"","employee":"Seb"}
 "half day admin friday"            → {"action":"new","type":"timesheet","date":"<last friday>","project":"Admin","hours":4,"notes":"","employee":"Seb"}
-"3.5h neil installing shelves"     → {"action":"new","type":"timesheet","date":"${todayStr}","project":"Neil - Balgowlah","hours":3.5,"notes":"installing shelves","employee":"Seb"}
+"3.5h neil installing shelves"     → {"action":"new","type":"timesheet","date":"${todayStr}","project":"${exampleProject4}","hours":3.5,"notes":"installing shelves","employee":"Seb"}
 "sick day today"                   → {"action":"new","type":"timesheet","date":"${todayStr}","project":"Sick days","hours":8,"notes":"","employee":"Seb"}
 "8h today on new project Smith - Manly Deck" → {"action":"new","type":"timesheet","date":"${todayStr}","project":"Smith - Manly Deck","hours":8,"notes":"","employee":"Seb","new_project":true}
 
@@ -87,7 +95,7 @@ Examples:
 "spent 85 on screws and nails at Mitre 10"  → {"action":"new","type":"expense","date":"${todayStr}","description":"Mitre 10 - screws and nails","category":"Materials","project":"","amount":85}
 "$62 fuel"                                   → {"action":"new","type":"expense","date":"${todayStr}","description":"Fuel","category":"Vehicle","project":"","amount":62}
 "160 parking fine seaforth"                  → {"action":"new","type":"expense","date":"${todayStr}","description":"Parking fine - Seaforth","category":"Vehicle","project":"","amount":160}
-"sub 400 for neil plasterer"                 → {"action":"new","type":"expense","date":"${todayStr}","description":"Subcontractor - plasterer","category":"Subcontractor","project":"Neil - Balgowlah","amount":400}
+"sub 400 for neil plasterer"                 → {"action":"new","type":"expense","date":"${todayStr}","description":"Subcontractor - plasterer","category":"Subcontractor","project":"${exampleProject4}","amount":400}
 
 EXPENSE CATEGORIES: Materials, Vehicle, Subcontractor, Equipment, Office, Other
 Dollar sign is optional — a number with a $ or near a store/item name = expense.
@@ -99,9 +107,9 @@ If no project is obvious from context, leave project as empty string "".
 Schema: {"action":"edit","date":"YYYY-MM-DD","project":"Name or null","changes":{"field":"value"}}
 
 Examples:
-"add note to today mark — installed top rail"  → {"action":"edit","date":"${todayStr}","project":"Mark - Nth Balgowlah","changes":{"notes":"installed top rail"}}
+"add note to today mark — installed top rail"  → {"action":"edit","date":"${todayStr}","project":"${exampleProject}","changes":{"notes":"installed top rail"}}
 "fix yesterday hours to 6"                     → {"action":"edit","date":"${yesterdayStr}","project":null,"changes":{"hours":6}}
-"change hours on ibk yesterday to 7.5"         → {"action":"edit","date":"${yesterdayStr}","project":"IBK - Mosman","changes":{"hours":7.5}}
+"change hours on ibk yesterday to 7.5"         → {"action":"edit","date":"${yesterdayStr}","project":"${exampleProject3}","changes":{"hours":7.5}}
 
 Use for: "add note", "note that", "fix hours", "change", "update", "correct".
 project: exact name to target one entry, or null to update all entries on that date.
@@ -124,15 +132,15 @@ ${recentTs || '(none yet)'}
 - Day name ("Monday", "last Friday") → calculate from today ${todayStr}
 - No date mentioned → ${todayStr}
 
-## PROJECT MATCHING
-- Match against ACTIVE PROJECTS list using common sense (abbreviations, first names, suburbs)
-- "mark", "nth balgo", "mark shippen" → first project containing "Mark Shippen" (not "Walkway")
-- "rob" → first project containing "Rob"
-- "ibk" or "mosman" → first project containing "IBK" or "Mosman"
-- "neil" → first project containing "Neil"
+## PROJECT MATCHING — ALWAYS pick from ACTIVE PROJECTS list above
+- If unsure, pick the closest name from ACTIVE PROJECTS. Do NOT invent a new name.
+- "mark", "nth balgo", "mark shippen", "balgowlah" (without "walkway") → "${exampleProject}"
+- "rob" → project containing "Rob"
+- "ibk", "mosman" → project containing "IBK" or "Mosman"
+- "neil" → project containing "Neil"
+- "walkway" → project containing "Walkway"
 - "admin", "office", "sick", "holiday", "carer" → matching NON-BILLABLE category
-- If input contains "new project [name]" → use name EXACTLY as written, set "new_project":true
-- If genuinely ambiguous with multiple possible projects → return unclear
+- Only set "new_project":true if input explicitly contains the words "new project"
 
 If you cannot confidently parse the input: {"action":"unclear","message":"brief plain-english reason"}`;
 
@@ -203,17 +211,35 @@ If you cannot confidently parse the input: {"action":"unclear","message":"brief 
         const canonical = [...projectList, ...NON_BILLABLE].find(p => p.toLowerCase() === parsed.project.toLowerCase());
         if (canonical) parsed.project = canonical;
       } else {
-        // Normal fuzzy match — must exist
-        const isValid = validProjects.some(p => p.toLowerCase() === parsed.project.toLowerCase());
-        if (!isValid) {
-          return { statusCode: 200, headers, body: JSON.stringify({
-            status: 'unclear',
-            message: `Unknown project "${parsed.project}". Valid projects: ${projectList.join(', ')}`
-          })};
+        // Try exact match first (case-insensitive)
+        const exactMatch = validProjects.find(p => p.toLowerCase() === parsed.project.toLowerCase());
+        if (exactMatch) {
+          parsed.project = exactMatch;
+        } else {
+          // Fuzzy consolidation: score each valid project by token overlap with the returned name
+          // This catches "Mark - Nth Balgowlah" → "Mark Shippen – Nth Balgowlah"
+          const tokenise = str => str.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/);
+          const returnedTokens = tokenise(parsed.project);
+          let bestMatch = null;
+          let bestScore = 0;
+          for (const p of validProjects) {
+            const pTokens = tokenise(p);
+            const overlap = returnedTokens.filter(t => pTokens.includes(t)).length;
+            // Score = overlap / max(returned length, project length) — penalises short spurious matches
+            const score = overlap / Math.max(returnedTokens.length, pTokens.length);
+            if (score > bestScore) { bestScore = score; bestMatch = p; }
+          }
+          // Accept the fuzzy match only if overlap is meaningful (>50% token match)
+          if (bestMatch && bestScore >= 0.5) {
+            console.log(`Fuzzy match: "${parsed.project}" → "${bestMatch}" (score ${bestScore.toFixed(2)})`);
+            parsed.project = bestMatch;
+          } else {
+            return { statusCode: 200, headers, body: JSON.stringify({
+              status: 'unclear',
+              message: `Unknown project "${parsed.project}". Valid projects: ${projectList.join(', ')}`
+            })};
+          }
         }
-        // Normalise casing
-        const match = validProjects.find(p => p.toLowerCase() === parsed.project.toLowerCase());
-        if (match) parsed.project = match;
       }
     }
 
