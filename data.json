@@ -6838,7 +6838,7 @@
   ],
   "projects": [
     {
-      "name": "Mark - Nth Balgowlah",
+      "name": "Mark Shippen \u2013 Nth Balgowlah",
       "status": "Active",
       "quoted": 39450,
       "notes": "Active project"
@@ -6892,7 +6892,7 @@
     {
       "id": "TS-003",
       "date": "2026-05-21",
-      "project": "Mark - Nth Balgowlah",
+      "project": "Mark Shippen \u2013 Nth Balgowlah",
       "hours": 8,
       "rate": 100,
       "value": 800,
@@ -6902,20 +6902,10 @@
     {
       "id": "TS-004",
       "date": "2026-05-20",
-      "project": "Mark - Nth Balgowlah",
+      "project": "Mark Shippen \u2013 Nth Balgowlah",
       "hours": 8,
       "rate": 100,
       "value": 800,
-      "employee": "Seb",
-      "notes": ""
-    },
-    {
-      "id": "TS-005",
-      "date": "2026-05-25",
-      "project": "Admin",
-      "hours": 6,
-      "rate": 100,
-      "value": 600,
       "employee": "Seb",
       "notes": ""
     },
