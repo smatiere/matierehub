@@ -867,7 +867,7 @@ function renderTimesheet() {
     <div class="section">
       <div class="section-head"><h2>Time Distribution</h2><span class="chart-clickable-hint">click a block for name + hours</span></div>
       <div class="section-body" style="padding:12px">
-        <div id="ts-treemap" style="min-height:140px;display:flex;flex-wrap:wrap;gap:3px;align-content:flex-start"></div>
+        <div id="ts-treemap" style="min-height:160px;width:100%"></div>
         <div id="ts-treemap-legend" style="display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:12px"></div>
       </div>
     </div>
@@ -1223,13 +1223,75 @@ function tsCustomRange() {
 }
 
 // ── Treemap ───────────────────────────────────────────────────────────────────
+// Squarified treemap: recursively splits the rect along the longest axis,
+// greedily adding items to a strip while the worst aspect ratio improves.
+function squarify(items, x, y, w, h) {
+  const result = [];
+  function layout(nodes, x, y, w, h) {
+    if (!nodes.length) return;
+    if (nodes.length === 1) {
+      result.push({ ...nodes[0], rx: x, ry: y, rw: w, rh: h });
+      return;
+    }
+    const totalArea = nodes.reduce((s, n) => s + n.area, 0);
+
+    function worstRatio(row, stripW, stripH) {
+      const rowArea = row.reduce((s, n) => s + n.area, 0);
+      let worst = 0;
+      for (const n of row) {
+        const bw = stripW >= stripH ? stripW : n.area / (rowArea / stripH);
+        const bh = stripW >= stripH ? n.area / (rowArea / stripW) : stripH;
+        worst = Math.max(worst, bw > bh ? bw / bh : bh / bw);
+      }
+      return worst;
+    }
+
+    // Build best strip along the shorter axis
+    let strip = [];
+    let best = Infinity;
+    for (const node of nodes) {
+      const candidate = [...strip, node];
+      const ratio = worstRatio(candidate, w, h);
+      if (ratio < best) { strip = candidate; best = ratio; }
+      else break;
+    }
+
+    const stripArea = strip.reduce((s, n) => s + n.area, 0);
+    const stripFrac = stripArea / totalArea;
+
+    if (w >= h) {
+      // Strip runs top-to-bottom along left edge; width = fraction of w
+      const stripW = w * stripFrac;
+      let cy = y;
+      for (const n of strip) {
+        const nh = h * (n.area / stripArea);
+        result.push({ ...n, rx: x, ry: cy, rw: stripW, rh: nh });
+        cy += nh;
+      }
+      layout(nodes.slice(strip.length), x + stripW, y, w - stripW, h);
+    } else {
+      // Strip runs left-to-right along top edge; height = fraction of h
+      const stripH = h * stripFrac;
+      let cx = x;
+      for (const n of strip) {
+        const nw = w * (n.area / stripArea);
+        result.push({ ...n, rx: cx, ry: y, rw: nw, rh: stripH });
+        cx += nw;
+      }
+      layout(nodes.slice(strip.length), x, y + stripH, w, h - stripH);
+    }
+  }
+  layout(items, x, y, w, h);
+  return result;
+}
+
 function renderTsTreemap() {
   const { from, to } = getRange();
   const playerTs = (D.timesheets||[]).filter(t => {
     return (t.employee||'Seb')===tsPlayer && t.date>=ds(from) && t.date<=ds(to);
   });
 
-  // Available workday hours in range — exclude today (day in progress, matches KPI tile logic)
+  // Available workday hours in range — exclude today
   const todayStr = ds(todayMidnight());
   let avail = 0;
   for (let d=new Date(from); d<=to; d.setDate(d.getDate()+1)) {
@@ -1247,24 +1309,36 @@ function renderTsTreemap() {
     .map(([name,hrs]) => ({ name, hrs, color: PROJECT_COLOR_MAP[name]||'#555', isGap:false }));
   if (missing>0.5) items.push({ name:'Not logged', hrs:missing, color:'rgba(255,0,110,0.12)', isGap:true });
 
-  const tmTotal = avail || total || 1;
   const tmEl = document.getElementById('ts-treemap');
   const lgEl = document.getElementById('ts-treemap-legend');
   if (!tmEl) return;
 
-  tmEl.innerHTML = items.map(item => {
-    const share = item.hrs/tmTotal;
-    if (share < 0.005) return '';
-    const basis = Math.max(50, share*800);
+  const W = tmEl.offsetWidth || 600;
+  const H = 160;
+  const tmTotal = items.reduce((s, i) => s + i.hrs, 0) || 1;
+
+  // Attach normalised area (pixels²) to each item
+  const nodes = items
+    .filter(i => i.hrs / tmTotal >= 0.005)
+    .map(i => ({ ...i, area: (i.hrs / tmTotal) * W * H }));
+
+  const rects = squarify(nodes, 0, 0, W, H);
+
+  tmEl.style.cssText = 'position:relative;height:' + H + 'px';
+  tmEl.innerHTML = rects.map(r => {
+    const gap = 2;
+    const textColor = r.isGap ? '#FF006E' : 'rgba(0,0,0,0.85)';
+    const showLabel = r.rw > 40 && r.rh > 30;
     return `<div
-      onclick="tsTmTip(this,'${item.name.replace(/'/g,"\\'")}',${item.hrs})"
-      style="flex-grow:${share*100};flex-shrink:0;flex-basis:${basis}px;min-height:70px;
-             background:${item.color};border-radius:5px;cursor:pointer;
+      onclick="tsTmTip(this,'${r.name.replace(/'/g,"\\'")}',${r.hrs})"
+      style="position:absolute;left:${r.rx+gap}px;top:${r.ry+gap}px;
+             width:${Math.max(0,r.rw-gap*2)}px;height:${Math.max(0,r.rh-gap*2)}px;
+             background:${r.color};border-radius:5px;cursor:pointer;overflow:hidden;
              display:flex;flex-direction:column;align-items:center;justify-content:center;
-             border:${item.isGap?'1px dashed rgba(255,0,110,0.35)':'none'};
-             padding:6px;text-align:center;position:relative;overflow:hidden">
-      <div style="font-size:10px;font-weight:700;color:${item.isGap?'#FF006E':'rgba(0,0,0,0.8)'};line-height:1.3;word-break:break-word">${item.name}</div>
-      <div style="font-size:13px;font-weight:700;color:${item.isGap?'#FF006E':'rgba(0,0,0,0.9)'}">${item.hrs.toFixed(0)}h</div>
+             border:${r.isGap?'1px dashed rgba(255,0,110,0.4)':'none'};
+             box-sizing:border-box;padding:4px;text-align:center">
+      ${showLabel ? `<div style="font-size:10px;font-weight:700;color:${textColor};line-height:1.3;word-break:break-word">${r.name}</div>
+      <div style="font-size:13px;font-weight:700;color:${textColor}">${r.hrs.toFixed(0)}h</div>` : ''}
     </div>`;
   }).join('');
 
