@@ -262,7 +262,7 @@ body{padding-bottom:62px}
 <!-- Floating Claude input bar -->
 <div id="claude-bar">
   <button id="claude-mic-btn" onclick="claudeMicToggle()" title="Hold to speak">🎤</button>
-  <input id="claude-bar-input" type="text" placeholder='e.g. "4h Mark Nth Balgowlah" or "$280 Bunnings materials"' autocomplete="off">
+  <input id="claude-bar-input" type="text" placeholder='e.g. "6h mark today" · "$85 bunnings screws" · "sick day" · "fix hours to 5"' autocomplete="off">
   <span id="claude-bar-status"></span>
   <button id="claude-send-btn" onclick="claudeBarSend()">Log</button>
 </div>
@@ -620,7 +620,12 @@ function renderLog() {
         <div class="log-amount">${e.type==='hours' ? e.amount/rate+'h' : fmt(e.amount)}</div>
       </div>`).join('')
     : `<div class="empty"><div class="empty-icon">💬</div><div>No activity logged yet.</div>
-        <div style="margin-top:8px;font-size:12px;color:var(--ink-4)">Tell Claude things like:<br>"Log 4 hours on Mark Nth Balgowlah today"<br>"Add $285 materials expense at Bunnings"</div></div>`;
+        <div style="margin-top:8px;font-size:12px;color:var(--ink-4)">
+          <b style="color:var(--ink-3)">Hours:</b> "6h mark today" · "full day rob balgo" · "half day admin friday" · "3.5h neil installing shelves"<br>
+          <b style="color:var(--ink-3)">Expenses:</b> "$85 bunnings screws" · "$62 fuel" · "400 sub plasterer neil"<br>
+          <b style="color:var(--ink-3)">Edit:</b> "fix hours to 5" · "add note to mark today — installed top rail"<br>
+          <b style="color:var(--ink-3)">New project:</b> "8h today on new project Smith - Manly Deck"
+        </div></div>`;
   document.getElementById('page-log').innerHTML = `
     <div class="divider">Captured Activity</div>
     <div class="kpi-grid">
@@ -1017,7 +1022,7 @@ function tsDayClick(dStr, ev) {
     </div>
     <div style="padding:12px 14px">${entriesHtml}</div>
     <div style="padding:10px 14px;border-top:1px solid var(--border)">
-      <div style="font-size:10px;color:var(--ink-4);margin-bottom:6px;letter-spacing:.04em">ADD ENTRY (e.g. "4h Mark Nth Balgowlah")</div>
+      <div style="font-size:10px;color:var(--ink-4);margin-bottom:6px;letter-spacing:.04em">ADD ENTRY — e.g. "6h mark" · "half day admin" · "3.5h neil installing shelves"</div>
       <div style="display:flex;gap:6px">
         <input id="ts-input" type="text" placeholder="e.g. 3h Admin" style="flex:1;padding:7px 9px;border-radius:5px;border:1px solid var(--border-2);background:var(--bg-3);color:var(--ink);font-size:12px;outline:none">
         <button onclick="tsSubmitEntry('${dStr}')" style="padding:7px 12px;background:var(--amber);color:#000;border:none;border-radius:5px;font-size:12px;font-weight:700;cursor:pointer;letter-spacing:.04em">Add</button>
