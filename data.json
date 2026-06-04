@@ -1,6 +1,6 @@
 {
   "meta": {
-    "last_updated": "2026-06-04T12:26:57.450Z",
+    "last_updated": "2026-06-04T12:27:18.964Z",
     "quotes_synced_at": "2026-05-29T12:21:26.216Z",
     "source": "Xero sync 2026-05-29 (3yr history)",
     "invoice_count": 261,
@@ -7000,6 +7000,16 @@
       "hours": 8,
       "employee": "Seb",
       "notes": "",
+      "rate": 100,
+      "value": 800
+    },
+    {
+      "id": "TS-011",
+      "date": "2026-06-04",
+      "project": "Mark - Nth Balgowlah",
+      "hours": 8,
+      "employee": "Seb",
+      "notes": "Walkway",
       "rate": 100,
       "value": 800
     }
