@@ -36,8 +36,16 @@ exports.handler = async (event) => {
     const yesterdayStr = new Date(new Date(todayStr + 'T12:00:00').getTime() - 86400000)
                            .toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
 
-    const projectList = (current.projects || []).map(p => p.name).join(', ');
-    const tsCount     = (current.timesheets || []).length;
+    const projectList  = (current.projects || []).map(p => p.name);
+    const projectNames = projectList.join(', ');
+
+    // Safe next ID — scan max existing numeric suffix rather than using length
+    // (length-based breaks after any delete)
+    const existingIds = (current.timesheets || [])
+      .map(t => parseInt((t.id || '').replace('TS-', ''), 10))
+      .filter(n => !isNaN(n));
+    const nextNum = existingIds.length ? Math.max(...existingIds) + 1 : 1;
+    const nextId  = `TS-${String(nextNum).padStart(3, '0')}`;
 
     // Recent entries — for delete matching only
     const recentTs = (current.timesheets || []).slice(-15)
@@ -49,7 +57,7 @@ exports.handler = async (event) => {
 
 TODAY: ${todayStr}
 YESTERDAY: ${yesterdayStr}
-PROJECTS: ${projectList}
+PROJECTS: ${projectNames}
 NON-BILLABLE: Admin, Office, Wasted time, Holidays, Sick days, Carer days
 
 ---
@@ -136,13 +144,29 @@ If you cannot parse the input: {"action":"unclear","message":"brief reason"}`;
       return { statusCode: 200, headers, body: JSON.stringify({ status: 'unclear', message: parsed.message }) };
     }
 
+    // ── Server-side project validation ──────────────────────────────────────
+    // Non-billable categories that are always valid even if not in projects list
+    const NON_BILLABLE = ['Admin', 'Office', 'Wasted time', 'Holidays', 'Sick days', 'Carer days'];
+    if (parsed.action === 'new' && parsed.type === 'timesheet' && parsed.project) {
+      const validProjects = [...projectList, ...NON_BILLABLE];
+      const isValid = validProjects.some(p => p.toLowerCase() === parsed.project.toLowerCase());
+      if (!isValid) {
+        return { statusCode: 200, headers, body: JSON.stringify({
+          status: 'unclear',
+          message: `Unknown project "${parsed.project}". Valid projects: ${projectList.join(', ')}`
+        })};
+      }
+      // Normalise casing to match the stored project name exactly
+      const match = validProjects.find(p => p.toLowerCase() === parsed.project.toLowerCase());
+      if (match) parsed.project = match;
+    }
+
     // ── 5. Apply action ─────────────────────────────────────────────────────
     let entryLabel = '';
     let responseExtra = {};
 
     if (parsed.action === 'new') {
       if (parsed.type === 'timesheet') {
-        const nextId = `TS-${String(tsCount + 1).padStart(3, '0')}`;
         const entry = {
           id:       nextId,
           date:     parsed.date,
