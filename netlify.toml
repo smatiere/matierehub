@@ -1,7 +1,7 @@
 [build]
   publish = "."
   functions = "netlify/functions"
-  ignore = "[ $(git diff --name-only HEAD^ HEAD | grep -cv '^data\\.json$') -eq 0 ]"
+  ignore = "[ $(git diff --name-only HEAD^ HEAD | grep -c 'data\\.json\\|index\\.html') -eq 0 ]"
 
 [functions]
   node_bundler = "esbuild"
