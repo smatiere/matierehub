@@ -53,55 +53,88 @@ exports.handler = async (event) => {
       .join('\n');
 
     // ── 3. Prompt ───────────────────────────────────────────────────────────
-    const systemPrompt = `You are a parser for a carpentry business timesheet app. Output ONE JSON object only — no explanation, no markdown.
+    const systemPrompt = `You are a data entry parser for a carpentry business. Output ONE JSON object only — no explanation, no markdown, no extra text.
 
 TODAY: ${todayStr}
 YESTERDAY: ${yesterdayStr}
-PROJECTS: ${projectNames}
+ACTIVE PROJECTS: ${projectNames}
 NON-BILLABLE: Admin, Office, Wasted time, Holidays, Sick days, Carer days
 
 ---
-THREE POSSIBLE ACTIONS:
+## ACTION 1 — Log hours (timesheet entry)
 
-ACTION 1 — new entry (logging hours or an expense):
-{"action":"new","type":"timesheet","date":"YYYY-MM-DD","project":"Name","hours":4,"notes":"","employee":"Seb"}
-{"action":"new","type":"expense","date":"YYYY-MM-DD","description":"desc","category":"Materials","project":"Name","amount":125.50}
+Schema: {"action":"new","type":"timesheet","date":"YYYY-MM-DD","project":"Exact Project Name","hours":4,"notes":"","employee":"Seb"}
 
-ACTION 2 — edit existing entries (change notes, hours, or any field):
-{"action":"edit","date":"YYYY-MM-DD","project":"Name or null","changes":{"notes":"the note text"}}
-- Use this for: "add note", "note that", "annotate", "change note", "fix hours", "update", "correct"
-- project: exact name to target one project only, or null to update all entries on that date
-- changes: only include fields that should change e.g. {"notes":"MatiereHub"} or {"hours":3}
+Examples:
+"4h mark today"                    → {"action":"new","type":"timesheet","date":"${todayStr}","project":"Mark - Nth Balgowlah","hours":4,"notes":"","employee":"Seb"}
+"logged 6 hours on ibk yesterday"  → {"action":"new","type":"timesheet","date":"${yesterdayStr}","project":"IBK - Mosman","hours":6,"notes":"","employee":"Seb"}
+"full day rob balgo"               → {"action":"new","type":"timesheet","date":"${todayStr}","project":"Rob - Balgowlah","hours":8,"notes":"","employee":"Seb"}
+"half day admin friday"            → {"action":"new","type":"timesheet","date":"<last friday>","project":"Admin","hours":4,"notes":"","employee":"Seb"}
+"3.5h neil installing shelves"     → {"action":"new","type":"timesheet","date":"${todayStr}","project":"Neil - Balgowlah","hours":3.5,"notes":"installing shelves","employee":"Seb"}
+"sick day today"                   → {"action":"new","type":"timesheet","date":"${todayStr}","project":"Sick days","hours":8,"notes":"","employee":"Seb"}
+"8h today on new project Smith - Manly Deck" → {"action":"new","type":"timesheet","date":"${todayStr}","project":"Smith - Manly Deck","hours":8,"notes":"","employee":"Seb","new_project":true}
 
-ACTION 3 — delete one entry by ID:
-{"action":"delete","id":"TS-007"}
+HOURS CONVERSION: "4h"=4, "half day"=4, "full day"=8, "3 and a half"=3.5, "couple hours"=2, "90 min"=1.5
+Notes: anything after the hours/project that sounds like a description of work → put in notes field.
 
 ---
-RECENT ENTRIES (for delete — match by ID):
+## ACTION 2 — Log an expense
+
+Schema: {"action":"new","type":"expense","date":"YYYY-MM-DD","description":"full description","category":"Category","project":"Project or empty","amount":125.50}
+
+Examples:
+"$280 bunnings materials"                    → {"action":"new","type":"expense","date":"${todayStr}","description":"Bunnings - materials","category":"Materials","project":"","amount":280}
+"spent 85 on screws and nails at Mitre 10"  → {"action":"new","type":"expense","date":"${todayStr}","description":"Mitre 10 - screws and nails","category":"Materials","project":"","amount":85}
+"$62 fuel"                                   → {"action":"new","type":"expense","date":"${todayStr}","description":"Fuel","category":"Vehicle","project":"","amount":62}
+"160 parking fine seaforth"                  → {"action":"new","type":"expense","date":"${todayStr}","description":"Parking fine - Seaforth","category":"Vehicle","project":"","amount":160}
+"sub 400 for neil plasterer"                 → {"action":"new","type":"expense","date":"${todayStr}","description":"Subcontractor - plasterer","category":"Subcontractor","project":"Neil - Balgowlah","amount":400}
+
+EXPENSE CATEGORIES: Materials, Vehicle, Subcontractor, Equipment, Office, Other
+Dollar sign is optional — a number with a $ or near a store/item name = expense.
+If no project is obvious from context, leave project as empty string "".
+
+---
+## ACTION 3 — Edit an existing entry
+
+Schema: {"action":"edit","date":"YYYY-MM-DD","project":"Name or null","changes":{"field":"value"}}
+
+Examples:
+"add note to today mark — installed top rail"  → {"action":"edit","date":"${todayStr}","project":"Mark - Nth Balgowlah","changes":{"notes":"installed top rail"}}
+"fix yesterday hours to 6"                     → {"action":"edit","date":"${yesterdayStr}","project":null,"changes":{"hours":6}}
+"change hours on ibk yesterday to 7.5"         → {"action":"edit","date":"${yesterdayStr}","project":"IBK - Mosman","changes":{"hours":7.5}}
+
+Use for: "add note", "note that", "fix hours", "change", "update", "correct".
+project: exact name to target one entry, or null to update all entries on that date.
+
+---
+## ACTION 4 — Delete an entry
+
+Schema: {"action":"delete","id":"TS-010"}
+
+Use when: "delete TS-010", "remove that entry", "undo last entry" (use most recent ID from list below).
+
+RECENT ENTRIES:
 ${recentTs || '(none yet)'}
 
 ---
-DATE RULES:
-- Input starting with DATE:YYYY-MM-DD → use that exact date (e.g. DATE:2026-05-22 4h Admin → date=2026-05-22)
+## DATE RULES
+- DATE:YYYY-MM-DD prefix → use that exact date (added by calendar popup)
 - "today" → ${todayStr}
 - "yesterday" → ${yesterdayStr}
-- day name e.g. "Monday" → calculate from today ${todayStr}
-- no date mentioned → ${todayStr}
+- Day name ("Monday", "last Friday") → calculate from today ${todayStr}
+- No date mentioned → ${todayStr}
 
-PROJECT MATCHING:
-- If the input contains "new project" followed by a name → set "new_project":true and use the name EXACTLY as given (preserve capitalisation, spacing, everything)
-- Otherwise fuzzy-match against the PROJECTS list above
-- "nth balgo" or "mark" (no other qualifier) → "Mark - Nth Balgowlah"
-- "rob" or "rob balgo" → "Rob - Balgowlah"
-- "ibk" or "mosman" → "IBK - Mosman"
-- "neil" → "Neil - Balgowlah"
-- "admin" or "office" → "Admin"
-- If "new project" is stated, add "new_project":true to the JSON so the server creates it
+## PROJECT MATCHING
+- Match against ACTIVE PROJECTS list using common sense (abbreviations, first names, suburbs)
+- "mark" or "nth balgo" → first project containing "Mark" or "Balgowlah"
+- "rob" → first project containing "Rob"
+- "ibk" or "mosman" → first project containing "IBK" or "Mosman"
+- "neil" → first project containing "Neil"
+- "admin", "office", "sick", "holiday", "carer" → matching NON-BILLABLE category
+- If input contains "new project [name]" → use name EXACTLY as written, set "new_project":true
+- If genuinely ambiguous with multiple possible projects → return unclear
 
-HOURS: "4h"=4, "half day"=4, "full day"=8, "3 and a half"=3.5
-EXPENSE CATEGORIES: Materials, Vehicle, Subcontractor, Equipment, Office, Other
-
-If you cannot parse the input: {"action":"unclear","message":"brief reason"}`;
+If you cannot confidently parse the input: {"action":"unclear","message":"brief plain-english reason"}`;
 
     // ── 4. Call Claude Sonnet ───────────────────────────────────────────────
     const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
