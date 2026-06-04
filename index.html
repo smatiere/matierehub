@@ -1229,10 +1229,11 @@ function renderTsTreemap() {
     return (t.employee||'Seb')===tsPlayer && t.date>=ds(from) && t.date<=ds(to);
   });
 
-  // Available workday hours in range
+  // Available workday hours in range — exclude today (day in progress, matches KPI tile logic)
+  const todayStr = ds(todayMidnight());
   let avail = 0;
   for (let d=new Date(from); d<=to; d.setDate(d.getDate()+1)) {
-    if (isWorkday(d)) avail += 8;
+    if (isWorkday(d) && ds(d) < todayStr) avail += 8;
   }
 
   // Group by project
