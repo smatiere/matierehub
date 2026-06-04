@@ -84,9 +84,9 @@ Seb's hourly rate: **$100/hr ex GST**
 ## What has been tried and FAILED — do not retry
 
 - **Google Sheets row-level writing** via Drive connector — connector can only create new files, cannot append rows
-- **Netlify serverless functions for Xero OAuth write bridge** — failed due to ES module/CommonJS conflicts and GitHub folder upload limitations
 - **Google Apps Script web endpoints** — robots.txt blocks Claude from fetching script.google.com
 - **Airtable** — not pursued, no paid subscriptions
+- **Early Xero OAuth attempts** — failed due to CORS (direct browser calls to api.xero.com), wrong scopes (`OUTPUT2`, `payroll.*`), and missing `node_bundler = "esbuild"` in netlify.toml. All fixed — Xero write-back now works. See DECISIONS.md.
 
 ---
 
