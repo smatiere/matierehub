@@ -83,9 +83,11 @@ Reference projects by their **name** string. The `id` is a stable primary key th
   "id": "EXP-042",
   "date": "2026-06-06",
   "supplier": "Bunnings Balgowlah",
-  "description": "Deck screws SS304 10Gx50mm BX1000 (x3)",
+  "description": "Deck Screws Titan T25 SS304 10Gx50mm BX1000",
   "category": "Materials",
   "project": "Mark - Nth Balgowlah",
+  "qty": 3,
+  "unit_price": 86.32,
   "amount": 258.95
 }
 ```
@@ -95,14 +97,23 @@ Reference projects by their **name** string. The `id` is a stable primary key th
 | `id` | string | Sequential: `EXP-001`, `EXP-002`, etc. Never reuse. |
 | `date` | string | ISO format: `YYYY-MM-DD` |
 | `supplier` | string | Name of shop or supplier (e.g. `Bunnings Balgowlah`, `Kimbriki`, `Kennards`) |
-| `description` | string | What was bought. Be specific enough to justify the expense. |
+| `description` | string | Product name exactly as it appears on the receipt. No quantity in the description — that goes in `qty`. |
 | `category` | string | Must match an entry from the Expense Categories table below |
-| `project` | string | Must match a name from the Canonical Project Names table above |
-| `amount` | number | Amount **ex GST** in AUD. Always ex GST. |
+| `project` | string | Must match a name from the Canonical Project List above |
+| `qty` | number | Quantity purchased. Default `1` if not specified. |
+| `unit_price` | number | Unit price **ex GST**. |
+| `amount` | number | Always `qty × unit_price` ex GST. Computed — never guessed independently. |
 
-**Banned fields** (strip from receipt captures before saving): `qty`, `unit_price`, `total_inc_gst`, `gst`, `total_ex_gst`, `payment_method`, `reference`, `logged_via`
+**Banned fields** (never save these): `total_inc_gst`, `gst`, `total_ex_gst`, `payment_method`, `reference`, `logged_via`
 
-**Note on receipt photo capture:** When Seb photos a receipt, Claude Haiku will extract multiple line items from it. Each line item becomes a separate `expense_log` entry with its own `EXP-xxx` id, all sharing the same date and supplier.
+**Capture rules — all input methods:**
+
+These rules apply regardless of how an expense is entered: Claude chat, voice, receipt photo, email drop, or any future method.
+
+- **One entry per product line.** Each distinct product on a receipt becomes its own `EXP-xxx` entry. This builds a price catalog over time.
+- **Multi-project receipts.** A single receipt can have items assigned to different projects. Each line item carries its own `project` value — assign based on context (what the item was for).
+- **Same date and supplier** across all lines from the same receipt.
+- **If project is unknown** for a line item, leave `project` as `""` and flag it for follow-up rather than guessing.
 
 ---
 
@@ -224,4 +235,4 @@ These existing entries in `data.json` don't match the canonical schema and shoul
 
 ---
 
-*Last updated: 2026-06-06 — v2: flexible project naming, PR-xxx primary keys, ask-before-assuming rule*
+*Last updated: 2026-06-06 — v3: qty/unit_price in expense schema, multi-project receipt rules, input-method-agnostic capture*
