@@ -1110,10 +1110,39 @@ function claudeMicToggle() {
   recognition.start();
 }
 
+// Stores a pending action awaiting "yes" confirmation from the user
+window._pendingConfirm = null;
+
 async function claudeBarSend() {
   const inp  = document.getElementById('claude-bar-input');
   const text = inp.value.trim();
   if (!text) return;
+
+  // ── Check for confirmation ("yes"/"yep"/"ok" etc.) ───────────────────────
+  const isYes = /^(yes|yeah|yep|yup|ok|correct|confirm|sure|go ahead)$/i.test(text);
+  if (isYes && window._pendingConfirm) {
+    const pending = window._pendingConfirm;
+    window._pendingConfirm = null;
+    inp.value = '';
+    claudeSetState('processing');
+    try {
+      const res = await fetch('/.netlify/functions/claude-parse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pendingAction: pending })
+      });
+      const data = await res.json();
+      claudeSetState('idle');
+      claudeHandleResponse(data, inp);
+    } catch (err) {
+      claudeSetState('idle');
+      claudeToast('⚠ Connection error — try again', 'error');
+    }
+    return;
+  }
+
+  // Any non-yes input clears the pending confirmation
+  window._pendingConfirm = null;
 
   claudeSetState('processing');
 
@@ -1124,51 +1153,8 @@ async function claudeBarSend() {
       body: JSON.stringify({ text })
     });
     const data = await res.json();
-
     claudeSetState('idle');
-
-    if (data.status === 'success') {
-      inp.value = '';
-      const action = data.action || '';
-      let msg = '';
-      if (action === 'new' && data.entry) {
-        const e = data.entry;
-        msg = data.type === 'timesheet'
-          ? `✓ Logged ${e.hours}h · ${e.project} · ${e.date}`
-          : `✓ Logged $${e.amount} · ${(e.description||'').slice(0,35)}`;
-      } else if (action === 'edit')   msg = `✏ ${data.label}`;
-      else if (action === 'delete')   msg = `🗑 ${data.label}`;
-      else msg = `✓ ${data.label || 'Done'}`;
-      claudeToast(msg, 'success');
-
-      // Optimistic in-memory update — no re-fetch needed
-      if (D) {
-        if (action === 'new' && data.entry) {
-          if (data.type === 'timesheet') {
-            D.timesheets = D.timesheets || [];
-            D.timesheets.push(data.entry);
-          } else {
-            D.expense_log = D.expense_log || [];
-            D.expense_log.push(data.entry);
-          }
-        } else if (action === 'edit' && data.updated) {
-          const updatedArr = Array.isArray(data.updated) ? data.updated : [data.updated];
-          updatedArr.forEach(u => {
-            const idx = (D.timesheets||[]).findIndex(ts => ts.id === u.id);
-            if (idx !== -1) D.timesheets[idx] = u;
-          });
-        } else if (action === 'delete' && data.deleted) {
-          D.timesheets = (D.timesheets||[]).filter(ts => ts.id !== data.deleted.id);
-        }
-        renderAll();
-        if (document.getElementById('page-timesheet').classList.contains('active')) renderTimesheet();
-      }
-
-    } else if (data.status === 'unclear') {
-      claudeToast('❓ ' + (data.message || 'Could not understand — try again'), 'unclear');
-    } else {
-      claudeToast('⚠ ' + (data.message || 'Something went wrong'), 'error');
-    }
+    claudeHandleResponse(data, inp);
 
   } catch (err) {
     claudeSetState('idle');
@@ -1176,12 +1162,63 @@ async function claudeBarSend() {
   }
 }
 
-function claudeToast(msg, type='success') {
+function claudeHandleResponse(data, inp) {
+  if (data.status === 'success') {
+    inp.value = '';
+    const action = data.action || '';
+    let msg = '';
+    if (action === 'new' && data.entry) {
+      const e = data.entry;
+      msg = data.type === 'timesheet'
+        ? `✓ Logged ${e.hours}h · ${e.project} · ${e.date}`
+        : `✓ Logged $${e.amount} · ${(e.description||'').slice(0,35)}`;
+    } else if (action === 'edit')   msg = `✏ ${data.label}`;
+    else if (action === 'delete')   msg = `🗑 ${data.label}`;
+    else msg = `✓ ${data.label || 'Done'}`;
+    claudeToast(msg, 'success');
+
+    // Optimistic in-memory update — no re-fetch needed
+    if (D) {
+      if (action === 'new' && data.entry) {
+        if (data.type === 'timesheet') {
+          D.timesheets = D.timesheets || [];
+          D.timesheets.push(data.entry);
+        } else {
+          D.expense_log = D.expense_log || [];
+          D.expense_log.push(data.entry);
+        }
+      } else if (action === 'edit' && data.updated) {
+        const updatedArr = Array.isArray(data.updated) ? data.updated : [data.updated];
+        updatedArr.forEach(u => {
+          const idx = (D.timesheets||[]).findIndex(ts => ts.id === u.id);
+          if (idx !== -1) D.timesheets[idx] = u;
+        });
+      } else if (action === 'delete' && data.deleted) {
+        D.timesheets = (D.timesheets||[]).filter(ts => ts.id !== data.deleted.id);
+      }
+      renderAll();
+      if (document.getElementById('page-timesheet').classList.contains('active')) renderTimesheet();
+    }
+
+  } else if (data.status === 'confirm') {
+    // Store the pending action and prompt Seb to confirm
+    window._pendingConfirm = data.pending;
+    claudeToast(`❓ ${data.message} — type yes to confirm`, 'unclear', 8000);
+
+  } else if (data.status === 'unclear') {
+    claudeToast('❓ ' + (data.message || 'Could not understand — try again'), 'unclear');
+  } else {
+    claudeToast('⚠ ' + (data.message || 'Something went wrong'), 'error');
+  }
+}
+
+function claudeToast(msg, type='success', duration) {
   const t = document.getElementById('claude-toast');
   t.textContent = msg;
   t.className = type;
   clearTimeout(t._timer);
-  t._timer = setTimeout(() => { t.className = ''; }, type === 'success' ? 3000 : 4500);
+  const ms = duration || (type === 'success' ? 3000 : 4500);
+  t._timer = setTimeout(() => { t.className = ''; }, ms);
 }
 
 // Popup "Add" button — prefix with DATE: so Haiku always uses the calendar date
