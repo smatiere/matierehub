@@ -1,9 +1,66 @@
-// claude-parse.js — simplified prompt, claude-sonnet-4-6 for reliability
+// claude-parse.js — Supabase edition
+// Parses natural language input via Claude Haiku and writes directly to Supabase.
+// No more GitHub push / Netlify redeploy cycle.
 
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-const GITHUB_REPO  = 'smatiere/matierehub';
-const GITHUB_FILE  = 'data.json';
+const SUPABASE_URL        = process.env.SUPABASE_URL;        // https://nwpzjqblhywclqharggu.supabase.co
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY; // service_role JWT
 
+// ── Supabase helpers ────────────────────────────────────────────────────────────
+async function sbGet(table, query = '') {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}${query}`, {
+    headers: {
+      'apikey': SUPABASE_SERVICE_KEY,
+      'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`
+    }
+  });
+  if (!res.ok) throw new Error(`Supabase GET ${table} failed: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+async function sbPost(table, body) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+    method: 'POST',
+    headers: {
+      'apikey': SUPABASE_SERVICE_KEY,
+      'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation'
+    },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error(`Supabase POST ${table} failed: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+async function sbPatch(table, query, body) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}${query}`, {
+    method: 'PATCH',
+    headers: {
+      'apikey': SUPABASE_SERVICE_KEY,
+      'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation'
+    },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error(`Supabase PATCH ${table} failed: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+async function sbDelete(table, query) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}${query}`, {
+    method: 'DELETE',
+    headers: {
+      'apikey': SUPABASE_SERVICE_KEY,
+      'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+      'Prefer': 'return=representation'
+    }
+  });
+  if (!res.ok) throw new Error(`Supabase DELETE ${table} failed: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+// ── Main handler ───────────────────────────────────────────────────────────────
 exports.handler = async (event) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -16,49 +73,52 @@ exports.handler = async (event) => {
 
   const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
   if (!ANTHROPIC_API_KEY) return { statusCode: 500, headers, body: JSON.stringify({ error: 'API key not configured' }) };
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return { statusCode: 500, headers, body: JSON.stringify({ error: 'Supabase env vars not configured' }) };
 
   try {
     const body = JSON.parse(event.body || '{}');
     const { text, pendingAction } = body;
     if (!text && !pendingAction) return { statusCode: 400, headers, body: JSON.stringify({ error: 'No input provided' }) };
 
-    // ── 1. Fetch current data.json ──────────────────────────────────────────
-    const ghRes = await fetch(
-      `https://api.github.com/repos/${GITHUB_REPO}/contents/${GITHUB_FILE}`,
-      { headers: { 'Authorization': `token ${GITHUB_TOKEN}`, 'User-Agent': 'MatiereHub' } }
-    );
-    if (!ghRes.ok) throw new Error(`GitHub fetch failed: ${ghRes.status}`);
-    const ghData  = await ghRes.json();
-    const current = JSON.parse(Buffer.from(ghData.content, 'base64').toString('utf-8'));
-    const sha     = ghData.sha;
+    // ── 1. Fetch context from Supabase ────────────────────────────────────────
+    const [projectRows, recentTimesheets, allTsIds, allExpIds] = await Promise.all([
+      sbGet('projects', '?select=id,name,status&order=id.asc'),
+      sbGet('timesheets', '?select=id,date,project,hours,notes&order=date.desc,id.desc&limit=15'),
+      sbGet('timesheets', '?select=id'),
+      sbGet('expense_log', '?select=id')
+    ]);
 
-    // ── 2. Date context ─────────────────────────────────────────────────────
+    const projectList  = projectRows.map(p => p.name);
+    const projectNames = projectList.join(', ');
+
+    // Safe next IDs
+    const existingTsNums = allTsIds
+      .map(t => parseInt((t.id || '').replace('TS-', ''), 10))
+      .filter(n => !isNaN(n));
+    const nextTsNum = existingTsNums.length ? Math.max(...existingTsNums) + 1 : 1;
+    const nextTsId  = `TS-${String(nextTsNum).padStart(3, '0')}`;
+
+    const existingExpNums = allExpIds
+      .map(e => parseInt((e.id || '').replace('EXP-', ''), 10))
+      .filter(n => !isNaN(n));
+    const nextExpNum = existingExpNums.length ? Math.max(...existingExpNums) + 1 : 1;
+    const nextExpId  = `EXP-${String(nextExpNum).padStart(3, '0')}`;
+
+    // ── 2. Date context ─────────────────────────────────────────────────────────
     const todayStr     = new Date().toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
     const yesterdayStr = new Date(new Date(todayStr + 'T12:00:00').getTime() - 86400000)
                            .toLocaleDateString('en-CA', { timeZone: 'Australia/Sydney' });
 
-    const projectList  = (current.projects || []).map(p => p.name);
-    const projectNames = projectList.join(', ');
-
-    // Safe next ID — scan max existing numeric suffix rather than using length
-    // (length-based breaks after any delete)
-    const existingIds = (current.timesheets || [])
-      .map(t => parseInt((t.id || '').replace('TS-', ''), 10))
-      .filter(n => !isNaN(n));
-    const nextNum = existingIds.length ? Math.max(...existingIds) + 1 : 1;
-    const nextId  = `TS-${String(nextNum).padStart(3, '0')}`;
-
-    // Recent entries — for delete matching only
-    const recentTs = (current.timesheets || []).slice(-15)
+    // Recent entries for delete matching
+    const recentTs = recentTimesheets
       .map(t => `${t.id} | ${t.date} | ${t.project} | ${t.hours}h | notes: "${t.notes||''}"`)
       .join('\n');
 
-    // ── 3. Prompt — build dynamic examples from live project list ───────────
-    // Use the first active project as the "mark" example so examples never go stale
-    const exampleProject = projectList[0] || 'Mark Shippen – Nth Balgowlah';
-    const exampleProject2 = projectList.find(p => p.toLowerCase().includes('rob')) || projectList[1] || exampleProject;
+    // Dynamic example projects
+    const exampleProject  = projectList[0] || 'Mark - Nth Balgowlah';
+    const exampleProject2 = projectList.find(p => p.toLowerCase().includes('rob'))    || projectList[1] || exampleProject;
     const exampleProject3 = projectList.find(p => p.toLowerCase().includes('ibk') || p.toLowerCase().includes('mosman')) || projectList[2] || exampleProject;
-    const exampleProject4 = projectList.find(p => p.toLowerCase().includes('neil')) || projectList[3] || exampleProject;
+    const exampleProject4 = projectList.find(p => p.toLowerCase().includes('neil'))   || projectList[3] || exampleProject;
 
     const systemPrompt = `You are a data entry parser for a carpentry business. Output ONE JSON object only — no explanation, no markdown, no extra text.
 
@@ -168,7 +228,7 @@ ${recentTs || '(none yet)'}
 
 If you cannot confidently parse the input at all: {"action":"unclear","message":"brief plain-english reason"}`;
 
-    // ── 4. Call Haiku (skipped if pendingAction already set) ────────────────
+    // ── 3. Call Haiku (skipped if pendingAction already set) ──────────────────
     let parsed = pendingAction || null;
 
     if (!parsed) {
@@ -214,17 +274,13 @@ If you cannot confidently parse the input at all: {"action":"unclear","message":
       return { statusCode: 200, headers, body: JSON.stringify({ status: 'unclear', message: parsed.message }) };
     }
 
-    // ── Server-side project validation (three-tier fuzzy) ───────────────────
-    // Runs for both fresh parses AND confirmed pending actions (to handle new_project creation)
+    // ── 4. Server-side project validation (three-tier fuzzy) ─────────────────
     const NON_BILLABLE = ['Admin', 'Wasted Time', 'Holidays', 'Sick days', 'Carer days'];
     const tokenise = str => str.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/);
 
     function fuzzyMatchProject(name, validProjects) {
-      // 1. Exact match (case-insensitive)
       const exact = validProjects.find(p => p.toLowerCase() === name.toLowerCase());
       if (exact) return { match: exact, score: 1.0 };
-
-      // 2. Token overlap scoring
       const inputTokens = tokenise(name);
       let bestMatch = null, bestScore = 0;
       for (const p of validProjects) {
@@ -236,7 +292,6 @@ If you cannot confidently parse the input at all: {"action":"unclear","message":
       return { match: bestMatch, score: bestScore };
     }
 
-    // Validate project field for new timesheets and new expenses
     const needsProjectCheck = parsed.action === 'new' && parsed.project &&
       (parsed.type === 'timesheet' || parsed.type === 'expense');
 
@@ -244,68 +299,51 @@ If you cannot confidently parse the input at all: {"action":"unclear","message":
       const validProjects = [...projectList, ...NON_BILLABLE];
 
       if (parsed.new_project) {
-        // ── "new project" intent ─────────────────────────────────────────────
         const alreadyExists = validProjects.some(p => p.toLowerCase() === parsed.project.toLowerCase());
         if (!alreadyExists) {
-          // Assign next PR-xxx ID
-          const existingPRIds = (current.projects || [])
+          const existingPRNums = projectRows
             .map(p => parseInt((p.id || '').replace('PR-', ''), 10))
             .filter(n => !isNaN(n));
-          const nextPRNum = existingPRIds.length ? Math.max(...existingPRIds) + 1 : 1;
+          const nextPRNum = existingPRNums.length ? Math.max(...existingPRNums) + 1 : 1;
           const nextPRId  = `PR-${String(nextPRNum).padStart(3, '0')}`;
-
-          current.projects = current.projects || [];
-          current.projects.push({
-            id:     nextPRId,
-            name:   parsed.project,
-            status: 'Active',
-            quoted: 0,
-            notes:  `Created ${new Date().toISOString().slice(0,10)}`
+          await sbPost('projects', {
+            id: nextPRId, name: parsed.project, status: 'Active', quoted: 0,
+            notes: `Created ${new Date().toISOString().slice(0,10)}`
           });
           projectList.push(parsed.project);
           console.log(`New project registered: ${nextPRId} "${parsed.project}"`);
         }
-        // Normalise capitalisation to match existing if it's a duplicate
         const canonical = [...projectList, ...NON_BILLABLE].find(p => p.toLowerCase() === parsed.project.toLowerCase());
         if (canonical) parsed.project = canonical;
 
       } else {
-        // ── Three-tier fuzzy match ────────────────────────────────────────────
         const { match, score } = fuzzyMatchProject(parsed.project, validProjects);
         console.log(`Project lookup: "${parsed.project}" → "${match}" (score ${score?.toFixed(2)})`);
 
         if (score >= 0.75) {
-          // HIGH confidence — auto-correct silently
           parsed.project = match;
-
         } else if (score >= 0.35) {
-          // MEDIUM confidence — ask Seb to confirm
-          // Return the whole parsed action so the front-end can re-send it on "yes"
           return { statusCode: 200, headers, body: JSON.stringify({
-            status:    'confirm',
-            message:   `Did you mean "${match}"?`,
-            suggested: match,
-            pending:   { ...parsed, project: match }
+            status: 'confirm', message: `Did you mean "${match}"?`,
+            suggested: match, pending: { ...parsed, project: match }
           })};
-
         } else {
-          // LOW confidence — can't figure it out
           return { statusCode: 200, headers, body: JSON.stringify({
-            status:  'unclear',
+            status: 'unclear',
             message: `I don't recognise "${parsed.project}" as a project. Active projects: ${projectList.join(', ')}`
           })};
         }
       }
     }
 
-    // ── 5. Apply action ─────────────────────────────────────────────────────
+    // ── 5. Apply action to Supabase ───────────────────────────────────────────
     let entryLabel = '';
     let responseExtra = {};
 
     if (parsed.action === 'new') {
       if (parsed.type === 'timesheet') {
         const entry = {
-          id:       nextId,
+          id:       nextTsId,
           date:     parsed.date,
           project:  parsed.project,
           hours:    parseFloat(parsed.hours),
@@ -314,23 +352,14 @@ If you cannot confidently parse the input at all: {"action":"unclear","message":
           rate:     100,
           value:    parseFloat(parsed.hours) * 100
         };
-        current.timesheets = current.timesheets || [];
-        current.timesheets.push(entry);
+        await sbPost('timesheets', entry);
         entryLabel = `${entry.hours}h on ${entry.project} (${entry.date})`;
         responseExtra = { entry };
 
       } else if (parsed.type === 'expense') {
-        // Assign next EXP-xxx id
-        const existingExpIds = (current.expense_log || [])
-          .map(e => parseInt((e.id || '').replace('EXP-', ''), 10))
-          .filter(n => !isNaN(n));
-        const nextExpNum = existingExpIds.length ? Math.max(...existingExpIds) + 1 : 1;
-        const nextExpId  = `EXP-${String(nextExpNum).padStart(3, '0')}`;
-
         const qty       = parseFloat(parsed.qty) || 1;
         const unitPrice = parseFloat(parsed.unit_price) || parseFloat(parsed.amount) / qty;
         const amount    = Math.round(qty * unitPrice * 100) / 100;
-
         const entry = {
           id:          nextExpId,
           date:        parsed.date,
@@ -342,8 +371,7 @@ If you cannot confidently parse the input at all: {"action":"unclear","message":
           unit_price:  Math.round(unitPrice * 100) / 100,
           amount
         };
-        current.expense_log = current.expense_log || [];
-        current.expense_log.push(entry);
+        await sbPost('expense_log', entry);
         entryLabel = `$${entry.amount} — ${entry.description.slice(0, 40)}`;
         responseExtra = { entry };
 
@@ -352,127 +380,48 @@ If you cannot confidently parse the input at all: {"action":"unclear","message":
       }
 
     } else if (parsed.action === 'edit') {
-      // Server-side matching by date + optional project
       const targetDate    = parsed.date;
       const targetProject = parsed.project || null;
       const changes       = parsed.changes || {};
 
-      const updated = [];
-      for (const ts of (current.timesheets || [])) {
-        if (ts.date !== targetDate) continue;
-        if (targetProject && ts.project !== targetProject) continue;
-        Object.assign(ts, changes);
-        if (changes.hours) {
-          ts.hours  = parseFloat(ts.hours);
-          ts.value  = Math.round(ts.hours * (ts.rate || 100) * 100) / 100;
-        }
-        updated.push(ts);
-      }
+      // Find matching entries
+      let query = `?date=eq.${targetDate}`;
+      if (targetProject) query += `&project=eq.${encodeURIComponent(targetProject)}`;
+      const toUpdate = await sbGet('timesheets', query + '&select=id,date,project,hours,rate');
 
-      if (!updated.length) {
+      if (!toUpdate.length) {
         return { statusCode: 200, headers, body: JSON.stringify({
           status: 'unclear',
           message: `No timesheet entries found for ${targetDate}${targetProject ? ' / ' + targetProject : ''}`
         })};
       }
 
-      entryLabel = `Updated ${updated.length} entr${updated.length > 1 ? 'ies' : 'y'} on ${targetDate}`;
-      responseExtra = { updated };
+      const updatedEntries = [];
+      for (const ts of toUpdate) {
+        const patch = { ...changes };
+        if (changes.hours) {
+          patch.hours = parseFloat(changes.hours);
+          patch.value = Math.round(patch.hours * (ts.rate || 100) * 100) / 100;
+        }
+        const updated = await sbPatch('timesheets', `?id=eq.${encodeURIComponent(ts.id)}`, patch);
+        updatedEntries.push(...(Array.isArray(updated) ? updated : [updated]));
+      }
+
+      entryLabel = `Updated ${updatedEntries.length} entr${updatedEntries.length !== 1 ? 'ies' : 'y'} on ${targetDate}`;
+      responseExtra = { updated: updatedEntries };
 
     } else if (parsed.action === 'delete') {
-      const idx = (current.timesheets || []).findIndex(t => t.id === parsed.id);
-      if (idx === -1) {
+      const deleted = await sbDelete('timesheets', `?id=eq.${encodeURIComponent(parsed.id)}`);
+      if (!deleted || deleted.length === 0) {
         return { statusCode: 200, headers, body: JSON.stringify({ status: 'unclear', message: `Entry ${parsed.id} not found` }) };
       }
-      const removed = current.timesheets.splice(idx, 1)[0];
+      const removed = deleted[0];
       entryLabel = `Deleted ${removed.id}: ${removed.hours}h ${removed.project} (${removed.date})`;
       responseExtra = { deleted: removed };
 
     } else {
       return { statusCode: 200, headers, body: JSON.stringify({ status: 'unclear', message: 'Unrecognised action from model' }) };
     }
-
-    current.meta              = current.meta || {};
-    current.meta.last_updated = new Date().toISOString();
-
-    // ── 6. Push to GitHub (with retry on SHA conflict) ──────────────────────
-    let pushData;
-    let currentForPush = current;
-    let shaForPush = sha;
-
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const newContent = Buffer.from(JSON.stringify(currentForPush, null, 2)).toString('base64');
-      const pushRes = await fetch(
-        `https://api.github.com/repos/${GITHUB_REPO}/contents/${GITHUB_FILE}`,
-        {
-          method: 'PUT',
-          headers: {
-            'Authorization': `token ${GITHUB_TOKEN}`,
-            'Content-Type': 'application/json',
-            'User-Agent': 'MatiereHub'
-          },
-          body: JSON.stringify({
-            message: `Hub: ${entryLabel}`,
-            content: newContent,
-            sha: shaForPush,
-            branch: 'main'
-          })
-        }
-      );
-
-      pushData = await pushRes.json();
-
-      if (pushRes.ok) break; // success
-
-      // 409 or 422 = SHA conflict — someone else pushed between our read and write.
-      // GitHub returns 422 "sha does not match" for stale SHAs (not 409).
-      // Re-fetch the latest version, re-apply our action on top of it, then retry.
-      if ((pushRes.status === 409 || pushRes.status === 422) && attempt < 2) {
-        console.log(`SHA conflict on attempt ${attempt + 1}, re-fetching and retrying...`);
-        const ghRetry = await fetch(
-          `https://api.github.com/repos/${GITHUB_REPO}/contents/${GITHUB_FILE}`,
-          { headers: { 'Authorization': `token ${GITHUB_TOKEN}`, 'User-Agent': 'MatiereHub' } }
-        );
-        if (!ghRetry.ok) throw new Error(`GitHub re-fetch failed: ${ghRetry.status}`);
-        const ghRetryData = await ghRetry.json();
-        const freshData = JSON.parse(Buffer.from(ghRetryData.content, 'base64').toString('utf-8'));
-        shaForPush = ghRetryData.sha;
-
-        // Re-apply our action onto the fresh copy
-        if (parsed.action === 'new' && parsed.type === 'timesheet') {
-          freshData.timesheets = freshData.timesheets || [];
-          // Avoid duplicate if somehow already applied
-          if (!freshData.timesheets.find(t => t.id === responseExtra.entry?.id)) {
-            freshData.timesheets.push(responseExtra.entry);
-          }
-        } else if (parsed.action === 'new' && parsed.type === 'expense') {
-          freshData.expense_log = freshData.expense_log || [];
-          freshData.expense_log.push(responseExtra.entry);
-        } else if (parsed.action === 'delete') {
-          const idx = (freshData.timesheets || []).findIndex(t => t.id === parsed.id);
-          if (idx !== -1) freshData.timesheets.splice(idx, 1);
-        } else if (parsed.action === 'edit') {
-          for (const ts of (freshData.timesheets || [])) {
-            if (ts.date !== parsed.date) continue;
-            if (parsed.project && ts.project !== parsed.project) continue;
-            Object.assign(ts, parsed.changes || {});
-            if (parsed.changes?.hours) {
-              ts.hours = parseFloat(ts.hours);
-              ts.value = Math.round(ts.hours * (ts.rate || 100) * 100) / 100;
-            }
-          }
-        }
-        freshData.meta = freshData.meta || {};
-        freshData.meta.last_updated = new Date().toISOString();
-        currentForPush = freshData;
-        continue; // retry loop
-      }
-
-      // Any other error — bail out
-      throw new Error(`GitHub push failed: ${pushData.message}`);
-    }
-
-    if (!pushData?.commit) throw new Error(`GitHub push failed after retries: ${pushData?.message}`);
 
     return {
       statusCode: 200,
@@ -482,7 +431,6 @@ If you cannot confidently parse the input at all: {"action":"unclear","message":
         action: parsed.action,
         type:   parsed.type || parsed.action,
         label:  entryLabel,
-        commit: pushData.commit.sha.slice(0, 7),
         ...responseExtra
       })
     };
