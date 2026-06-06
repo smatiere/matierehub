@@ -375,12 +375,21 @@ async function writeToSupabase(result, log) {
   // ── Parse P&L reports ─────────────────────────────────────────────────────
   // FY24 + FY25: single-period summaries (no periods param) → used for fy_summary only
   // FY26: 11-month breakdown → used for monthly arrays AND fy_summary
-  const p24 = parsePnL(result.pnl_fy24 || {});          // single-period
-  const p25 = parsePnL(result.pnl_fy25 || {});          // single-period
-  const p26 = ensureChronological(parsePnL(result.pnl_fy26_monthly || {})); // 11 monthly cols
+  const p24 = parsePnL(result.pnl_fy24 || {});          // single-period (for fy_summary)
+  const p25 = parsePnL(result.pnl_fy25 || {});          // single-period (for fy_summary)
+  const p24m = ensureChronological(parsePnL(result.pnl_fy24_monthly || {})); // FY24 monthly
+  const p25m = ensureChronological(parsePnL(result.pnl_fy25_monthly || {})); // FY25 monthly
+  const p26  = ensureChronological(parsePnL(result.pnl_fy26_monthly || {})); // FY26 monthly
 
-  const allPeriods = p26.headerPeriods.map(parseMonthLabel).filter(Boolean);
+  // Combine all 3 years for monthly chart arrays (~34 months: FY24 11 + FY25 11 + FY26 12)
+  const pAll = combineMonthly(p24m, p25m, p26);
+
+  const allPeriods = pAll.headerPeriods.map(parseMonthLabel).filter(Boolean);
   const nPeriods   = allPeriods.length;
+
+  // FY26-only period count (for FY26-specific arrays like cost_detail_monthly)
+  const p26Periods = p26.headerPeriods.map(parseMonthLabel).filter(Boolean);
+  const nP26       = p26Periods.length;
 
   // Helper: extract FY totals from a sectionMap (works for both single and multi-period)
   function fyTotals(sm) {
@@ -423,24 +432,25 @@ async function writeToSupabase(result, log) {
       .reduce((s, q) => s + (q.total || 0), 0)
   );
 
-  // ── Monthly arrays (FY26 only, from the 11-month P&L) ─────────────────────
-  const incomeSect = findSection(p26.sectionMap, 'Income', 'Trading Income');
-  const cosSect    = findSection(p26.sectionMap, 'Less Cost of Sales', 'Cost of Sales');
+  // ── Monthly arrays (all 3 FYs combined, ~34 months) ──────────────────────
+  const incomeSect = findSection(pAll.sectionMap, 'Income', 'Trading Income');
+  const cosSect    = findSection(pAll.sectionMap, 'Less Cost of Sales', 'Cost of Sales');
 
   const revRow     = incomeSect['Total Income'] || incomeSect['Total Trading Income'] || sectionTotals(incomeSect);
   const matsRow    = cosSect['Materials'] || Array(nPeriods).fill(0);
 
-  const wagesP     = findAccount(p26.sectionMap, 'Wages Payable')            || Array(nPeriods).fill(0);
-  const loanSeb    = findAccount(p26.sectionMap, 'Loan - Sebastien Matiere') || Array(nPeriods).fill(0);
-  const wagesOwner = addArrays(wagesP, loanSeb);
+  const wagesP     = findAccount(pAll.sectionMap, 'Wages Payable')            || Array(nPeriods).fill(0);
+  const loanSeb    = findAccount(pAll.sectionMap, 'Loan - Sebastien Matiere') || Array(nPeriods).fill(0);
+  const wagesSal   = findAccount(pAll.sectionMap, 'Wages & Salaries')         || Array(nPeriods).fill(0);
+  const wagesOwner = addArrays(wagesP, loanSeb, wagesSal);
 
-  const mvRows     = Object.values(p26.sectionMap).flatMap(s =>
+  const mvRows     = Object.values(pAll.sectionMap).flatMap(s =>
     Object.entries(s).filter(([k]) => k.startsWith('Motor Vehicles')).map(([, v]) => v)
   );
   const motorVeh   = mvRows.length ? addArrays(...mvRows) : Array(nPeriods).fill(0);
 
-  const subconRow  = findAccount(p26.sectionMap, 'Subcontractors') || Array(nPeriods).fill(0);
-  const taxRow     = findAccount(p26.sectionMap, 'ATO/BAS Clearing') || Array(nPeriods).fill(0);
+  const subconRow  = findAccount(pAll.sectionMap, 'Subcontractors') || Array(nPeriods).fill(0);
+  const taxRow     = findAccount(pAll.sectionMap, 'ATO/BAS Clearing') || Array(nPeriods).fill(0);
 
   const clamp = arr => arr.slice(0, nPeriods).map(v => round2(Math.abs(v)));
 
@@ -450,13 +460,13 @@ async function writeToSupabase(result, log) {
   const wages26Sum   = round2(Math.abs((findAccount(p26.sectionMap, 'Wages & Salaries')         || []).reduce((a, b) => a + b, 0)));
   const cashBal      = parseCashBalance(result.balance_sheet || {});
 
-  // ── cost_detail_monthly (FY26 monthly breakdown) ──────────────────────────
+  // ── cost_detail_monthly (FY26 only — current-year breakdown) ─────────────
   const costDetail = {};
   for (const accounts of Object.values(p26.sectionMap)) {
     for (const [name, vals] of Object.entries(accounts)) {
       if (name.startsWith('Total ') || name.startsWith('Net ')) continue;
       if (ACCOUNT_CATEGORIES[name]) {
-        costDetail[name] = vals.slice(0, nPeriods).map(v => round2(Math.abs(v)));
+        costDetail[name] = vals.slice(0, nP26).map(v => round2(Math.abs(v)));
       }
     }
   }
@@ -536,7 +546,7 @@ async function writeToSupabase(result, log) {
 
   ]);
 
-  log.push(`  → Wrote 9 keys to Supabase xero_cache (${nPeriods} monthly periods)`);
+  log.push(`  → Wrote 9 keys to Supabase xero_cache (${nPeriods} monthly periods across 3 FYs)`);
 }
 
 // ── Main handler ──────────────────────────────────────────────────────────────
@@ -625,19 +635,23 @@ exports.handler = async function(event) {
       result.invoices = invoices;
     }
 
-    // ── P&L reports — FY26 monthly (max 11 periods) + FY24/FY25 summaries + balance sheet ──
+    // ── P&L reports — monthly breakdowns for FY24/FY25/FY26 + summaries + balance sheet ──
     if (scope.includes('pnl')) {
       log.push('Fetching P&L reports and balance sheet…');
-      const [pnl24, pnl25, pnl26m, balSheet] = await Promise.all([
+      const [pnl24, pnl25, pnl24m, pnl25m, pnl26m, balSheet] = await Promise.all([
         xeroGet('Reports/ProfitAndLoss?fromDate=2023-07-01&toDate=2024-06-30', accessToken, tenantId),
         xeroGet('Reports/ProfitAndLoss?fromDate=2024-07-01&toDate=2025-06-30', accessToken, tenantId),
+        xeroGet('Reports/ProfitAndLoss?fromDate=2023-07-01&periods=11&timeframe=MONTH', accessToken, tenantId),
+        xeroGet('Reports/ProfitAndLoss?fromDate=2024-07-01&periods=11&timeframe=MONTH', accessToken, tenantId),
         xeroGet('Reports/ProfitAndLoss?periods=11&timeframe=MONTH', accessToken, tenantId),
         xeroGet('Reports/BalanceSheet', accessToken, tenantId)
       ]);
-      result.pnl_fy24     = pnl24;   // single-period summary (for fy_summary)
-      result.pnl_fy25     = pnl25;   // single-period summary (for fy_summary)
-      result.pnl_fy26_monthly = pnl26m; // 11-month breakdown (for monthly arrays)
-      result.balance_sheet    = balSheet;
+      result.pnl_fy24          = pnl24;   // single-period summary (for fy_summary)
+      result.pnl_fy25          = pnl25;   // single-period summary (for fy_summary)
+      result.pnl_fy24_monthly  = pnl24m;  // 11-month breakdown Jul23–May24
+      result.pnl_fy25_monthly  = pnl25m;  // 11-month breakdown Jul24–May25
+      result.pnl_fy26_monthly  = pnl26m;  // 12-month breakdown Jul25–Jun26
+      result.balance_sheet     = balSheet;
       log.push('  → P&L reports and balance sheet fetched');
     }
 
