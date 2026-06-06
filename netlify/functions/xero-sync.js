@@ -619,7 +619,7 @@ exports.handler = async function(event) {
       const [pnl24, pnl25, pnl26m, balSheet] = await Promise.all([
         xeroGet('Reports/ProfitAndLoss?fromDate=2023-07-01&toDate=2024-06-30', accessToken, tenantId),
         xeroGet('Reports/ProfitAndLoss?fromDate=2024-07-01&toDate=2025-06-30', accessToken, tenantId),
-        xeroGet('Reports/ProfitAndLoss?fromDate=2025-07-01&toDate=2026-05-31&periods=11&timeframe=MONTH', accessToken, tenantId),
+        xeroGet('Reports/ProfitAndLoss?toDate=2026-05-31&periods=11&timeframe=MONTH', accessToken, tenantId),
         xeroGet('Reports/BalanceSheet', accessToken, tenantId)
       ]);
       result.pnl_fy24     = pnl24;   // single-period summary (for fy_summary)
