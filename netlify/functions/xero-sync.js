@@ -554,6 +554,19 @@ exports.handler = async function(event) {
   const params = event.queryStringParameters || {};
   const scope  = params.scope ? params.scope.split(',') : ['quotes', 'invoices', 'pnl', 'bank'];
 
+  // ── Optional: seed a fresh refresh token from POST body ──────────────────
+  // Useful when Netlify Blobs has a stale token and the fresh one is in the browser.
+  // Pass { "refresh_token": "..." } in the request body to override Blobs.
+  try {
+    if (event.body) {
+      const bodyData = JSON.parse(event.body);
+      if (bodyData.refresh_token) {
+        await saveRefreshToken(bodyData.refresh_token);
+        console.log('Seeded fresh refresh token from request body into Netlify Blobs');
+      }
+    }
+  } catch(e) { /* non-fatal — body may be empty or non-JSON */ }
+
   try {
     const startTime = Date.now();
     const log       = [];
