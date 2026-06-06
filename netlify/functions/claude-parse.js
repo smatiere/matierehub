@@ -18,8 +18,9 @@ exports.handler = async (event) => {
   if (!ANTHROPIC_API_KEY) return { statusCode: 500, headers, body: JSON.stringify({ error: 'API key not configured' }) };
 
   try {
-    const { text } = JSON.parse(event.body || '{}');
-    if (!text || !text.trim()) return { statusCode: 400, headers, body: JSON.stringify({ error: 'No input text provided' }) };
+    const body = JSON.parse(event.body || '{}');
+    const { text, pendingAction } = body;
+    if (!text && !pendingAction) return { statusCode: 400, headers, body: JSON.stringify({ error: 'No input provided' }) };
 
     // ── 1. Fetch current data.json ──────────────────────────────────────────
     const ghRes = await fetch(
@@ -64,7 +65,7 @@ exports.handler = async (event) => {
 TODAY: ${todayStr}
 YESTERDAY: ${yesterdayStr}
 ACTIVE PROJECTS: ${projectNames}
-NON-BILLABLE: Admin, Office, Wasted time, Holidays, Sick days, Carer days
+NON-BILLABLE: Admin, Wasted Time, Holidays, Sick days, Carer days
 
 CRITICAL: You MUST use project names EXACTLY as they appear in ACTIVE PROJECTS above. Do NOT invent or abbreviate project names.
 
@@ -93,13 +94,28 @@ Schema: {"action":"new","type":"expense","date":"YYYY-MM-DD","description":"full
 Examples:
 "$280 bunnings materials"                    → {"action":"new","type":"expense","date":"${todayStr}","description":"Bunnings - materials","category":"Materials","project":"","amount":280}
 "spent 85 on screws and nails at Mitre 10"  → {"action":"new","type":"expense","date":"${todayStr}","description":"Mitre 10 - screws and nails","category":"Materials","project":"","amount":85}
-"$62 fuel"                                   → {"action":"new","type":"expense","date":"${todayStr}","description":"Fuel","category":"Vehicle","project":"","amount":62}
-"160 parking fine seaforth"                  → {"action":"new","type":"expense","date":"${todayStr}","description":"Parking fine - Seaforth","category":"Vehicle","project":"","amount":160}
+"$62 fuel"                                   → {"action":"new","type":"expense","date":"${todayStr}","description":"Fuel","category":"Motor Vehicles - Fuel & Oil","project":"","amount":62}
+"160 parking fine seaforth"                  → {"action":"new","type":"expense","date":"${todayStr}","description":"Parking fine - Seaforth","category":"Fines & Penalties","project":"","amount":160}
 "sub 400 for neil plasterer"                 → {"action":"new","type":"expense","date":"${todayStr}","description":"Subcontractor - plasterer","category":"Subcontractor","project":"${exampleProject4}","amount":400}
 
-EXPENSE CATEGORIES: Materials, Vehicle, Subcontractor, Equipment, Office, Other
+EXPENSE CATEGORIES (use these exact strings):
+- Materials           → timber, plasterboard, fixings, adhesives, anything installed
+- Consumables         → blades, sandpaper, cutting discs, tape — used up on the job
+- Tools               → power tools, hand tools, accessories
+- Hire of Plant & Equipment → scaffold hire, equipment rental
+- Motor Vehicles - Fuel & Oil → petrol, diesel
+- Motor Vehicles - Repairs & Maintenance → servicing, tyres, repairs
+- Motor Vehicles - Registration & Insurance → rego, CTP, insurance
+- Motor Vehicles - Tolls → toll charges
+- Fines & Penalties   → parking fines, infringement notices
+- Subcontractors      → payments to subbies
+- Uniforms            → workwear, boots, PPE
+- Staff Amenities     → coffee, food on site
+- Subscriptions & Memberships → software, trade memberships
+- Sundry Expenses     → anything that doesn't fit above
+
 Dollar sign is optional — a number with a $ or near a store/item name = expense.
-If no project is obvious from context, leave project as empty string "".
+If project is obvious from context use exact name from ACTIVE PROJECTS. Otherwise leave project as empty string "".
 
 ---
 ## ACTION 3 — Edit an existing entry
@@ -133,113 +149,140 @@ ${recentTs || '(none yet)'}
 - No date mentioned → ${todayStr}
 
 ## PROJECT MATCHING — ALWAYS pick from ACTIVE PROJECTS list above
-- If unsure, pick the closest name from ACTIVE PROJECTS. Do NOT invent a new name.
-- "mark walkway", "walkway", "balgo walkway" → project containing "Walkway"
-- "mark", "nth balgo", "mark shippen", "balgowlah" (without "walkway") → "${exampleProject}"
-- "rob" → project containing "Rob"
-- "ibk", "mosman" → project containing "IBK" or "Mosman"
-- "neil" → project containing "Neil"
-- "walkway" → project containing "Walkway"
-- "admin", "office", "sick", "holiday", "carer" → matching NON-BILLABLE category
+- Match by keyword — first name, suburb, or any distinctive word in the project name
+- Copy the full exact project name from ACTIVE PROJECTS — never paraphrase or shorten it
+- "admin", "wasted", "sick", "holiday", "carer" → matching NON-BILLABLE category
 - Only set "new_project":true if input explicitly contains the words "new project"
+- If a project cannot be confidently identified, output {"action":"unclear","message":"brief reason"}
 
-If you cannot confidently parse the input: {"action":"unclear","message":"brief plain-english reason"}`;
+If you cannot confidently parse the input at all: {"action":"unclear","message":"brief plain-english reason"}`;
 
-    // ── 4. Call Claude Sonnet ───────────────────────────────────────────────
-    const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 300,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: text.trim() }]
-      })
-    });
+    // ── 4. Call Haiku (skipped if pendingAction already set) ────────────────
+    let parsed = pendingAction || null;
 
-    const claudeData = await claudeRes.json();
-    if (!claudeRes.ok) throw new Error(`Claude API error: ${claudeData.error?.message || claudeRes.status}`);
+    if (!parsed) {
+      const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 300,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: text.trim() }]
+        })
+      });
 
-    // Parse JSON from response
-    let rawText = claudeData.content[0].text.trim();
-    console.log('INPUT:', text.trim());
-    console.log('MODEL OUTPUT:', rawText);
+      const claudeData = await claudeRes.json();
+      if (!claudeRes.ok) throw new Error(`Claude API error: ${claudeData.error?.message || claudeRes.status}`);
 
-    rawText = rawText.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim();
-    let parsed;
-    try {
-      parsed = JSON.parse(rawText);
-    } catch(e) {
-      // Greedy match — handles nested objects e.g. {"changes":{"notes":"text"}}
-      const match = rawText.match(/\{[\s\S]*\}/);
-      if (match) {
-        try { parsed = JSON.parse(match[0]); }
-        catch(e2) { throw new Error(`Bad JSON from model: ${rawText.slice(0, 200)}`); }
-      } else {
-        throw new Error(`Bad JSON from model: ${rawText.slice(0, 200)}`);
+      let rawText = claudeData.content[0].text.trim();
+      console.log('INPUT:', text.trim());
+      console.log('MODEL OUTPUT:', rawText);
+
+      rawText = rawText.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim();
+      try {
+        parsed = JSON.parse(rawText);
+      } catch(e) {
+        const match = rawText.match(/\{[\s\S]*\}/);
+        if (match) {
+          try { parsed = JSON.parse(match[0]); }
+          catch(e2) { throw new Error(`Bad JSON from model: ${rawText.slice(0, 200)}`); }
+        } else {
+          throw new Error(`Bad JSON from model: ${rawText.slice(0, 200)}`);
+        }
       }
     }
+
     console.log('PARSED ACTION:', JSON.stringify(parsed));
 
     if (parsed.action === 'unclear') {
       return { statusCode: 200, headers, body: JSON.stringify({ status: 'unclear', message: parsed.message }) };
     }
 
-    // ── Server-side project validation ──────────────────────────────────────
-    const NON_BILLABLE = ['Admin', 'Office', 'Wasted time', 'Holidays', 'Sick days', 'Carer days'];
-    if (parsed.action === 'new' && parsed.type === 'timesheet' && parsed.project) {
+    // ── Server-side project validation (three-tier fuzzy) ───────────────────
+    // Runs for both fresh parses AND confirmed pending actions (to handle new_project creation)
+    const NON_BILLABLE = ['Admin', 'Wasted Time', 'Holidays', 'Sick days', 'Carer days'];
+    const tokenise = str => str.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/);
+
+    function fuzzyMatchProject(name, validProjects) {
+      // 1. Exact match (case-insensitive)
+      const exact = validProjects.find(p => p.toLowerCase() === name.toLowerCase());
+      if (exact) return { match: exact, score: 1.0 };
+
+      // 2. Token overlap scoring
+      const inputTokens = tokenise(name);
+      let bestMatch = null, bestScore = 0;
+      for (const p of validProjects) {
+        const pTokens = tokenise(p);
+        const overlap = inputTokens.filter(t => pTokens.includes(t)).length;
+        const score = overlap / Math.max(inputTokens.length, pTokens.length);
+        if (score > bestScore) { bestScore = score; bestMatch = p; }
+      }
+      return { match: bestMatch, score: bestScore };
+    }
+
+    // Validate project field for new timesheets and new expenses
+    const needsProjectCheck = parsed.action === 'new' && parsed.project &&
+      (parsed.type === 'timesheet' || parsed.type === 'expense');
+
+    if (needsProjectCheck) {
       const validProjects = [...projectList, ...NON_BILLABLE];
 
       if (parsed.new_project) {
-        // "new project" intent — create it if not already in the list
+        // ── "new project" intent ─────────────────────────────────────────────
         const alreadyExists = validProjects.some(p => p.toLowerCase() === parsed.project.toLowerCase());
         if (!alreadyExists) {
+          // Assign next PR-xxx ID
+          const existingPRIds = (current.projects || [])
+            .map(p => parseInt((p.id || '').replace('PR-', ''), 10))
+            .filter(n => !isNaN(n));
+          const nextPRNum = existingPRIds.length ? Math.max(...existingPRIds) + 1 : 1;
+          const nextPRId  = `PR-${String(nextPRNum).padStart(3, '0')}`;
+
           current.projects = current.projects || [];
           current.projects.push({
-            name: parsed.project,
+            id:     nextPRId,
+            name:   parsed.project,
             status: 'Active',
             quoted: 0,
-            notes: `Created ${new Date().toISOString().slice(0,10)}`
+            notes:  `Created ${new Date().toISOString().slice(0,10)}`
           });
-          // Refresh projectList after adding
           projectList.push(parsed.project);
+          console.log(`New project registered: ${nextPRId} "${parsed.project}"`);
         }
-        // Use the exact name as given (or normalise to existing if duplicate)
+        // Normalise capitalisation to match existing if it's a duplicate
         const canonical = [...projectList, ...NON_BILLABLE].find(p => p.toLowerCase() === parsed.project.toLowerCase());
         if (canonical) parsed.project = canonical;
+
       } else {
-        // Try exact match first (case-insensitive)
-        const exactMatch = validProjects.find(p => p.toLowerCase() === parsed.project.toLowerCase());
-        if (exactMatch) {
-          parsed.project = exactMatch;
+        // ── Three-tier fuzzy match ────────────────────────────────────────────
+        const { match, score } = fuzzyMatchProject(parsed.project, validProjects);
+        console.log(`Project lookup: "${parsed.project}" → "${match}" (score ${score?.toFixed(2)})`);
+
+        if (score >= 0.75) {
+          // HIGH confidence — auto-correct silently
+          parsed.project = match;
+
+        } else if (score >= 0.35) {
+          // MEDIUM confidence — ask Seb to confirm
+          // Return the whole parsed action so the front-end can re-send it on "yes"
+          return { statusCode: 200, headers, body: JSON.stringify({
+            status:    'confirm',
+            message:   `Did you mean "${match}"?`,
+            suggested: match,
+            pending:   { ...parsed, project: match }
+          })};
+
         } else {
-          // Fuzzy consolidation: score each valid project by token overlap with the returned name
-          // This catches "Mark - Nth Balgowlah" → "Mark Shippen – Nth Balgowlah"
-          const tokenise = str => str.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/);
-          const returnedTokens = tokenise(parsed.project);
-          let bestMatch = null;
-          let bestScore = 0;
-          for (const p of validProjects) {
-            const pTokens = tokenise(p);
-            const overlap = returnedTokens.filter(t => pTokens.includes(t)).length;
-            // Score = overlap / max(returned length, project length) — penalises short spurious matches
-            const score = overlap / Math.max(returnedTokens.length, pTokens.length);
-            if (score > bestScore) { bestScore = score; bestMatch = p; }
-          }
-          // Accept the fuzzy match only if overlap is meaningful (>50% token match)
-          if (bestMatch && bestScore >= 0.5) {
-            console.log(`Fuzzy match: "${parsed.project}" → "${bestMatch}" (score ${bestScore.toFixed(2)})`);
-            parsed.project = bestMatch;
-          } else {
-            return { statusCode: 200, headers, body: JSON.stringify({
-              status: 'unclear',
-              message: `Unknown project "${parsed.project}". Valid projects: ${projectList.join(', ')}`
-            })};
-          }
+          // LOW confidence — can't figure it out
+          return { statusCode: 200, headers, body: JSON.stringify({
+            status:  'unclear',
+            message: `I don't recognise "${parsed.project}" as a project. Active projects: ${projectList.join(', ')}`
+          })};
         }
       }
     }
