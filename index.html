@@ -2438,6 +2438,10 @@ async function handleXeroCallback() {
     }
   } catch (e) {
     console.error('Xero callback failed:', e);
+    history.replaceState({}, '', '/');
+    updateXeroBtn();
+    alert('⚠ Xero connection failed: ' + e.message + '\n\nPlease try clicking ⚡ Connect Xero again.');
+    return false;
   }
 
   history.replaceState({}, '', '/');
