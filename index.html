@@ -2394,10 +2394,65 @@ function showCategoryDetail(cat) {
     ${catQuotes.length>15?`<div style="padding:10px 14px;font-size:11px;color:var(--ink-4)">+ ${catQuotes.length-15} more quotes in this category</div>`:''}`);
 }
 
+// ── Xero OAuth callback handler ───────────────────────────────────────────────
+// After xeroConnect() redirects to Xero, Xero redirects back to
+// https://matierehub2.netlify.app/xero-callback?code=...&state=...
+// Netlify's SPA redirect serves index.html, and we handle the code here.
+async function handleXeroCallback() {
+  const params = new URLSearchParams(window.location.search);
+  const code  = params.get('code');
+  const state = params.get('state');
+  if (!code) return false;
+
+  // CSRF check
+  const savedState = localStorage.getItem('xero_state');
+  if (state && savedState && state !== savedState) {
+    console.error('Xero OAuth state mismatch — possible CSRF');
+    history.replaceState({}, '', '/');
+    return false;
+  }
+
+  try {
+    const res = await fetch('/.netlify/functions/xero-auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'callback', code, redirect_uri: XERO_REDIRECT_URI })
+    });
+    const tokens = await res.json();
+    if (tokens.error) throw new Error(tokens.error_description || tokens.error);
+
+    localStorage.setItem('xero_access_token', tokens.access_token);
+    if (tokens.refresh_token) localStorage.setItem('xero_refresh_token', tokens.refresh_token);
+    localStorage.setItem('xero_token_expiry', Date.now() + (tokens.expires_in * 1000));
+
+    // Fetch tenant ID
+    const connRes = await fetch('/.netlify/functions/xero-api', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint: 'connections', method: 'GET', access_token: tokens.access_token, tenant_id: 'none' })
+    });
+    const conns = await connRes.json();
+    if (Array.isArray(conns) && conns[0]) {
+      localStorage.setItem('xero_tenant_id', conns[0].tenantId);
+      localStorage.setItem('xero_org_name', conns[0].tenantName || 'Xero');
+    }
+  } catch (e) {
+    console.error('Xero callback failed:', e);
+  }
+
+  history.replaceState({}, '', '/');
+  return true;
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
-if (window.location.search.includes('xero=connected')) history.replaceState({}, '', '/');
-updateXeroBtn();
-loadData();
+(async () => {
+  if (window.location.pathname === '/xero-callback' || window.location.search.includes('code=')) {
+    await handleXeroCallback();
+  }
+  if (window.location.search.includes('xero=connected')) history.replaceState({}, '', '/');
+  updateXeroBtn();
+  loadData();
+})();
 </script>
 </body>
 </html>
