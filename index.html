@@ -272,12 +272,45 @@ body{padding-bottom:62px}
 let D = null;
 let charts = {};
 
-// ── Data load ─────────────────────────────────────────────────────────────────
+// ── Supabase config ───────────────────────────────────────────────────────────
+const SB_URL  = 'https://nwpzjqblhywclqharggu.supabase.co';
+const SB_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im53cHpqcWJsaHl3Y2xxaGFyZ2d1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA3MTQ2NjcsImV4cCI6MjA5NjI5MDY2N30.XYgfk5jriDpZVXFW6xkWh-hyaYLsP6ZKpInTMXqk9tc';
+const SB_HDR  = { 'apikey': SB_ANON, 'Authorization': 'Bearer ' + SB_ANON };
+
+async function sbGet(path) {
+  const r = await fetch(SB_URL + path, { headers: SB_HDR });
+  if (!r.ok) throw new Error('Supabase error ' + r.status + ' on ' + path);
+  return r.json();
+}
+
+// ── Data load — live from Supabase ────────────────────────────────────────────
 async function loadData() {
   try {
-    const r = await fetch('https://raw.githubusercontent.com/smatiere/matierehub/main/data.json?t=' + Date.now());
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    D = await r.json();
+    const [timesheets, expenses, projects, xeroRows] = await Promise.all([
+      sbGet('/rest/v1/timesheets?select=*&order=date.asc,id.asc'),
+      sbGet('/rest/v1/expense_log?select=*&order=date.asc,id.asc'),
+      sbGet('/rest/v1/projects?select=*&order=id.asc'),
+      sbGet('/rest/v1/xero_cache?select=key,data')
+    ]);
+
+    const xero = {};
+    xeroRows.forEach(row => { xero[row.key] = row.data; });
+
+    D = {
+      timesheets,
+      expense_log:          expenses,
+      projects,
+      kpis:                 xero.kpis                 || {},
+      monthly:              xero.monthly              || { labels:[], periods:[], revenue:[], materials:[], wages_owner:[] },
+      open_invoices:        xero.open_invoices        || [],
+      top_customers:        xero.top_customers        || [],
+      quotes:               xero.quotes               || [],
+      fy_summary:           xero.fy_summary           || {},
+      cost_detail_monthly:  xero.cost_detail_monthly  || {},
+      account_categories:   xero.account_categories   || {},
+      meta:                 xero.meta                 || { last_updated: new Date().toISOString() }
+    };
+
     document.getElementById('loading').style.display = 'none';
     document.getElementById('app').style.display = 'block';
     document.getElementById('error-box').style.display = 'none';
