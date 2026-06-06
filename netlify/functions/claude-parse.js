@@ -89,14 +89,25 @@ Notes: anything after the hours/project that sounds like a description of work �
 ---
 ## ACTION 2 — Log an expense
 
-Schema: {"action":"new","type":"expense","date":"YYYY-MM-DD","description":"full description","category":"Category","project":"Project or empty","amount":125.50}
+Schema: {"action":"new","type":"expense","date":"YYYY-MM-DD","supplier":"Shop name","description":"Product name","category":"Category","project":"Project or empty","qty":1,"unit_price":125.50,"amount":125.50}
+
+Rules:
+- One entry per product line. A single receipt = multiple expense actions if it has multiple products.
+- description = product name only (no qty, no price — those are separate fields)
+- qty × unit_price = amount (all ex GST)
+- qty defaults to 1 if not specified
+- unit_price = amount / qty (ex GST)
+- A receipt can have items for different projects — assign project per line based on context
+- If project is unclear, leave as ""
 
 Examples:
-"$280 bunnings materials"                    → {"action":"new","type":"expense","date":"${todayStr}","description":"Bunnings - materials","category":"Materials","project":"","amount":280}
-"spent 85 on screws and nails at Mitre 10"  → {"action":"new","type":"expense","date":"${todayStr}","description":"Mitre 10 - screws and nails","category":"Materials","project":"","amount":85}
-"$62 fuel"                                   → {"action":"new","type":"expense","date":"${todayStr}","description":"Fuel","category":"Motor Vehicles - Fuel & Oil","project":"","amount":62}
-"160 parking fine seaforth"                  → {"action":"new","type":"expense","date":"${todayStr}","description":"Parking fine - Seaforth","category":"Fines & Penalties","project":"","amount":160}
-"sub 400 for neil plasterer"                 → {"action":"new","type":"expense","date":"${todayStr}","description":"Subcontractor - plasterer","category":"Subcontractor","project":"${exampleProject4}","amount":400}
+"$280 bunnings materials"                    → {"action":"new","type":"expense","date":"${todayStr}","supplier":"Bunnings","description":"Materials","category":"Materials","project":"","qty":1,"unit_price":254.55,"amount":254.55}
+"3x deck screws $94.95 each at Bunnings"    → {"action":"new","type":"expense","date":"${todayStr}","supplier":"Bunnings","description":"Deck Screws","category":"Materials","project":"","qty":3,"unit_price":86.32,"amount":258.95}
+"$62 fuel"                                  → {"action":"new","type":"expense","date":"${todayStr}","supplier":"","description":"Fuel","category":"Motor Vehicles - Fuel & Oil","project":"","qty":1,"unit_price":56.36,"amount":56.36}
+"160 parking fine seaforth"                 → {"action":"new","type":"expense","date":"${todayStr}","supplier":"","description":"Parking fine - Seaforth","category":"Fines & Penalties","project":"","qty":1,"unit_price":145.45,"amount":145.45}
+"sub 400 for neil plasterer"                → {"action":"new","type":"expense","date":"${todayStr}","supplier":"","description":"Subcontractor - plasterer","category":"Subcontractors","project":"${exampleProject4}","qty":1,"unit_price":363.64,"amount":363.64}
+
+IMPORTANT: amounts are always ex GST. If given an inc-GST price, divide by 1.1 to get ex-GST.
 
 EXPENSE CATEGORIES (use these exact strings):
 - Materials           → timber, plasterboard, fixings, adhesives, anything installed
@@ -309,12 +320,27 @@ If you cannot confidently parse the input at all: {"action":"unclear","message":
         responseExtra = { entry };
 
       } else if (parsed.type === 'expense') {
+        // Assign next EXP-xxx id
+        const existingExpIds = (current.expense_log || [])
+          .map(e => parseInt((e.id || '').replace('EXP-', ''), 10))
+          .filter(n => !isNaN(n));
+        const nextExpNum = existingExpIds.length ? Math.max(...existingExpIds) + 1 : 1;
+        const nextExpId  = `EXP-${String(nextExpNum).padStart(3, '0')}`;
+
+        const qty       = parseFloat(parsed.qty) || 1;
+        const unitPrice = parseFloat(parsed.unit_price) || parseFloat(parsed.amount) / qty;
+        const amount    = Math.round(qty * unitPrice * 100) / 100;
+
         const entry = {
+          id:          nextExpId,
           date:        parsed.date,
+          supplier:    parsed.supplier || '',
           description: parsed.description,
-          category:    parsed.category || 'Other',
+          category:    parsed.category || 'Sundry Expenses',
           project:     parsed.project || '',
-          amount:      parseFloat(parsed.amount)
+          qty,
+          unit_price:  Math.round(unitPrice * 100) / 100,
+          amount
         };
         current.expense_log = current.expense_log || [];
         current.expense_log.push(entry);
