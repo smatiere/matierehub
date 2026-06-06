@@ -367,6 +367,13 @@ async function writeToSupabase(result, log) {
   const p25 = parsePnL(result.pnl_fy25 || {});          // single-period
   const p26 = ensureChronological(parsePnL(result.pnl_fy26_monthly || {})); // 11 monthly cols
 
+  // DEBUG: log raw p26 header to diagnose 0-periods issue
+  const rawReport = result.pnl_fy26_monthly?.Reports?.[0];
+  const rawHeader = rawReport?.Rows?.find(r => r.RowType === 'Header');
+  log.push(`DEBUG p26 RowTypes: ${(rawReport?.Rows||[]).slice(0,3).map(r=>r.RowType).join(', ')}`);
+  log.push(`DEBUG p26 header cells: ${JSON.stringify((rawHeader?.Cells||[]).slice(0,4).map(c=>c.Value))}`);
+  log.push(`DEBUG p26 headerPeriods parsed: ${JSON.stringify(p26.headerPeriods.slice(0,3))}`);
+
   const allPeriods = p26.headerPeriods.map(parseMonthLabel).filter(Boolean);
   const nPeriods   = allPeriods.length;
 
