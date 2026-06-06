@@ -70,9 +70,21 @@ exports.handler = async function(event) {
     return { statusCode: 500, headers: cors, body: JSON.stringify({ error: 'Missing XERO_CLIENT_ID or XERO_CLIENT_SECRET env vars' }) };
   }
 
+  // DEBUG: log raw request so we can see what's calling this function
+  console.log('xero-auth called:', {
+    method: event.httpMethod,
+    path: event.path,
+    rawBody: (event.body || '').slice(0, 300),
+    referer: event.headers?.referer || event.headers?.Referer || 'none'
+  });
+
   let payload;
   try { payload = JSON.parse(event.body || '{}'); }
-  catch { return { statusCode: 400, headers: cors, body: JSON.stringify({ error: 'Invalid JSON' }) }; }
+  catch (e) { return { statusCode: 400, headers: cors, body: JSON.stringify({ error: 'Invalid JSON: ' + e.message, rawBody: (event.body||'').slice(0,100) }) }; }
+
+  if (!payload || typeof payload !== 'object') {
+    return { statusCode: 400, headers: cors, body: JSON.stringify({ error: 'Body must be a JSON object', got: typeof payload }) };
+  }
 
   const { action } = payload;
   const credentials = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64');
