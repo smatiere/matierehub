@@ -30,7 +30,8 @@ exports.handler = async (event) => {
     const data   = JSON.parse(Buffer.from(ghData.content, 'base64').toString('utf-8'));
 
     // 2. Keys to cache in Supabase xero_cache
-    const xeroKeys = ['kpis','monthly','open_invoices','top_customers','quotes','fy_summary','cost_detail_monthly','account_categories'];
+    // 'quotes' excluded — 280 records make data.json too large for a single function call; xero-sync handles it
+    const xeroKeys = ['kpis','monthly','open_invoices','top_customers','fy_summary','cost_detail_monthly','account_categories'];
     const results  = [];
 
     for (const key of xeroKeys) {
