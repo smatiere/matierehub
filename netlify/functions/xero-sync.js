@@ -163,11 +163,23 @@ const MONTH_NUM = {
   Jul: '07', Aug: '08', Sep: '09', Oct: '10', Nov: '11', Dec: '12'
 };
 
-// "Jul 2023" → { period: "2023-07", label: "Jul '23" }
+// Handles both Xero formats:
+//   "30 Jun 26"  (DD Mon YY  — what Xero actually returns for periods)
+//   "Jun 2025"   (Mon YYYY   — older/alternative format)
+// → { period: "2026-06", label: "Jun '26" }
 function parseMonthLabel(label) {
-  const m = (label || '').match(/^(\w{3})\s+(\d{4})$/);
-  if (!m || !MONTH_NUM[m[1]]) return null;
-  return { period: `${m[2]}-${MONTH_NUM[m[1]]}`, label: `${m[1]} '${m[2].slice(2)}` };
+  // "30 Jun 26"
+  const m1 = (label || '').match(/^\d{1,2}\s+(\w{3})\s+(\d{2})$/);
+  if (m1 && MONTH_NUM[m1[1]]) {
+    const year = 2000 + parseInt(m1[2], 10);
+    return { period: `${year}-${MONTH_NUM[m1[1]]}`, label: `${m1[1]} '${m1[2]}` };
+  }
+  // "Jun 2025"
+  const m2 = (label || '').match(/^(\w{3})\s+(\d{4})$/);
+  if (m2 && MONTH_NUM[m2[1]]) {
+    return { period: `${m2[2]}-${MONTH_NUM[m2[1]]}`, label: `${m2[1]} '${m2[2].slice(2)}` };
+  }
+  return null;
 }
 
 // Parse a Xero P&L report (single-period or multi-period monthly).
@@ -366,13 +378,6 @@ async function writeToSupabase(result, log) {
   const p24 = parsePnL(result.pnl_fy24 || {});          // single-period
   const p25 = parsePnL(result.pnl_fy25 || {});          // single-period
   const p26 = ensureChronological(parsePnL(result.pnl_fy26_monthly || {})); // 11 monthly cols
-
-  // DEBUG: log raw p26 header to diagnose 0-periods issue
-  const rawReport = result.pnl_fy26_monthly?.Reports?.[0];
-  const rawHeader = rawReport?.Rows?.find(r => r.RowType === 'Header');
-  log.push(`DEBUG p26 RowTypes: ${(rawReport?.Rows||[]).slice(0,3).map(r=>r.RowType).join(', ')}`);
-  log.push(`DEBUG p26 header cells: ${JSON.stringify((rawHeader?.Cells||[]).slice(0,4).map(c=>c.Value))}`);
-  log.push(`DEBUG p26 headerPeriods parsed: ${JSON.stringify(p26.headerPeriods.slice(0,3))}`);
 
   const allPeriods = p26.headerPeriods.map(parseMonthLabel).filter(Boolean);
   const nPeriods   = allPeriods.length;
