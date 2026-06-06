@@ -360,27 +360,31 @@ const ACCOUNT_CATEGORIES = {
 
 // ── Transform raw Xero data → write all xero_cache keys to Supabase ───────────
 async function writeToSupabase(result, log) {
-  // ── Parse monthly P&L reports (reverse to chronological order) ────────────
-  const p24 = ensureChronological(parsePnL(result.pnl_fy24_monthly || {}));
-  const p25 = ensureChronological(parsePnL(result.pnl_fy25_monthly || {}));
-  const p26 = ensureChronological(parsePnL(result.pnl_fy26_monthly || {}));
-  const all = combineMonthly(p24, p25, p26);
+  // ── Parse P&L reports ─────────────────────────────────────────────────────
+  // FY24 + FY25: single-period summaries (no periods param) → used for fy_summary only
+  // FY26: 11-month breakdown → used for monthly arrays AND fy_summary
+  const p24 = parsePnL(result.pnl_fy24 || {});          // single-period
+  const p25 = parsePnL(result.pnl_fy25 || {});          // single-period
+  const p26 = ensureChronological(parsePnL(result.pnl_fy26_monthly || {})); // 11 monthly cols
 
-  const allPeriods = all.headerPeriods.map(parseMonthLabel).filter(Boolean);
+  const allPeriods = p26.headerPeriods.map(parseMonthLabel).filter(Boolean);
   const nPeriods   = allPeriods.length;
 
-  // Helper: extract single-FY summary from a sectionMap
+  // Helper: extract FY totals from a sectionMap (works for both single and multi-period)
   function fyTotals(sm) {
     const incomeAccts = findSection(sm, 'Income', 'Trading Income', 'Revenue');
     const cosAccts    = findSection(sm, 'Less Cost of Sales', 'Cost of Sales', 'Direct Costs');
     const opexAccts   = findSection(sm, 'Operating Expenses', 'Expenses');
     const netRow      = findAccount(sm, 'Net Profit', 'Net Surplus', 'Net Loss');
 
-    const revenue = round2(Math.abs(sectionTotals(incomeAccts)[0] || 0));
-    const cos     = round2(Math.abs(sectionTotals(cosAccts)[0] || 0));
+    // For multi-period, sum all columns; for single-period, [0] is the only value
+    const sumVals = vals => (vals || [0]).reduce((a, b) => a + b, 0);
+
+    const revenue = round2(Math.abs(sumVals(sectionTotals(incomeAccts))));
+    const cos     = round2(Math.abs(sumVals(sectionTotals(cosAccts))));
     const gross   = round2(revenue - cos);
-    const opex    = round2(Math.abs(sectionTotals(opexAccts)[0] || 0));
-    const net     = netRow ? round2(netRow[0] || 0) : round2(revenue - cos - opex);
+    const opex    = round2(Math.abs(sumVals(sectionTotals(opexAccts))));
+    const net     = netRow ? round2(sumVals(netRow)) : round2(revenue - cos - opex);
     return { revenue, cos, gross_profit: gross, opex, net_profit: net };
   }
 
@@ -407,42 +411,36 @@ async function writeToSupabase(result, log) {
       .reduce((s, q) => s + (q.total || 0), 0)
   );
 
-  // ── Monthly arrays ─────────────────────────────────────────────────────────
-  const incomeSect = findSection(all.sectionMap, 'Income', 'Trading Income');
-  const cosSect    = findSection(all.sectionMap, 'Less Cost of Sales', 'Cost of Sales');
+  // ── Monthly arrays (FY26 only, from the 11-month P&L) ─────────────────────
+  const incomeSect = findSection(p26.sectionMap, 'Income', 'Trading Income');
+  const cosSect    = findSection(p26.sectionMap, 'Less Cost of Sales', 'Cost of Sales');
 
-  // Revenue: prefer the "Total Income" SummaryRow, fall back to summing section rows
   const revRow     = incomeSect['Total Income'] || incomeSect['Total Trading Income'] || sectionTotals(incomeSect);
-
-  // Materials: direct account within Cost of Sales section
   const matsRow    = cosSect['Materials'] || Array(nPeriods).fill(0);
 
-  // Wages owner = Wages Payable + Loan - Sebastien Matiere (combined)
-  const wagesP     = findAccount(all.sectionMap, 'Wages Payable')            || Array(nPeriods).fill(0);
-  const loanSeb    = findAccount(all.sectionMap, 'Loan - Sebastien Matiere') || Array(nPeriods).fill(0);
+  const wagesP     = findAccount(p26.sectionMap, 'Wages Payable')            || Array(nPeriods).fill(0);
+  const loanSeb    = findAccount(p26.sectionMap, 'Loan - Sebastien Matiere') || Array(nPeriods).fill(0);
   const wagesOwner = addArrays(wagesP, loanSeb);
 
-  // Motor vehicles: sum all Motor Vehicles accounts across all sections
-  const mvRows     = Object.values(all.sectionMap).flatMap(s =>
+  const mvRows     = Object.values(p26.sectionMap).flatMap(s =>
     Object.entries(s).filter(([k]) => k.startsWith('Motor Vehicles')).map(([, v]) => v)
   );
   const motorVeh   = mvRows.length ? addArrays(...mvRows) : Array(nPeriods).fill(0);
 
-  // Subcontractors and Tax/BAS
-  const subconRow  = findAccount(all.sectionMap, 'Subcontractors') || Array(nPeriods).fill(0);
-  const taxRow     = findAccount(all.sectionMap, 'ATO/BAS Clearing') || Array(nPeriods).fill(0);
+  const subconRow  = findAccount(p26.sectionMap, 'Subcontractors') || Array(nPeriods).fill(0);
+  const taxRow     = findAccount(p26.sectionMap, 'ATO/BAS Clearing') || Array(nPeriods).fill(0);
 
   const clamp = arr => arr.slice(0, nPeriods).map(v => round2(Math.abs(v)));
 
-  // ── FY26-only values for kpis ─────────────────────────────────────────────
+  // ── FY26 KPI-specific values ──────────────────────────────────────────────
   const loanSeb26Sum = round2(Math.abs((findAccount(p26.sectionMap, 'Loan - Sebastien Matiere') || []).reduce((a, b) => a + b, 0)));
   const wagesP26Sum  = round2(Math.abs((findAccount(p26.sectionMap, 'Wages Payable')            || []).reduce((a, b) => a + b, 0)));
   const wages26Sum   = round2(Math.abs((findAccount(p26.sectionMap, 'Wages & Salaries')         || []).reduce((a, b) => a + b, 0)));
   const cashBal      = parseCashBalance(result.balance_sheet || {});
 
-  // ── cost_detail_monthly ────────────────────────────────────────────────────
+  // ── cost_detail_monthly (FY26 monthly breakdown) ──────────────────────────
   const costDetail = {};
-  for (const accounts of Object.values(all.sectionMap)) {
+  for (const accounts of Object.values(p26.sectionMap)) {
     for (const [name, vals] of Object.entries(accounts)) {
       if (name.startsWith('Total ') || name.startsWith('Net ')) continue;
       if (ACCOUNT_CATEGORIES[name]) {
@@ -615,20 +613,20 @@ exports.handler = async function(event) {
       result.invoices = invoices;
     }
 
-    // ── P&L reports — 3 FYs (monthly) + balance sheet ─────────────────────
+    // ── P&L reports — FY26 monthly (max 11 periods) + FY24/FY25 summaries + balance sheet ──
     if (scope.includes('pnl')) {
-      log.push('Fetching P&L reports (monthly, FY24–FY26) and balance sheet…');
-      const [pnl24m, pnl25m, pnl26m, balSheet] = await Promise.all([
-        xeroGet('Reports/ProfitAndLoss?fromDate=2023-07-01&toDate=2024-06-30&periods=12&timeframe=MONTH', accessToken, tenantId),
-        xeroGet('Reports/ProfitAndLoss?fromDate=2024-07-01&toDate=2025-06-30&periods=12&timeframe=MONTH', accessToken, tenantId),
+      log.push('Fetching P&L reports and balance sheet…');
+      const [pnl24, pnl25, pnl26m, balSheet] = await Promise.all([
+        xeroGet('Reports/ProfitAndLoss?fromDate=2023-07-01&toDate=2024-06-30', accessToken, tenantId),
+        xeroGet('Reports/ProfitAndLoss?fromDate=2024-07-01&toDate=2025-06-30', accessToken, tenantId),
         xeroGet('Reports/ProfitAndLoss?fromDate=2025-07-01&toDate=2026-05-31&periods=11&timeframe=MONTH', accessToken, tenantId),
         xeroGet('Reports/BalanceSheet', accessToken, tenantId)
       ]);
-      result.pnl_fy24_monthly = pnl24m;
-      result.pnl_fy25_monthly = pnl25m;
-      result.pnl_fy26_monthly = pnl26m;
+      result.pnl_fy24     = pnl24;   // single-period summary (for fy_summary)
+      result.pnl_fy25     = pnl25;   // single-period summary (for fy_summary)
+      result.pnl_fy26_monthly = pnl26m; // 11-month breakdown (for monthly arrays)
       result.balance_sheet    = balSheet;
-      log.push('  → P&L monthly reports and balance sheet fetched');
+      log.push('  → P&L reports and balance sheet fetched');
     }
 
     // ── Bank transactions (FY26) — kept for reference / future use ─────────
