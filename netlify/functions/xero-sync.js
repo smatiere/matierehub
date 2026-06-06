@@ -619,9 +619,9 @@ exports.handler = async function(event) {
     if (scope.includes('pnl')) {
       log.push('Fetching P&L reports (monthly, FY24–FY26) and balance sheet…');
       const [pnl24m, pnl25m, pnl26m, balSheet] = await Promise.all([
-        xeroGet('Reports/ProfitAndLoss?toDate=2024-06-30&periods=12&timeframe=MONTH', accessToken, tenantId),
-        xeroGet('Reports/ProfitAndLoss?toDate=2025-06-30&periods=12&timeframe=MONTH', accessToken, tenantId),
-        xeroGet('Reports/ProfitAndLoss?toDate=2026-05-31&periods=11&timeframe=MONTH', accessToken, tenantId),
+        xeroGet('Reports/ProfitAndLoss?fromDate=2023-07-01&toDate=2024-06-30&periods=12&timeframe=MONTH', accessToken, tenantId),
+        xeroGet('Reports/ProfitAndLoss?fromDate=2024-07-01&toDate=2025-06-30&periods=12&timeframe=MONTH', accessToken, tenantId),
+        xeroGet('Reports/ProfitAndLoss?fromDate=2025-07-01&toDate=2026-05-31&periods=11&timeframe=MONTH', accessToken, tenantId),
         xeroGet('Reports/BalanceSheet', accessToken, tenantId)
       ]);
       result.pnl_fy24_monthly = pnl24m;
