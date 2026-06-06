@@ -70,14 +70,6 @@ exports.handler = async function(event) {
     return { statusCode: 500, headers: cors, body: JSON.stringify({ error: 'Missing XERO_CLIENT_ID or XERO_CLIENT_SECRET env vars' }) };
   }
 
-  // DEBUG: log raw request so we can see what's calling this function
-  console.log('xero-auth called:', {
-    method: event.httpMethod,
-    path: event.path,
-    rawBody: (event.body || '').slice(0, 300),
-    referer: event.headers?.referer || event.headers?.Referer || 'none'
-  });
-
   let payload;
   try { payload = JSON.parse(event.body || '{}'); }
   catch (e) { return { statusCode: 400, headers: cors, body: JSON.stringify({ error: 'Invalid JSON: ' + e.message, rawBody: (event.body||'').slice(0,100) }) }; }
@@ -93,11 +85,12 @@ exports.handler = async function(event) {
   try {
     let formBody;
 
-    if (action === 'callback') {
+    if (action === 'callback' || action === 'exchange') {
       const { code, redirect_uri } = payload;
-      if (!code)         return { statusCode: 400, headers: cors, body: JSON.stringify({ error: 'Missing code' }) };
-      if (!redirect_uri) return { statusCode: 400, headers: cors, body: JSON.stringify({ error: 'Missing redirect_uri' }) };
-      formBody = { grant_type: 'authorization_code', code, redirect_uri };
+      if (!code) return { statusCode: 400, headers: cors, body: JSON.stringify({ error: 'Missing code' }) };
+      // redirect_uri may be omitted in older callers — fall back to registered URI
+      const uri = redirect_uri || 'https://matierehub2.netlify.app/xero-callback';
+      formBody = { grant_type: 'authorization_code', code, redirect_uri: uri };
 
     } else if (action === 'refresh') {
       const { refresh_token } = payload;
@@ -105,7 +98,7 @@ exports.handler = async function(event) {
       formBody = { grant_type: 'refresh_token', refresh_token };
 
     } else {
-      return { statusCode: 400, headers: cors, body: JSON.stringify({ error: 'action must be "callback" or "refresh"' }) };
+      return { statusCode: 400, headers: cors, body: JSON.stringify({ error: 'action must be "callback", "exchange", or "refresh"' }) };
     }
 
     const result = await httpPost('/connect/token', formBody, authHeader);
