@@ -235,4 +235,164 @@ These existing entries in `data.json` don't match the canonical schema and shoul
 
 ---
 
-*Last updated: 2026-06-06 — v3: qty/unit_price in expense schema, multi-project receipt rules, input-method-agnostic capture*
+## Xero Sync — How It Works
+
+### Trigger
+
+The "⬇ Sync Xero" button in the Hub calls `syncFromXero()` (in `index.html`), which:
+
+1. Fetches all data from Xero via `xeroApiCall()` → `/.netlify/functions/xero-api` (browser proxy)
+2. Downloads the result as `xero_sync_YYYY-MM-DD.json` to your computer
+3. You upload that file to Claude and say **"Merge this Xero sync into data.json"**
+4. Claude transforms and merges it into `data.json` and pushes to GitHub
+
+### What gets fetched
+
+| Key in sync file | Xero API call | Coverage |
+|---|---|---|
+| `invoices` | `Invoices?where=Type=="ACCREC"` | Sales invoices, 3 years from Jul 2023 |
+| `bills` | `Invoices?where=Type=="ACCPAY"` | Purchase bills, 3 years from Jul 2023 |
+| `quotes` | `Quotes` | All quotes, all time |
+| `contacts` | `Contacts` | All contacts |
+| `bank_transactions` | `BankTransactions` | 3 years from Jul 2023 |
+| `accounts` | `Accounts?where=Status=="ACTIVE"` | Chart of accounts |
+| `pnl_monthly_3y` | `Reports/ProfitAndLoss?periods=36&timeframe=MONTH` | Monthly P&L, Jul 2023 – Jun 2026 |
+| `pnl_fy24` | `Reports/ProfitAndLoss?fromDate=2023-07-01&toDate=2024-06-30` | FY24 annual |
+| `pnl_fy25` | `Reports/ProfitAndLoss?fromDate=2024-07-01&toDate=2025-06-30` | FY25 annual |
+| `pnl_fy26` | `Reports/ProfitAndLoss?fromDate=2025-07-01&toDate=2026-06-30` | FY26 YTD |
+| `balance_sheet` | `Reports/BalanceSheet` | Current |
+| `trial_balance` | `Reports/TrialBalance` | Current |
+| `journals` | `Journals` | General ledger, all time (if scope allows) |
+
+---
+
+### Financial Year boundaries
+
+| FY | Start | End |
+|---|---|---|
+| FY24 | 2023-07-01 | 2024-06-30 |
+| FY25 | 2024-07-01 | 2025-06-30 |
+| FY26 | 2025-07-01 | 2026-06-30 |
+
+**Rule:** Any invoice, transaction, or P&L period with a date in `YYYY-MM` where MM ∈ {07..12} belongs to FY `YYYY+1`, and MM ∈ {01..06} belongs to FY `YYYY`.
+
+---
+
+### P&L Report structure (Xero format)
+
+The Xero P&L report is a nested `Rows` array. Parsing rules:
+
+```
+Report.Rows[]
+  RowType: "Header"   → column headings (month labels for multi-period, or just "Total")
+  RowType: "Section"  → named section (Trading Income, Cost of Sales, Gross Profit, Expenses, Net Profit)
+    .Title            → section name string
+    .Rows[]           → child rows within section
+      RowType: "Row"        → individual account line
+        .Cells[0].Value     → account name
+        .Cells[1..n].Value  → numeric value per period (or single total)
+      RowType: "SummaryRow" → section total
+```
+
+**To extract a value:**
+1. Find the `Section` with the matching `.Title`
+2. Within that section, find the `Row` where `Cells[0].Value` matches the account name
+3. Read `Cells[i].Value` where `i` = the period column index (0-based after the label column)
+
+**Negative values:** Xero sometimes returns expenses as negative in P&L rows. Always use `Math.abs()` when storing cost figures.
+
+---
+
+### data.json field sources
+
+| data.json field | Source | Logic |
+|---|---|---|
+| `monthly.labels[]` | `pnl_monthly_3y` Header row | Extract month label strings from `Cells[].Value` |
+| `monthly.periods[]` | `pnl_monthly_3y` Header row | Convert labels to `YYYY-MM` format |
+| `monthly.revenue[]` | `pnl_monthly_3y` | Sum all rows in the **Trading Income** section per period |
+| `monthly.materials[]` | `pnl_monthly_3y` | Row named **"Materials"** (or **"Cost of Goods Sold"**) in the **Cost of Sales** section |
+| `monthly.wages_owner[]` | `pnl_monthly_3y` | Row named **"Wages & Salaries"** or **"Owner's Wages"** in the **Expenses** section |
+| `kpis.fy26_revenue` | `pnl_fy26` | SummaryRow of **Trading Income** section — single total cell |
+| `kpis.fy26_materials` | `pnl_fy26` | Row **"Materials"** in **Cost of Sales** — single total cell |
+| `kpis.fy26_gross_profit` | `pnl_fy26` | SummaryRow of **Gross Profit** section — single total cell |
+| `kpis.fy26_gp_margin` | Computed | `(fy26_gross_profit / fy26_revenue) × 100`, rounded to 2dp |
+| `kpis.fy26_opex` | `pnl_fy26` | SummaryRow of **Expenses** section — single total cell (abs value) |
+| `kpis.fy26_owner_drawings` | `pnl_fy26` | Row for owner wages/drawings in **Expenses** section |
+| `kpis.fy26_net_profit` | `pnl_fy26` | SummaryRow of **Net Profit** section — single total cell |
+| `kpis.cash_balance` | `balance_sheet` | **Bank** or **Cash** row in Assets section |
+| `kpis.total_outstanding` | `invoices` | Sum of `AmountDue` for all ACCREC invoices with `Status == "AUTHORISED"` |
+| `kpis.overdue_xero` | `invoices` | Sum of `AmountDue` where `Status == "AUTHORISED"` and `DueDateString < today` |
+| `kpis.pipeline_total` | `quotes` | Sum of `SubTotal` for all quotes with `Status` in `["DRAFT","SENT","ACCEPTED"]` |
+| `open_invoices[]` | `invoices` | ACCREC invoices with `Status == "AUTHORISED"`, mapped to compact schema |
+| `top_customers[]` | `invoices` | All ACCREC invoices, grouped by `Contact.Name`, sum of `SubTotal` per contact, top 10 by revenue |
+| `quotes[]` | `quotes` | Full quotes list mapped to compact schema (see Quotes section above) |
+| `fy_summary` | `pnl_fy24`, `pnl_fy25`, `pnl_fy26` | Revenue, gross profit, net profit totals per FY |
+| `cost_detail_monthly` | `pnl_monthly_3y` | Each named account row in **Expenses** section → array of monthly values |
+| `meta.last_updated` | Computed | ISO timestamp of when the merge was run |
+| `meta.invoice_count` | `invoices` | `invoices.length` |
+| `meta.bank_tx_count` | `bank_transactions` | `bank_transactions.length` |
+
+---
+
+### open_invoices compact schema
+
+Mapped from raw Xero ACCREC invoices with `Status == "AUTHORISED"`:
+
+```json
+{
+  "invoice": "INV-0042",
+  "contact": "Mark Shippen",
+  "date": "2026-05-15",
+  "due_date": "2026-06-15",
+  "amount": 3945.00,
+  "amount_due": 3945.00
+}
+```
+
+| Xero field | data.json field |
+|---|---|
+| `InvoiceNumber` | `invoice` |
+| `Contact.Name` | `contact` |
+| `DateString` (slice 0,10) | `date` |
+| `DueDateString` (slice 0,10) | `due_date` |
+| `SubTotal` | `amount` (ex GST) |
+| `AmountDue` | `amount_due` |
+
+**Note:** `days_old` is NOT stored — it is computed dynamically in the browser from `date` vs today's date.
+
+---
+
+### Merge rules — what to overwrite vs preserve
+
+When merging a Xero sync file into `data.json`:
+
+| Section | Rule |
+|---|---|
+| `monthly.*` | **Replace entirely** — always rebuild from the fresh P&L |
+| `kpis.*` | **Replace entirely** — always recompute from fresh P&L + invoices |
+| `open_invoices[]` | **Replace entirely** — reflects live Xero state |
+| `top_customers[]` | **Replace entirely** |
+| `quotes[]` | **Replace entirely** |
+| `fy_summary` | **Replace entirely** |
+| `cost_detail_monthly` | **Replace entirely** |
+| `timesheets[]` | **NEVER touch** — managed by Claude chat only |
+| `expense_log[]` | **NEVER touch** — managed by Claude chat only |
+| `projects[]` | **NEVER touch** — managed by Claude chat only |
+| `meta` | Update `last_updated`, `invoice_count`, `bank_tx_count`; preserve other keys |
+
+---
+
+### P&L account names to watch for (verify from real sync)
+
+These are the expected Xero account names for Matiere Pty Ltd. Confirm on first merge after a reconnect — account names can change if the chart of accounts is edited in Xero.
+
+| data.json field | Expected Xero account name |
+|---|---|
+| Revenue | `Sales` (in Trading Income) |
+| Materials cost | `Materials` (in Cost of Sales) |
+| Owner wages | `Wages & Salaries` or `Owner's Wages` (in Expenses) |
+| Subcontractors | `Subcontractors` (in Cost of Sales or Expenses) |
+
+---
+
+*Last updated: 2026-06-06 — v4: Xero sync section added (proxy function, fetch inventory, P&L parsing, field mappings, merge rules)*
