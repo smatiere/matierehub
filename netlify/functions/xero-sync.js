@@ -43,9 +43,17 @@ function httpRequest(options, body) {
 }
 
 // ── Token management ──────────────────────────────────────────────────────────
+// getStore('xero-tokens') cannot auto-detect its context in this deploy — it throws
+// "environment has not been configured to use Netlify Blobs". We pass siteID/token
+// explicitly (NETLIFY_SITE_ID / NETLIFY_BLOBS_TOKEN env vars — a Netlify Personal
+// Access Token). See XERO_NOTES.md §3 for the full story.
+function blobsStore() {
+  return getStore({ name: 'xero-tokens', siteID: process.env.NETLIFY_SITE_ID, token: process.env.NETLIFY_BLOBS_TOKEN });
+}
+
 async function getRefreshToken() {
   try {
-    const store = getStore('xero-tokens');
+    const store = blobsStore();
     const token = await store.get('refresh_token');
     if (token) return token;
   } catch (e) {
@@ -56,7 +64,7 @@ async function getRefreshToken() {
 
 async function saveRefreshToken(token) {
   try {
-    const store = getStore('xero-tokens');
+    const store = blobsStore();
     await store.set('refresh_token', token);
   } catch (e) {
     console.warn('Could not save refresh token to Blobs:', e.message);
@@ -581,7 +589,7 @@ exports.handler = async function(event) {
   if (params.debug === 'token') {
     let blobsError = null, blobsValue = null;
     try {
-      const store = getStore('xero-tokens');
+      const store = blobsStore();
       blobsValue = await store.get('refresh_token');
     } catch (e) { blobsError = e.message; }
 
