@@ -127,6 +127,20 @@ async function getTenantId(accessToken) {
   return tenants[0].tenantId;
 }
 
+// ── Chart of accounts lookup ──────────────────────────────────────────────────
+// Maps account NAME → Xero account CODE. We look this up live (rather than hardcoding
+// codes) because account codes can be renumbered in Xero but names stay stable — this
+// is what lets us find "ATO/BAS Clearing" / "Superannuation Payable" transactions
+// without Seb (or Claude, in a future session) having to go hunting for magic numbers.
+async function getAccountCodeMap(accessToken, tenantId) {
+  const res = await xeroGet('Accounts', accessToken, tenantId);
+  const map = {};
+  for (const acc of (res.Accounts || [])) {
+    if (acc.Name && acc.Code) map[acc.Name] = acc.Code;
+  }
+  return map;
+}
+
 // ── Paginated fetch ───────────────────────────────────────────────────────────
 async function fetchAllPages(baseEndpoint, key, accessToken, tenantId) {
   let all = [], page = 1;
@@ -137,7 +151,8 @@ async function fetchAllPages(baseEndpoint, key, accessToken, tenantId) {
     all = all.concat(batch);
     if (batch.length < 100) break;
     page++;
-    if (page > 10) break; // safety cap
+    if (page > 30) break; // safety cap — raised from 10: full-history bank-transaction
+                          // fetches (Dec 2022→now, ~3.5 yrs) can exceed 1,000 records
   }
   return all;
 }
@@ -160,6 +175,21 @@ async function sbUpsert(key, data) {
   if (!res.ok) {
     const msg = await res.text();
     throw new Error(`Supabase upsert "${key}" failed: ${res.status} ${msg.slice(0, 200)}`);
+  }
+}
+
+// ── Supabase read (used to merge new chunks into previously-cached history) ───
+async function sbSelect(key) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return null;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/xero_cache?key=eq.${key}&select=data`, {
+      headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` }
+    });
+    if (!res.ok) return null;
+    const rows = await res.json();
+    return rows[0]?.data || null;
+  } catch (e) {
+    return null;
   }
 }
 
@@ -295,6 +325,82 @@ function addArrays(...arrays) {
 
 function round2(n) { return Math.round((n || 0) * 100) / 100; }
 
+// ── Merge monthly chunks into the persisted history ───────────────────────────
+// Lets us backfill years of history in several short runs (each run only fetches a
+// bounded `from`/`to` window of P&L months — see monthRange call below) without
+// ever losing months synced in a previous run, AND lets a future lightweight
+// "just sync last month" run update one period without wiping the rest. Sources
+// are merged in order — later sources overwrite earlier ones for the same period —
+// so freshly-fetched data always wins over what's cached.
+function mergeMonthly(...sources) {
+  const map = {};
+  for (const src of sources) {
+    if (!src || !Array.isArray(src.periods)) continue;
+    src.periods.forEach((period, i) => {
+      map[period] = map[period] || { period, label: src.labels?.[i] || period };
+      if (src.labels?.[i]) map[period].label = src.labels[i];
+      for (const field of Object.keys(src)) {
+        if (field === 'periods' || field === 'labels') continue;
+        if (Array.isArray(src[field])) map[period][field] = src[field][i] ?? 0;
+      }
+    });
+  }
+  const periods = Object.keys(map).sort();
+  const fields = [...new Set(periods.flatMap(p => Object.keys(map[p])))].filter(f => f !== 'period' && f !== 'label');
+  const out = { periods, labels: periods.map(p => map[p].label) };
+  for (const f of fields) out[f] = periods.map(p => map[p][f] ?? 0);
+  return out;
+}
+
+// ── Transaction-level BAS / Super / Owner-drawings (the "source of truth" fix) ──
+// ATO/BAS Clearing, Superannuation Payable, Loan - Sebastien Matiere and Wages Payable
+// are Balance Sheet LIABILITY accounts — they never post to the P&L, which is why the
+// dashboard always showed $0 for tax/BAS/super even though real cash went out the door
+// (see BUGS.md "fy26_owner_drawings is 0" / project_bas_tax_gap memory). Real spend is
+// what actually left the bank account, so we sum SPEND bank-transaction line items coded
+// to these accounts, bucketed by month — the same proven mechanism that already produces
+// the (correct) owner-drawings figure, just generalised across accounts and full history.
+function bucketLiabilitiesByMonth(bankTx, accountCodeMap, periods, log) {
+  const GROUPS = {
+    tax_bas:        { names: ['ATO/BAS Clearing'],                              fallbackCodes: [] },
+    super:          { names: ['Superannuation Payable'],                        fallbackCodes: [] },
+    owner_drawings: { names: ['Loan - Sebastien Matiere', 'Wages Payable'],     fallbackCodes: ['896', '804'] }
+  };
+  const codeSets = {};
+  for (const [key, { names, fallbackCodes }] of Object.entries(GROUPS)) {
+    let codes = names.map(n => accountCodeMap[n]).filter(Boolean);
+    if (!codes.length && fallbackCodes.length) {
+      codes = fallbackCodes;
+      if (log) log.push(`  ⚠ "${names.join('"/"')}" not found in chart of accounts — using last-known code(s) ${fallbackCodes.join(', ')}`);
+    } else if (codes.length < names.length && log) {
+      const missing = names.filter(n => !accountCodeMap[n]);
+      log.push(`  ⚠ Couldn't find account code for: ${missing.join(', ')} — ${key} figures may be partial`);
+    }
+    codeSets[key] = codes;
+  }
+
+  const buckets = {};
+  for (const key of Object.keys(GROUPS)) buckets[key] = Object.fromEntries(periods.map(p => [p, 0]));
+  const periodSet = new Set(periods);
+
+  for (const tx of bankTx) {
+    if (tx.Type !== 'SPEND') continue;
+    const period = (tx.DateString || tx.Date || '').slice(0, 7);
+    if (!periodSet.has(period)) continue;
+    for (const li of (tx.LineItems || [])) {
+      for (const key of Object.keys(GROUPS)) {
+        if (codeSets[key].includes(li.AccountCode)) {
+          buckets[key][period] += Math.abs(li.LineAmount || 0);
+        }
+      }
+    }
+  }
+
+  const out = {};
+  for (const key of Object.keys(GROUPS)) out[key] = periods.map(p => round2(buckets[key][p] || 0));
+  return out;
+}
+
 // Recursively search balance sheet rows for "Total Bank Accounts" and return its value
 function parseCashBalance(bsObj) {
   const report = bsObj?.Reports?.[0] || bsObj;
@@ -406,28 +512,35 @@ const ACCOUNT_CATEGORIES = {
 };
 
 // ── Transform raw Xero data → write all xero_cache keys to Supabase ───────────
+// Format a 'YYYY-MM' period string as a chart label ('2022-07' → 'Jul 2022') —
+// independent of Xero's report-header format, so liability series spanning the
+// full history (which has no Xero header strings of its own) can still be labelled.
+const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function periodLabel(period) {
+  const [y, m] = period.split('-');
+  return `${MONTH_NAMES[parseInt(m, 10) - 1]} ${y}`;
+}
+
 async function writeToSupabase(result, log) {
   // ── Parse P&L reports ─────────────────────────────────────────────────────
-  // FY24 + FY25 + FY26: single-period summaries (clean fromDate→toDate ranges, ONE
-  // total per account) → used for fy_summary and FY26 KPIs. This is the same mechanism
-  // that already produced correct FY24/FY25 totals — now used for FY26 too instead of
-  // (incorrectly) summing rolling-window monthly columns.
+  // FY23 + FY24 + FY25 + FY26: single-period summaries (clean fromDate→toDate ranges,
+  // ONE total per account) → used for fy_summary and FY26 KPIs. This is the same
+  // mechanism that already produced correct FY24/FY25 totals — now extended back to
+  // FY23 (Matiere's first full financial year — Xero data starts Dec 2022) and used
+  // for FY26 too instead of (incorrectly) summing rolling-window monthly columns.
+  const p23 = parsePnL(result.pnl_fy23 || {});
   const p24 = parsePnL(result.pnl_fy24 || {});
   const p25 = parsePnL(result.pnl_fy25 || {});
   const p26 = parsePnL(result.pnl_fy26 || {});
 
   // Discrete calendar-month P&L for the chart arrays — fetched one bounded report per
-  // month (see fetchDiscreteMonthlyPnL), already combined into one {headerPeriods, sectionMap}
-  // spanning all 3 FYs in chronological order.
-  const pAll = result.pnl_monthly || { headerPeriods: [], sectionMap: {} };
-
-  const allPeriods = pAll.headerPeriods.map(parseMonthLabel).filter(Boolean);
-  const nPeriods   = allPeriods.length;
-
-  // FY26 portion of the combined monthly data (periods '2025-07' onward) — for cost_detail_monthly
-  const fy26Indices = allPeriods.reduce((acc, p, i) => { if (p.period >= '2025-07') acc.push(i); return acc; }, []);
-  const nP26        = fy26Indices.length;
-  const sliceFy26   = arr => fy26Indices.map(i => arr[i] || 0);
+  // month (see fetchDiscreteMonthlyPnL), combined into one {headerPeriods, sectionMap}.
+  // NOTE: this is now only a CHUNK of the full history (bounded by ?from=/?to=, default
+  // 2022-07→current month) — see the `pnl` scope block. It gets merged with whatever's
+  // already cached below (mergeMonthly), so a multi-run backfill never loses earlier months.
+  const pChunk       = result.pnl_monthly || { headerPeriods: [], sectionMap: {} };
+  const chunkPeriods = pChunk.headerPeriods.map(parseMonthLabel).filter(Boolean);
+  const nChunk       = chunkPeriods.length;
 
   // Helper: extract FY totals from a sectionMap (works for both single and multi-period)
   function fyTotals(sm) {
@@ -447,6 +560,7 @@ async function writeToSupabase(result, log) {
     return { revenue, cos, gross_profit: gross, opex, net_profit: net };
   }
 
+  const fy23s = fyTotals(p23.sectionMap);
   const fy24s = fyTotals(p24.sectionMap);
   const fy25s = fyTotals(p25.sectionMap);
   const fy26s = fyTotals(p26.sectionMap);
@@ -470,58 +584,120 @@ async function writeToSupabase(result, log) {
       .reduce((s, q) => s + (q.total || 0), 0)
   );
 
-  // ── Monthly arrays (all 3 FYs combined, ~34 months) ──────────────────────
-  const incomeSect = findSection(pAll.sectionMap, 'Income', 'Trading Income');
-  const cosSect    = findSection(pAll.sectionMap, 'Less Cost of Sales', 'Cost of Sales');
+  // ── Fresh P&L-derived monthly chunk (only the date-range this run fetched) ────
+  const incomeSect = findSection(pChunk.sectionMap, 'Income', 'Trading Income');
+  const cosSect    = findSection(pChunk.sectionMap, 'Less Cost of Sales', 'Cost of Sales');
 
   const revRow     = incomeSect['Total Income'] || incomeSect['Total Trading Income'] || sectionTotals(incomeSect);
-  const matsRow    = cosSect['Materials'] || Array(nPeriods).fill(0);
+  const matsRow    = cosSect['Materials'] || Array(nChunk).fill(0);
 
-  const wagesP     = findAccount(pAll.sectionMap, 'Wages Payable')            || Array(nPeriods).fill(0);
-  const loanSeb    = findAccount(pAll.sectionMap, 'Loan - Sebastien Matiere') || Array(nPeriods).fill(0);
-  const wagesSal   = findAccount(pAll.sectionMap, 'Wages & Salaries')         || Array(nPeriods).fill(0);
+  const wagesP     = findAccount(pChunk.sectionMap, 'Wages Payable')            || Array(nChunk).fill(0);
+  const loanSeb    = findAccount(pChunk.sectionMap, 'Loan - Sebastien Matiere') || Array(nChunk).fill(0);
+  const wagesSal   = findAccount(pChunk.sectionMap, 'Wages & Salaries')         || Array(nChunk).fill(0);
   const wagesOwner = addArrays(wagesP, loanSeb, wagesSal);
 
-  const mvRows     = Object.values(pAll.sectionMap).flatMap(s =>
+  const mvRows     = Object.values(pChunk.sectionMap).flatMap(s =>
     Object.entries(s).filter(([k]) => k.startsWith('Motor Vehicles')).map(([, v]) => v)
   );
-  const motorVeh   = mvRows.length ? addArrays(...mvRows) : Array(nPeriods).fill(0);
+  const motorVeh   = mvRows.length ? addArrays(...mvRows) : Array(nChunk).fill(0);
 
-  const subconRow  = findAccount(pAll.sectionMap, 'Subcontractors') || Array(nPeriods).fill(0);
-  const taxRow     = findAccount(pAll.sectionMap, 'ATO/BAS Clearing') || Array(nPeriods).fill(0);
+  const subconRow  = findAccount(pChunk.sectionMap, 'Subcontractors') || Array(nChunk).fill(0);
 
-  const clamp = arr => arr.slice(0, nPeriods).map(v => round2(Math.abs(v)));
+  const clamp = arr => arr.slice(0, nChunk).map(v => round2(Math.abs(v)));
+
+  const freshChunk = {
+    periods:        chunkPeriods.map(p => p.period),
+    labels:         chunkPeriods.map(p => p.label),
+    revenue:        clamp(revRow),
+    materials:      clamp(matsRow),
+    wages_owner:    clamp(wagesOwner),
+    motor_vehicles: clamp(motorVeh),
+    subcontractors: clamp(subconRow)
+    // NOTE: tax_bas deliberately omitted here — it used to be sourced from the P&L
+    // 'ATO/BAS Clearing' account, which is a Balance Sheet liability that never posts
+    // to the P&L and was therefore always $0 (see project_bas_tax_gap memory). The
+    // transaction-derived `freshLiability` series below supplies the real figure and
+    // wins on merge for every period, retiring the broken P&L-based field entirely.
+  };
+
+  // ── Liability series (BAS, Super, Owner Drawings) — sourced from bank TRANSACTIONS,
+  // not the P&L, because 'ATO/BAS Clearing', 'Superannuation Payable', 'Loan - Sebastien
+  // Matiere' and 'Wages Payable' are Balance Sheet LIABILITY accounts that structurally
+  // never appear in a Profit & Loss report (see BUGS.md "fy26_owner_drawings is 0" /
+  // project_bas_tax_gap memory — root cause of the long-standing $0 BAS/Tax/Super bug).
+  // Real spend is cash that actually left the bank account, so we bucket SPEND
+  // transactions coded to these accounts by month — across the FULL transaction history
+  // (independent of whichever P&L date-chunk this run covers), so these figures are
+  // always complete and correct, never partial.
+  const todayStr2        = todayISO();
+  const fullHistoryMonths  = monthRange(2022, 7, parseInt(todayStr2.slice(0, 4), 10), parseInt(todayStr2.slice(5, 7), 10));
+  const fullHistoryPeriods = fullHistoryMonths.map(m => m.period);
+  const bankTx           = result.bank_transactions || [];
+  const accountCodeMap   = result.account_code_map  || {};
+  const haveBankData     = Array.isArray(result.bank_transactions); // only present when scope included 'bank'
+
+  let freshLiability = null;
+  if (haveBankData) {
+    const liability = bucketLiabilitiesByMonth(bankTx, accountCodeMap, fullHistoryPeriods, log);
+    freshLiability = {
+      periods: fullHistoryPeriods,
+      labels:  fullHistoryPeriods.map(periodLabel),
+      tax_bas:        liability.tax_bas,
+      super:          liability.super,
+      owner_drawings: liability.owner_drawings
+    };
+  } else {
+    log.push('  ⚠ scope did not include "bank" — leaving cached BAS/Super/Owner-Drawings figures untouched');
+  }
+
+  // ── Merge: cached history ← fresh P&L chunk ← fresh liability series ──────────
+  // Order matters: existing cache is the base (so months outside this run's chunk
+  // survive), the fresh P&L chunk overwrites its covered months' revenue/cost fields,
+  // and — only if this run actually fetched bank data — the liability series overwrites
+  // tax_bas/super/owner_drawings for the FULL history (it always wins where present,
+  // since it's the only correct source for those fields).
+  const existingMonthly = await sbSelect('monthly');
+  const mergeSources    = [existingMonthly, freshChunk];
+  if (freshLiability) mergeSources.push(freshLiability);
+  const merged   = mergeMonthly(...mergeSources);
+  const nPeriods = merged.periods.length;
 
   // ── FY26 KPI-specific values ──────────────────────────────────────────────
   const wages26Sum = round2(Math.abs((findAccount(p26.sectionMap, 'Wages & Salaries') || []).reduce((a, b) => a + b, 0)));
   const cashBal    = parseCashBalance(result.balance_sheet || {});
 
-  // ── Owner Drawings (FY26) — sourced from bank transactions, NOT the P&L ──────────────
-  // 'Loan - Sebastien Matiere' (acct 896) and 'Wages Payable' (acct 804) are Balance Sheet
-  // LIABILITY accounts — they structurally never appear in a Profit & Loss report, which is
-  // why this KPI was stuck at $0 (see BUGS.md "fy26_owner_drawings is 0"). Real drawings are
-  // cash actually paid to Seb, so we sum FY26 bank SPEND transactions coded to either account
-  // — the same kind of bank-transaction-level matching that produced the old (correct-ish)
-  // $64,421.70 figure via the `normalizePnLCat` regex in index.html.
-  const DRAWING_ACCOUNT_CODES = ['896', '804']; // Loan - Sebastien Matiere, Wages Payable
-  const bankTx = result.bank_transactions || [];
-  const ownerDrawings26 = round2(
-    bankTx
-      .filter(tx => tx.Type === 'SPEND')
-      .reduce((sum, tx) => sum + (tx.LineItems || [])
-        .filter(li => DRAWING_ACCOUNT_CODES.includes(li.AccountCode))
-        .reduce((s, li) => s + Math.abs(li.LineAmount || 0), 0), 0)
-  );
+  // FY26 = periods '2025-07' through '2026-06'. Derived from the MERGED series (always
+  // complete) rather than the current chunk or a one-off transaction filter — so these
+  // KPIs are correct on every run regardless of which date-range was synced this time.
+  const fy26Mask = merged.periods.map(p => p >= '2025-07' && p <= '2026-06');
+  const sumFy26  = arr => round2((arr || []).reduce((s, v, i) => s + (fy26Mask[i] ? (v || 0) : 0), 0));
 
-  // ── cost_detail_monthly (FY26 only — current-year breakdown, sliced from discrete monthly data)
-  const costDetail = {};
-  for (const accounts of Object.values(pAll.sectionMap)) {
-    for (const [name, vals] of Object.entries(accounts)) {
-      if (name.startsWith('Total ') || name.startsWith('Net ')) continue;
-      if (ACCOUNT_CATEGORIES[name]) {
-        costDetail[name] = sliceFy26(vals).map(v => round2(Math.abs(v)));
+  const ownerDrawings26 = sumFy26(merged.owner_drawings);
+  const taxBas26        = sumFy26(merged.tax_bas);
+  const super26         = sumFy26(merged.super);
+
+  // ── cost_detail_monthly — current-FY (FY26) cost breakdown, sliced from this run's
+  // P&L chunk. Only rebuilt when the chunk actually includes FY26 months — otherwise
+  // (e.g. a backfill run covering FY23 only) we'd overwrite good FY26 data with empty
+  // FY23-era figures. Guarded by `nP26Chunk > 0`; the existing cached value is left as-is
+  // when skipped (we simply don't include the key in this run's upsert batch).
+  const fy26ChunkIdx = chunkPeriods.reduce((acc, p, i) => { if (p.period >= '2025-07') acc.push(i); return acc; }, []);
+  const nP26Chunk    = fy26ChunkIdx.length;
+  const sliceFy26    = arr => fy26ChunkIdx.map(i => arr[i] || 0);
+
+  let costDetail = null;
+  if (nP26Chunk > 0) {
+    costDetail = {};
+    for (const accounts of Object.values(pChunk.sectionMap)) {
+      for (const [name, vals] of Object.entries(accounts)) {
+        if (name.startsWith('Total ') || name.startsWith('Net ')) continue;
+        if (ACCOUNT_CATEGORIES[name]) {
+          costDetail[name] = sliceFy26(vals).map(v => round2(Math.abs(v)));
+        }
       }
     }
+  } else {
+    log.push('  ℹ this run\'s P&L chunk has no FY26 months — leaving cached cost_detail_monthly untouched');
   }
 
   // ── top_customers ──────────────────────────────────────────────────────────
@@ -538,9 +714,10 @@ async function writeToSupabase(result, log) {
 
   // ── Write all keys in parallel ─────────────────────────────────────────────
   const syncedAt = new Date().toISOString();
-  await Promise.all([
+  const writes = [
 
     sbUpsert('fy_summary', {
+      fy23: { revenue: fy23s.revenue, cos: fy23s.cos, gross_profit: fy23s.gross_profit, opex: fy23s.opex, net_profit: fy23s.net_profit },
       fy24: { revenue: fy24s.revenue, cos: fy24s.cos, gross_profit: fy24s.gross_profit, opex: fy24s.opex, net_profit: fy24s.net_profit },
       fy25: { revenue: fy25s.revenue, cos: fy25s.cos, gross_profit: fy25s.gross_profit, opex: fy25s.opex, net_profit: fy25s.net_profit },
       fy26: { revenue: fy26s.revenue, cos: fy26s.cos, gross_profit: fy26s.gross_profit, opex: fy26s.opex, net_profit: fy26s.net_profit }
@@ -554,25 +731,21 @@ async function writeToSupabase(result, log) {
       fy26_opex:            round2(fy26s.opex),
       fy26_wages:           wages26Sum,
       fy26_owner_drawings:  ownerDrawings26,
+      fy26_tax_bas:         taxBas26,
+      fy26_super:           super26,
       fy26_net_profit:      round2(fy26s.net_profit),
       cash_balance:         cashBal,
       total_outstanding:    outstanding,
       overdue_xero:         overdueXero,
       pipeline_total:       pipeline,
-      total_revenue_alltime: round2(fy24s.revenue + fy25s.revenue + fy26s.revenue),
+      total_revenue_alltime: round2(fy23s.revenue + fy24s.revenue + fy25s.revenue + fy26s.revenue),
       sebRate_per_hour:     100
     }),
 
-    sbUpsert('monthly', {
-      labels:         allPeriods.map(p => p.label),
-      periods:        allPeriods.map(p => p.period),
-      revenue:        clamp(revRow),
-      materials:      clamp(matsRow),
-      wages_owner:    clamp(wagesOwner),
-      motor_vehicles: clamp(motorVeh),
-      subcontractors: clamp(subconRow),
-      tax_bas:        clamp(taxRow)
-    }),
+    // `merged` = cached history ⊕ this run's fresh P&L chunk ⊕ (if fetched) the full
+    // transaction-derived liability series — see the merge step above. Spans full
+    // history (Jul'22→now) once fully backfilled, regardless of how many runs it took.
+    sbUpsert('monthly', merged),
 
     sbUpsert('open_invoices', openInvs.map(inv => ({
       invoice: inv.InvoiceNumber,
@@ -585,21 +758,28 @@ async function writeToSupabase(result, log) {
 
     allQuotes.length ? sbUpsert('quotes', allQuotes) : Promise.resolve(),
 
-    sbUpsert('cost_detail_monthly', costDetail),
-
     sbUpsert('account_categories', ACCOUNT_CATEGORIES),
 
     sbUpsert('meta', {
-      last_updated:  syncedAt,
-      source:        'xero-sync',
-      invoice_count: invoices.length,
-      quotes_count:  allQuotes.length,
-      period_count:  nPeriods
+      last_updated:    syncedAt,
+      source:          'xero-sync',
+      invoice_count:   invoices.length,
+      quotes_count:    allQuotes.length,
+      period_count:    nPeriods,
+      pnl_chunk_range: result.pnl_chunk_range || null,
+      bank_tx_synced:  haveBankData
     })
 
-  ]);
+  ];
 
-  log.push(`  → Wrote 9 keys to Supabase xero_cache (${nPeriods} monthly periods across 3 FYs)`);
+  // cost_detail_monthly is only rebuilt when this run's P&L chunk covers FY26 — see guard
+  // above. Omitting the upsert (rather than writing an empty object) leaves the cached
+  // value untouched, so a backfill run over older FYs can't blank out current-year data.
+  if (costDetail) writes.push(sbUpsert('cost_detail_monthly', costDetail));
+
+  await Promise.all(writes);
+
+  log.push(`  → Wrote ${writes.length} keys to Supabase xero_cache (${nPeriods} monthly periods merged${result.pnl_chunk_range ? `, this run's P&L chunk: ${result.pnl_chunk_range.from}→${result.pnl_chunk_range.to}` : ''})`);
 }
 
 // ── Main handler ──────────────────────────────────────────────────────────────
@@ -700,34 +880,58 @@ exports.handler = async function(event) {
       const FY26_START = '2025-07-01', FY26_END = '2026-06-30';
       const fy26ToDate = todayStr < FY26_END ? todayStr : FY26_END;
 
-      const [pnl24, pnl25, pnl26, balSheet] = await Promise.all([
+      const [pnl23, pnl24, pnl25, pnl26, balSheet] = await Promise.all([
+        xeroGet('Reports/ProfitAndLoss?fromDate=2022-07-01&toDate=2023-06-30', accessToken, tenantId),
         xeroGet('Reports/ProfitAndLoss?fromDate=2023-07-01&toDate=2024-06-30', accessToken, tenantId),
         xeroGet('Reports/ProfitAndLoss?fromDate=2024-07-01&toDate=2025-06-30', accessToken, tenantId),
         xeroGet(`Reports/ProfitAndLoss?fromDate=${FY26_START}&toDate=${fy26ToDate}`, accessToken, tenantId),
         xeroGet('Reports/BalanceSheet', accessToken, tenantId)
       ]);
+      result.pnl_fy23      = pnl23;   // single-period FY23 summary (Matiere's first full FY in Xero — Dec 2022 start)
       result.pnl_fy24      = pnl24;   // single-period FY24 summary (for fy_summary)
       result.pnl_fy25      = pnl25;   // single-period FY25 summary (for fy_summary)
       result.pnl_fy26      = pnl26;   // single-period FY26-to-date summary (for fy_summary + KPIs)
       result.balance_sheet = balSheet;
-      log.push('  → FY summary P&L reports and balance sheet fetched');
+      log.push('  → FY summary P&L reports (FY23–FY26) and balance sheet fetched');
 
-      log.push('Fetching discrete monthly P&L (Jul \'23 → current month)…');
-      const months = monthRange(2023, 7, parseInt(todayStr.slice(0, 4), 10), parseInt(todayStr.slice(5, 7), 10));
+      // Discrete monthly P&L is the slow part (~1 Xero call per calendar month — 11 max
+      // per `periods` request, so we fetch one bounded report per month). Fetching all
+      // ~47 months (Jul'22 → now) in one run risks the Netlify Function timeout, so the
+      // range is chunkable via ?from=YYYY-MM&to=YYYY-MM — e.g. run once per FY to backfill
+      // (from=2022-07&to=2023-06, then 2023-07&to=2024-06, etc), and a future lightweight
+      // weekly sync can pass just the last month or two. Chunks are merged with whatever's
+      // already cached (see mergeMonthly in writeToSupabase) — nothing already-synced is lost.
+      const DEFAULT_FROM = '2022-07', DEFAULT_TO = todayStr.slice(0, 7);
+      const fromParam = /^\d{4}-\d{2}$/.test(params.from || '') ? params.from : DEFAULT_FROM;
+      const toParam   = /^\d{4}-\d{2}$/.test(params.to   || '') ? params.to   : DEFAULT_TO;
+      const [fy, fm] = fromParam.split('-').map(n => parseInt(n, 10));
+      const [ty, tm] = toParam.split('-').map(n => parseInt(n, 10));
+
+      log.push(`Fetching discrete monthly P&L (${fromParam} → ${toParam})…`);
+      const months = monthRange(fy, fm, ty, tm);
       result.pnl_monthly = await fetchDiscreteMonthlyPnL(months, accessToken, tenantId, log);
+      result.pnl_chunk_range = { from: fromParam, to: toParam };
       log.push(`  → ${months.length} discrete monthly P&L reports fetched and combined`);
     }
 
-    // ── Bank transactions (FY26) — used for owner-drawings calc + reference ─
+    // ── Bank transactions (full history) — liability-account figures (BAS/Super/   ──
+    // Owner Drawings) are computed from these, NOT the P&L, because those accounts are
+    // Balance Sheet liabilities that never post to P&L (see project_bas_tax_gap memory /
+    // BUGS.md). Fetched in full (not chunked) — at ~11 paginated calls even across 4 years
+    // this is cheap relative to the monthly-P&L fetch, and these figures must always be
+    // complete regardless of which P&L date-chunk a given run covers.
     if (scope.includes('bank')) {
-      log.push('Fetching bank transactions…');
+      log.push('Fetching full bank transaction history (Dec 2022 → now)…');
       const bank = await fetchAllPages(
-        'BankTransactions?where=Date%3E%3DDateTime(2025%2C7%2C1)&unitdp=2',
+        'BankTransactions?where=Date%3E%3DDateTime(2022%2C12%2C1)&unitdp=2',
         'BankTransactions', accessToken, tenantId
       );
       log.push(`  → ${bank.length} bank transactions fetched`);
       result.bank_tx_count    = bank.length;
-      result.bank_transactions = bank; // used by writeToSupabase to compute fy26_owner_drawings; not written to Supabase directly
+      result.bank_transactions = bank; // used by writeToSupabase to compute liability series; not written to Supabase directly
+
+      log.push('Looking up chart-of-accounts codes for liability accounts…');
+      result.account_code_map = await getAccountCodeMap(accessToken, tenantId);
     }
 
     result.duration_ms = Date.now() - startTime;
