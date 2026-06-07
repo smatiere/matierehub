@@ -2103,26 +2103,27 @@ async function syncFromXero() {
     results.accounts = acRes.Accounts || [];
 
     // ── P&L reports ───────────────────────────────────────────────────────────
-    // Monthly breakdowns per FY — Xero rejects fromDate+toDate combined with
-    // periods+timeframe, AND caps the fromDate/toDate gap at 365 days, so a single
-    // 36-month combined request (fromDate=2023-07-01&toDate=2026-06-30&periods=36)
-    // always fails. Fetch one FY at a time instead (fromDate + periods=11&timeframe=MONTH,
-    // no toDate) — the same proven pattern xero-sync.js already uses successfully.
+    // Monthly breakdowns per FY. CONFIRMED WORKING PATTERN (tested live 2026-06-07):
+    // you MUST pass fromDate AND toDate together with periods=11&timeframe=MONTH —
+    // the combo is NOT rejected (earlier comment here was wrong). What actually breaks
+    // things is omitting toDate: Xero then validates fromDate against an implicit
+    // "today" as the end date, so any FY more than 365 days in the past throws
+    // "fromDate and toDate parameters must be with 365 days of each other."
+    // Each FY's own fromDate→toDate span is ~365 days, so this is always within range.
     status('Fetching monthly P&L — FY24…');
-    const pnl24m = await xeroApiCall('Reports/ProfitAndLoss?fromDate=2023-07-01&periods=11&timeframe=MONTH');
+    const pnl24m = await xeroApiCall('Reports/ProfitAndLoss?fromDate=2023-07-01&toDate=2024-06-30&periods=11&timeframe=MONTH');
     results.pnl_fy24_monthly = pnl24m.Reports ? pnl24m.Reports[0] : pnl24m;
 
     status('Fetching monthly P&L — FY25…');
-    const pnl25m = await xeroApiCall('Reports/ProfitAndLoss?fromDate=2024-07-01&periods=11&timeframe=MONTH');
+    const pnl25m = await xeroApiCall('Reports/ProfitAndLoss?fromDate=2024-07-01&toDate=2025-06-30&periods=11&timeframe=MONTH');
     results.pnl_fy25_monthly = pnl25m.Reports ? pnl25m.Reports[0] : pnl25m;
 
     status('Fetching monthly P&L — FY26…');
-    const pnl26m = await xeroApiCall('Reports/ProfitAndLoss?fromDate=2025-07-01&periods=11&timeframe=MONTH');
+    const pnl26m = await xeroApiCall('Reports/ProfitAndLoss?fromDate=2025-07-01&toDate=2026-06-30&periods=11&timeframe=MONTH');
     results.pnl_fy26_monthly = pnl26m.Reports ? pnl26m.Reports[0] : pnl26m;
-    // Note: deliberately NOT combining these into one 36-period report — Xero's report
-    // structure makes that fragile (account rows differ year to year). Keep them as three
-    // separate monthly breakdowns, same as xero-sync.js does for the Supabase cache —
-    // the Hub's chart code already knows how to stitch fy24/fy25/fy26 monthly series together.
+    // Kept as three separate FY breakdowns (not one 36-period report) — Xero's report
+    // structure makes a single combined request fragile (account rows differ year to
+    // year), and the Hub's chart code already stitches fy24/fy25/fy26 monthly series together.
 
     // Annual summaries per FY
     status('Fetching FY24 P&L…');
