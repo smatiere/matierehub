@@ -1,6 +1,8 @@
 # MatiereHub — Data Reference
 
-This file is the single source of truth for how data must be structured in `data.json`.
+This file is the single source of truth for how `timesheets`, `expense_log` and `projects` records must be structured.
+
+**Note:** these now live in **Supabase** tables (see `CLAUDE.md` → "Database: Supabase" and `supabase_setup.sql`), not in `data.json`. The schemas below describe the row shape Claude and the `claude-parse` Netlify function must produce — the storage layer changed, the required formats and allowed values did not.
 Claude (both this session and the `claude-parse` Netlify function) must match these exact formats and allowed values.
 
 ---
