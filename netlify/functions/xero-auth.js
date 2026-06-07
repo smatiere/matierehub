@@ -69,7 +69,11 @@ req.end();
 
 async function saveRefreshToken(token) {
 try {
-const store = getStore('xero-tokens');
+// getStore('xero-tokens') cannot auto-detect its context in this deploy — it throws
+// "environment has not been configured to use Netlify Blobs". Pass siteID/token
+// explicitly (NETLIFY_SITE_ID / NETLIFY_BLOBS_TOKEN — a Netlify Personal Access
+// Token) so this lands in the SAME store xero-sync.js reads from. See XERO_NOTES.md §3.
+const store = getStore({ name: 'xero-tokens', siteID: process.env.NETLIFY_SITE_ID, token: process.env.NETLIFY_BLOBS_TOKEN });
 await store.set('refresh_token', token);
 } catch (e) {
 console.warn('Could not save refresh token to Blobs:', e.message);
