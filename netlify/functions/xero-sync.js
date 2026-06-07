@@ -43,17 +43,9 @@ function httpRequest(options, body) {
 }
 
 // ── Token management ──────────────────────────────────────────────────────────
-// getStore('xero-tokens') cannot auto-detect its context in this deploy — it throws
-// "environment has not been configured to use Netlify Blobs". We pass siteID/token
-// explicitly (NETLIFY_SITE_ID / NETLIFY_BLOBS_TOKEN env vars — a Netlify Personal
-// Access Token). See XERO_NOTES.md §3 for the full story.
-function blobsStore() {
-  return getStore({ name: 'xero-tokens', siteID: process.env.NETLIFY_SITE_ID, token: process.env.NETLIFY_BLOBS_TOKEN });
-}
-
 async function getRefreshToken() {
   try {
-    const store = blobsStore();
+    const store = getStore('xero-tokens');
     const token = await store.get('refresh_token');
     if (token) return token;
   } catch (e) {
@@ -64,7 +56,7 @@ async function getRefreshToken() {
 
 async function saveRefreshToken(token) {
   try {
-    const store = blobsStore();
+    const store = getStore('xero-tokens');
     await store.set('refresh_token', token);
   } catch (e) {
     console.warn('Could not save refresh token to Blobs:', e.message);
@@ -221,23 +213,36 @@ function parsePnL(reportObj) {
   return { headerPeriods, sectionMap };
 }
 
-// Xero returns period columns newest-first; reverse to oldest-first for our charts.
-function ensureChronological(parsed) {
-  if (parsed.headerPeriods.length < 2) return parsed;
-  const a = parseMonthLabel(parsed.headerPeriods[0]);
-  const b = parseMonthLabel(parsed.headerPeriods[1]);
-  if (a && b && a.period > b.period) {
-    return {
-      headerPeriods: [...parsed.headerPeriods].reverse(),
-      sectionMap: Object.fromEntries(
-        Object.entries(parsed.sectionMap).map(([s, accounts]) => [
-          s,
-          Object.fromEntries(Object.entries(accounts).map(([acc, vals]) => [acc, [...vals].reverse()]))
-        ])
-      )
-    };
+// ── Calendar-month range helpers (for fetching discrete, non-overlapping monthly P&L) ────
+// See BUGS.md "Revenue/costs inflated ~9-10x" — Xero's `periods`+`timeframe=MONTH`
+// comparison-report mode returns rolling trailing-12-month windows, not calendar months.
+// The fix is to fetch one bounded `fromDate`/`toDate` report per calendar month instead.
+
+const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function todayISO() {
+  const d = new Date();
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
+// "2023-07" → "Jul 2023" — a label format parseMonthLabel already understands
+function periodToHeaderLabel(period) {
+  const [y, m] = period.split('-');
+  return `${MONTH_ABBR[parseInt(m, 10) - 1]} ${y}`;
+}
+
+// {from, to, period} for each calendar month from (startYear,startMonth) to (endYear,endMonth) inclusive
+function monthRange(startYear, startMonth, endYear, endMonth) {
+  const out = [];
+  let y = startYear, m = startMonth;
+  while (y < endYear || (y === endYear && m <= endMonth)) {
+    const mm = String(m).padStart(2, '0');
+    const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    out.push({ from: `${y}-${mm}-01`, to: `${y}-${mm}-${String(lastDay).padStart(2, '0')}`, period: `${y}-${mm}` });
+    m++;
+    if (m > 12) { m = 1; y++; }
   }
-  return parsed;
+  return out;
 }
 
 // Find a section by partial/exact title match; returns its accounts object or {}
@@ -309,32 +314,41 @@ function parseCashBalance(bsObj) {
   return round2(Math.abs(balance || 0));
 }
 
-// Merge 3 monthly P&L parsed results into one spanning all periods (FY24 + FY25 + FY26)
-function combineMonthly(p24, p25, p26) {
-  const headerPeriods = [...p24.headerPeriods, ...p25.headerPeriods, ...p26.headerPeriods];
-  const sectionMap    = {};
-
-  const allSections = new Set([
-    ...Object.keys(p24.sectionMap),
-    ...Object.keys(p25.sectionMap),
-    ...Object.keys(p26.sectionMap)
-  ]);
-
-  for (const section of allSections) {
-    sectionMap[section] = {};
-    const allAccounts = new Set([
-      ...Object.keys(p24.sectionMap[section] || {}),
-      ...Object.keys(p25.sectionMap[section] || {}),
-      ...Object.keys(p26.sectionMap[section] || {})
-    ]);
-    for (const account of allAccounts) {
-      const n24 = p24.headerPeriods.length, n25 = p25.headerPeriods.length, n26 = p26.headerPeriods.length;
-      const v24 = p24.sectionMap[section]?.[account] || Array(n24).fill(0);
-      const v25 = p25.sectionMap[section]?.[account] || Array(n25).fill(0);
-      const v26 = p26.sectionMap[section]?.[account] || Array(n26).fill(0);
-      sectionMap[section][account] = [...v24, ...v25, ...v26];
-    }
+// Fetch ONE P&L report PER CALENDAR MONTH and stitch them into a single combined
+// {headerPeriods, sectionMap} structure spanning the whole range.
+//
+// WHY: Xero's `periods`+`timeframe=MONTH` "comparison report" mode does NOT return discrete,
+// non-overlapping calendar months — it returns rolling trailing-12-month windows anchored to
+// the report date. That caused every "monthly" revenue/cost figure on the dashboard to be a
+// ~12-month rolling total instead of that month's actual figure (~9-10x inflation — Seb
+// spotted "March '24 showing $165k when it should be ~$10-15k"; full investigation in
+// BUGS.md "Revenue/costs inflated ~9-10x"). Fetching one bounded `fromDate`/`toDate` report
+// per month is slower (N calls, batched) but each report can only return the single
+// calendar-month period we explicitly asked for — guaranteed correct, no API guesswork.
+async function fetchDiscreteMonthlyPnL(months, accessToken, tenantId, log) {
+  const BATCH = 6; // keep concurrent Xero calls modest — avoid rate limits / timeouts
+  const reports = [];
+  for (let i = 0; i < months.length; i += BATCH) {
+    const batch = months.slice(i, i + BATCH);
+    const batchResults = await Promise.all(
+      batch.map(({ from, to }) => xeroGet(`Reports/ProfitAndLoss?fromDate=${from}&toDate=${to}`, accessToken, tenantId))
+    );
+    reports.push(...batchResults);
+    if (log) log.push(`  → fetched discrete monthly P&L: ${Math.min(i + BATCH, months.length)}/${months.length}`);
   }
+
+  const headerPeriods = months.map(m => periodToHeaderLabel(m.period));
+  const sectionMap    = {};
+  reports.forEach((reportObj, i) => {
+    const parsed = parsePnL(reportObj);
+    for (const [section, accounts] of Object.entries(parsed.sectionMap)) {
+      sectionMap[section] = sectionMap[section] || {};
+      for (const [name, vals] of Object.entries(accounts)) {
+        if (!sectionMap[section][name]) sectionMap[section][name] = Array(months.length).fill(0);
+        sectionMap[section][name][i] = vals[0] || 0; // single-period report → one value per month
+      }
+    }
+  });
 
   return { headerPeriods, sectionMap };
 }
@@ -381,23 +395,26 @@ const ACCOUNT_CATEGORIES = {
 // ── Transform raw Xero data → write all xero_cache keys to Supabase ───────────
 async function writeToSupabase(result, log) {
   // ── Parse P&L reports ─────────────────────────────────────────────────────
-  // FY24 + FY25: single-period summaries (no periods param) → used for fy_summary only
-  // FY26: 11-month breakdown → used for monthly arrays AND fy_summary
-  const p24 = parsePnL(result.pnl_fy24 || {});          // single-period (for fy_summary)
-  const p25 = parsePnL(result.pnl_fy25 || {});          // single-period (for fy_summary)
-  const p24m = ensureChronological(parsePnL(result.pnl_fy24_monthly || {})); // FY24 monthly
-  const p25m = ensureChronological(parsePnL(result.pnl_fy25_monthly || {})); // FY25 monthly
-  const p26  = ensureChronological(parsePnL(result.pnl_fy26_monthly || {})); // FY26 monthly
+  // FY24 + FY25 + FY26: single-period summaries (clean fromDate→toDate ranges, ONE
+  // total per account) → used for fy_summary and FY26 KPIs. This is the same mechanism
+  // that already produced correct FY24/FY25 totals — now used for FY26 too instead of
+  // (incorrectly) summing rolling-window monthly columns.
+  const p24 = parsePnL(result.pnl_fy24 || {});
+  const p25 = parsePnL(result.pnl_fy25 || {});
+  const p26 = parsePnL(result.pnl_fy26 || {});
 
-  // Combine all 3 years for monthly chart arrays (~34 months: FY24 11 + FY25 11 + FY26 12)
-  const pAll = combineMonthly(p24m, p25m, p26);
+  // Discrete calendar-month P&L for the chart arrays — fetched one bounded report per
+  // month (see fetchDiscreteMonthlyPnL), already combined into one {headerPeriods, sectionMap}
+  // spanning all 3 FYs in chronological order.
+  const pAll = result.pnl_monthly || { headerPeriods: [], sectionMap: {} };
 
   const allPeriods = pAll.headerPeriods.map(parseMonthLabel).filter(Boolean);
   const nPeriods   = allPeriods.length;
 
-  // FY26-only period count (for FY26-specific arrays like cost_detail_monthly)
-  const p26Periods = p26.headerPeriods.map(parseMonthLabel).filter(Boolean);
-  const nP26       = p26Periods.length;
+  // FY26 portion of the combined monthly data (periods '2025-07' onward) — for cost_detail_monthly
+  const fy26Indices = allPeriods.reduce((acc, p, i) => { if (p.period >= '2025-07') acc.push(i); return acc; }, []);
+  const nP26        = fy26Indices.length;
+  const sliceFy26   = arr => fy26Indices.map(i => arr[i] || 0);
 
   // Helper: extract FY totals from a sectionMap (works for both single and multi-period)
   function fyTotals(sm) {
@@ -463,18 +480,33 @@ async function writeToSupabase(result, log) {
   const clamp = arr => arr.slice(0, nPeriods).map(v => round2(Math.abs(v)));
 
   // ── FY26 KPI-specific values ──────────────────────────────────────────────
-  const loanSeb26Sum = round2(Math.abs((findAccount(p26.sectionMap, 'Loan - Sebastien Matiere') || []).reduce((a, b) => a + b, 0)));
-  const wagesP26Sum  = round2(Math.abs((findAccount(p26.sectionMap, 'Wages Payable')            || []).reduce((a, b) => a + b, 0)));
-  const wages26Sum   = round2(Math.abs((findAccount(p26.sectionMap, 'Wages & Salaries')         || []).reduce((a, b) => a + b, 0)));
-  const cashBal      = parseCashBalance(result.balance_sheet || {});
+  const wages26Sum = round2(Math.abs((findAccount(p26.sectionMap, 'Wages & Salaries') || []).reduce((a, b) => a + b, 0)));
+  const cashBal    = parseCashBalance(result.balance_sheet || {});
 
-  // ── cost_detail_monthly (FY26 only — current-year breakdown) ─────────────
+  // ── Owner Drawings (FY26) — sourced from bank transactions, NOT the P&L ──────────────
+  // 'Loan - Sebastien Matiere' (acct 896) and 'Wages Payable' (acct 804) are Balance Sheet
+  // LIABILITY accounts — they structurally never appear in a Profit & Loss report, which is
+  // why this KPI was stuck at $0 (see BUGS.md "fy26_owner_drawings is 0"). Real drawings are
+  // cash actually paid to Seb, so we sum FY26 bank SPEND transactions coded to either account
+  // — the same kind of bank-transaction-level matching that produced the old (correct-ish)
+  // $64,421.70 figure via the `normalizePnLCat` regex in index.html.
+  const DRAWING_ACCOUNT_CODES = ['896', '804']; // Loan - Sebastien Matiere, Wages Payable
+  const bankTx = result.bank_transactions || [];
+  const ownerDrawings26 = round2(
+    bankTx
+      .filter(tx => tx.Type === 'SPEND')
+      .reduce((sum, tx) => sum + (tx.LineItems || [])
+        .filter(li => DRAWING_ACCOUNT_CODES.includes(li.AccountCode))
+        .reduce((s, li) => s + Math.abs(li.LineAmount || 0), 0), 0)
+  );
+
+  // ── cost_detail_monthly (FY26 only — current-year breakdown, sliced from discrete monthly data)
   const costDetail = {};
-  for (const accounts of Object.values(p26.sectionMap)) {
+  for (const accounts of Object.values(pAll.sectionMap)) {
     for (const [name, vals] of Object.entries(accounts)) {
       if (name.startsWith('Total ') || name.startsWith('Net ')) continue;
       if (ACCOUNT_CATEGORIES[name]) {
-        costDetail[name] = vals.slice(0, nP26).map(v => round2(Math.abs(v)));
+        costDetail[name] = sliceFy26(vals).map(v => round2(Math.abs(v)));
       }
     }
   }
@@ -508,7 +540,7 @@ async function writeToSupabase(result, log) {
       fy26_gp_margin:       fy26s.revenue ? round2(fy26s.gross_profit / fy26s.revenue * 100) : 0,
       fy26_opex:            round2(fy26s.opex),
       fy26_wages:           wages26Sum,
-      fy26_owner_drawings:  round2(loanSeb26Sum + wagesP26Sum),
+      fy26_owner_drawings:  ownerDrawings26,
       fy26_net_profit:      round2(fy26s.net_profit),
       cash_balance:         cashBal,
       total_outstanding:    outstanding,
@@ -582,37 +614,18 @@ exports.handler = async function(event) {
   const params = event.queryStringParameters || {};
   const scope  = params.scope ? params.scope.split(',') : ['quotes', 'invoices', 'pnl', 'bank'];
 
-  // ── TEMPORARY diagnostic: ?debug=token returns a non-reversible fingerprint
-  // of whatever getRefreshToken() currently resolves to, WITHOUT exchanging it.
-  // Used to confirm xero-auth.js's writes and xero-sync.js's reads hit the same
-  // Blobs store. Remove once the token-rotation issue is fully resolved.
-  if (params.debug === 'token') {
-    let blobsError = null, blobsValue = null;
-    try {
-      const store = blobsStore();
-      blobsValue = await store.get('refresh_token');
-    } catch (e) { blobsError = e.message; }
-
-    const tok = await getRefreshToken();
-    const t = tok || '';
-    let fp = 0;
-    for (let i = 0; i < t.length; i++) fp = (fp + t.charCodeAt(i) * (i + 1)) % 1000000;
-    let blobsFp = null;
-    if (blobsValue) { blobsFp = 0; for (let i=0;i<blobsValue.length;i++) blobsFp = (blobsFp + blobsValue.charCodeAt(i)*(i+1)) % 1000000; }
-    return { statusCode: 200, headers, body: JSON.stringify({
-      present: t.length > 0, length: t.length, fingerprint: fp,
-      source: t === process.env.XERO_REFRESH_TOKEN ? 'env_var_fallback' : 'blobs_or_other',
-      blobsDirectRead: { error: blobsError, present: !!blobsValue, fingerprint: blobsFp }
-    }) };
-  }
-
-  // NOTE: We deliberately do NOT accept a refresh_token in the POST body anymore.
-  // Netlify Blobs is the single source of truth for the refresh token — xero-auth.js
-  // writes every rotated token there atomically as part of each browser-side refresh.
-  // A client-supplied token (from localStorage) can be one rotation behind Blobs by
-  // the time it arrives here; overwriting Blobs with it caused "refresh token has
-  // been consumed" failures (the seed clobbered a genuinely-fresh token with a dead
-  // one). See XERO_NOTES.md "Token rotation race" for the full story.
+  // ── Optional: seed a fresh refresh token from POST body ──────────────────
+  // Useful when Netlify Blobs has a stale token and the fresh one is in the browser.
+  // Pass { "refresh_token": "..." } in the request body to override Blobs.
+  try {
+    if (event.body) {
+      const bodyData = JSON.parse(event.body);
+      if (bodyData.refresh_token) {
+        await saveRefreshToken(bodyData.refresh_token);
+        console.log('Seeded fresh refresh token from request body into Netlify Blobs');
+      }
+    }
+  } catch(e) { /* non-fatal — body may be empty or non-JSON */ }
 
   try {
     const startTime = Date.now();
@@ -662,33 +675,36 @@ exports.handler = async function(event) {
       result.invoices = invoices;
     }
 
-    // ── P&L reports — monthly breakdowns for FY24/FY25/FY26 + summaries + balance sheet ──
+    // ── P&L reports — FY summaries + discrete monthly breakdown + balance sheet ──
+    // FY24/FY25/FY26 are each fetched as a single bounded fromDate→toDate report (one
+    // total per account — the mechanism already proven correct for FY24/FY25). The monthly
+    // chart data is built from N individually-fetched calendar-month reports rather than
+    // Xero's `periods`+`timeframe` comparison mode — see fetchDiscreteMonthlyPnL for why.
     if (scope.includes('pnl')) {
       log.push('Fetching P&L reports and balance sheet…');
-      // CONFIRMED WORKING PATTERN (tested live 2026-06-07): fromDate AND toDate
-      // MUST both be passed alongside periods=11&timeframe=MONTH. Omitting toDate
-      // makes Xero validate fromDate against an implicit "today" end date, which
-      // throws "fromDate and toDate parameters must be with 365 days of each other"
-      // for any FY more than a year in the past (this is what was silently breaking
-      // pnl_fy24_monthly/pnl_fy25_monthly before — only the current-FY call worked).
-      const [pnl24, pnl25, pnl24m, pnl25m, pnl26m, balSheet] = await Promise.all([
+      const todayStr   = todayISO();
+      const FY26_START = '2025-07-01', FY26_END = '2026-06-30';
+      const fy26ToDate = todayStr < FY26_END ? todayStr : FY26_END;
+
+      const [pnl24, pnl25, pnl26, balSheet] = await Promise.all([
         xeroGet('Reports/ProfitAndLoss?fromDate=2023-07-01&toDate=2024-06-30', accessToken, tenantId),
         xeroGet('Reports/ProfitAndLoss?fromDate=2024-07-01&toDate=2025-06-30', accessToken, tenantId),
-        xeroGet('Reports/ProfitAndLoss?fromDate=2023-07-01&toDate=2024-06-30&periods=11&timeframe=MONTH', accessToken, tenantId),
-        xeroGet('Reports/ProfitAndLoss?fromDate=2024-07-01&toDate=2025-06-30&periods=11&timeframe=MONTH', accessToken, tenantId),
-        xeroGet('Reports/ProfitAndLoss?fromDate=2025-07-01&toDate=2026-06-30&periods=11&timeframe=MONTH', accessToken, tenantId),
+        xeroGet(`Reports/ProfitAndLoss?fromDate=${FY26_START}&toDate=${fy26ToDate}`, accessToken, tenantId),
         xeroGet('Reports/BalanceSheet', accessToken, tenantId)
       ]);
-      result.pnl_fy24          = pnl24;   // single-period summary (for fy_summary)
-      result.pnl_fy25          = pnl25;   // single-period summary (for fy_summary)
-      result.pnl_fy24_monthly  = pnl24m;  // 12-month breakdown Jul23–Jun24
-      result.pnl_fy25_monthly  = pnl25m;  // 12-month breakdown Jul24–Jun25
-      result.pnl_fy26_monthly  = pnl26m;  // 12-month breakdown Jul25–Jun26 (YTD)
-      result.balance_sheet     = balSheet;
-      log.push('  → P&L reports and balance sheet fetched');
+      result.pnl_fy24      = pnl24;   // single-period FY24 summary (for fy_summary)
+      result.pnl_fy25      = pnl25;   // single-period FY25 summary (for fy_summary)
+      result.pnl_fy26      = pnl26;   // single-period FY26-to-date summary (for fy_summary + KPIs)
+      result.balance_sheet = balSheet;
+      log.push('  → FY summary P&L reports and balance sheet fetched');
+
+      log.push('Fetching discrete monthly P&L (Jul \'23 → current month)…');
+      const months = monthRange(2023, 7, parseInt(todayStr.slice(0, 4), 10), parseInt(todayStr.slice(5, 7), 10));
+      result.pnl_monthly = await fetchDiscreteMonthlyPnL(months, accessToken, tenantId, log);
+      log.push(`  → ${months.length} discrete monthly P&L reports fetched and combined`);
     }
 
-    // ── Bank transactions (FY26) — kept for reference / future use ─────────
+    // ── Bank transactions (FY26) — used for owner-drawings calc + reference ─
     if (scope.includes('bank')) {
       log.push('Fetching bank transactions…');
       const bank = await fetchAllPages(
@@ -696,8 +712,8 @@ exports.handler = async function(event) {
         'BankTransactions', accessToken, tenantId
       );
       log.push(`  → ${bank.length} bank transactions fetched`);
-      result.bank_tx_count = bank.length;
-      // Not written to Supabase — P&L reports are the authoritative source for monthly data
+      result.bank_tx_count    = bank.length;
+      result.bank_transactions = bank; // used by writeToSupabase to compute fy26_owner_drawings; not written to Supabase directly
     }
 
     result.duration_ms = Date.now() - startTime;
@@ -720,12 +736,10 @@ exports.handler = async function(event) {
       body: JSON.stringify({
         ...result,
         // Strip raw Xero blobs from the response to keep it readable
-        invoices:          result.invoices?.length   ? `[${result.invoices.length} invoices]`   : undefined,
-        bank_transactions: undefined,
-        pnl_fy24_monthly:  result.pnl_fy24_monthly   ? '[P&L FY24 monthly]'                     : undefined,
-        pnl_fy25_monthly:  result.pnl_fy25_monthly   ? '[P&L FY25 monthly]'                     : undefined,
-        pnl_fy26_monthly:  result.pnl_fy26_monthly   ? '[P&L FY26 monthly]'                     : undefined,
-        balance_sheet:     result.balance_sheet       ? '[Balance Sheet]'                        : undefined
+        invoices:          result.invoices?.length    ? `[${result.invoices.length} invoices]`        : undefined,
+        bank_transactions: result.bank_transactions   ? `[${result.bank_transactions.length} bank tx]` : undefined,
+        pnl_monthly:       result.pnl_monthly         ? `[P&L: ${result.pnl_monthly.headerPeriods.length} discrete months]` : undefined,
+        balance_sheet:     result.balance_sheet       ? '[Balance Sheet]'                              : undefined
       })
     };
 
