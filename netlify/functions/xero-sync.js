@@ -574,18 +574,13 @@ exports.handler = async function(event) {
   const params = event.queryStringParameters || {};
   const scope  = params.scope ? params.scope.split(',') : ['quotes', 'invoices', 'pnl', 'bank'];
 
-  // ── Optional: seed a fresh refresh token from POST body ──────────────────
-  // Useful when Netlify Blobs has a stale token and the fresh one is in the browser.
-  // Pass { "refresh_token": "..." } in the request body to override Blobs.
-  try {
-    if (event.body) {
-      const bodyData = JSON.parse(event.body);
-      if (bodyData.refresh_token) {
-        await saveRefreshToken(bodyData.refresh_token);
-        console.log('Seeded fresh refresh token from request body into Netlify Blobs');
-      }
-    }
-  } catch(e) { /* non-fatal — body may be empty or non-JSON */ }
+  // NOTE: We deliberately do NOT accept a refresh_token in the POST body anymore.
+  // Netlify Blobs is the single source of truth for the refresh token — xero-auth.js
+  // writes every rotated token there atomically as part of each browser-side refresh.
+  // A client-supplied token (from localStorage) can be one rotation behind Blobs by
+  // the time it arrives here; overwriting Blobs with it caused "refresh token has
+  // been consumed" failures (the seed clobbered a genuinely-fresh token with a dead
+  // one). See XERO_NOTES.md "Token rotation race" for the full story.
 
   try {
     const startTime = Date.now();
