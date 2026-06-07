@@ -6,7 +6,10 @@ Format: **[Status]** Description → Fix applied
 
 ## Open
 
-*(none currently — see Fixed below)*
+**[OPEN]** `kpis.fy26_owner_drawings` is `0` in Supabase `xero_cache`
+- **Where it shows:** Overview tab "Owner Drawings" card and P&L tab "Owner Drawings" card both correctly read `D.kpis.fy26_owner_drawings` — but the value stored in Supabase is `0`, while an older local snapshot of `data.json` had `64421.70`.
+- **Likely cause:** `xero-sync.js` isn't categorising/summing owner-drawings transactions into this field during the sync that populates `xero_cache`.
+- **Fix needed:** Check `xero-sync.js`'s P&L/category aggregation logic for how `fy26_owner_drawings` is computed and re-run the sync.
 
 ---
 
