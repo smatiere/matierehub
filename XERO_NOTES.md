@@ -39,7 +39,43 @@ this matters — we broke this rule once and paid for it.)
 
 ---
 
-## 3. The token-rotation race ("refresh token has been consumed") — RESOLVED
+## 3. THE ACTUAL ROOT CAUSE — Netlify Blobs was never configured (found 2026-06-07, fix pending)
+
+After chasing what looked like a token-rotation race (§3a below), a direct diagnostic
+(`/.netlify/functions/xero-sync?debug=token`) revealed the real problem:
+
+> `getStore('xero-tokens')` throws: "The environment has not been configured to use
+> Netlify Blobs. To use it manually, supply the following properties when creating
+> a store: siteID, token"
+
+**This means Netlify Blobs has never actually worked**, in either function. Every
+`saveRefreshToken()` call in `xero-auth.js` has been silently failing (swallowed by
+its own `try/catch`/`console.warn`), and `getRefreshToken()` in `xero-sync.js` has
+always fallen through to the static `XERO_REFRESH_TOKEN` env var — a token that was
+pasted in once, used, and went stale long ago. Every fresh, valid token Xero has
+ever minted for us has vanished into a Blobs store that was never actually reachable.
+
+**The fix:** `getStore(name)` needs to be given explicit `siteID` and `token`
+(a Netlify **Personal Access Token**, account-level credential) — it can't
+auto-detect its context in this deploy. This requires:
+1. Seb generates a Netlify PAT: **User settings → Applications → Personal access
+   tokens → New access token**
+2. Find the Site ID: **Site settings → General → Site details → Site ID** (an
+   API ID, NOT the site name)
+3. Add both as Netlify environment variables: `NETLIFY_BLOBS_TOKEN` (the PAT) and
+   `NETLIFY_SITE_ID` (the Site ID)
+4. Update `getStore('xero-tokens')` in both `xero-auth.js` and `xero-sync.js` to:
+   ```js
+   const store = getStore({ name: 'xero-tokens', siteID: process.env.NETLIFY_SITE_ID, token: process.env.NETLIFY_BLOBS_TOKEN });
+   ```
+
+Generating a PAT is an account-level credential action — Claude should not do this
+on Seb's behalf. Once the env vars are in place, Claude can make the code change
+and push it.
+
+---
+
+## 3a. The token-rotation race ("refresh token has been consumed") — secondary issue, fix still good practice
 
 **Symptom:** `xero-sync` fails with `Xero auth error: invalid_grant — Refresh
 token has been consumed`, even right after a fresh reconnect.
