@@ -638,19 +638,25 @@ exports.handler = async function(event) {
     // ── P&L reports — monthly breakdowns for FY24/FY25/FY26 + summaries + balance sheet ──
     if (scope.includes('pnl')) {
       log.push('Fetching P&L reports and balance sheet…');
+      // CONFIRMED WORKING PATTERN (tested live 2026-06-07): fromDate AND toDate
+      // MUST both be passed alongside periods=11&timeframe=MONTH. Omitting toDate
+      // makes Xero validate fromDate against an implicit "today" end date, which
+      // throws "fromDate and toDate parameters must be with 365 days of each other"
+      // for any FY more than a year in the past (this is what was silently breaking
+      // pnl_fy24_monthly/pnl_fy25_monthly before — only the current-FY call worked).
       const [pnl24, pnl25, pnl24m, pnl25m, pnl26m, balSheet] = await Promise.all([
         xeroGet('Reports/ProfitAndLoss?fromDate=2023-07-01&toDate=2024-06-30', accessToken, tenantId),
         xeroGet('Reports/ProfitAndLoss?fromDate=2024-07-01&toDate=2025-06-30', accessToken, tenantId),
-        xeroGet('Reports/ProfitAndLoss?fromDate=2023-07-01&periods=11&timeframe=MONTH', accessToken, tenantId),
-        xeroGet('Reports/ProfitAndLoss?fromDate=2024-07-01&periods=11&timeframe=MONTH', accessToken, tenantId),
-        xeroGet('Reports/ProfitAndLoss?periods=11&timeframe=MONTH', accessToken, tenantId),
+        xeroGet('Reports/ProfitAndLoss?fromDate=2023-07-01&toDate=2024-06-30&periods=11&timeframe=MONTH', accessToken, tenantId),
+        xeroGet('Reports/ProfitAndLoss?fromDate=2024-07-01&toDate=2025-06-30&periods=11&timeframe=MONTH', accessToken, tenantId),
+        xeroGet('Reports/ProfitAndLoss?fromDate=2025-07-01&toDate=2026-06-30&periods=11&timeframe=MONTH', accessToken, tenantId),
         xeroGet('Reports/BalanceSheet', accessToken, tenantId)
       ]);
       result.pnl_fy24          = pnl24;   // single-period summary (for fy_summary)
       result.pnl_fy25          = pnl25;   // single-period summary (for fy_summary)
-      result.pnl_fy24_monthly  = pnl24m;  // 11-month breakdown Jul23–May24
-      result.pnl_fy25_monthly  = pnl25m;  // 11-month breakdown Jul24–May25
-      result.pnl_fy26_monthly  = pnl26m;  // 12-month breakdown Jul25–Jun26
+      result.pnl_fy24_monthly  = pnl24m;  // 12-month breakdown Jul23–Jun24
+      result.pnl_fy25_monthly  = pnl25m;  // 12-month breakdown Jul24–Jun25
+      result.pnl_fy26_monthly  = pnl26m;  // 12-month breakdown Jul25–Jun26 (YTD)
       result.balance_sheet     = balSheet;
       log.push('  → P&L reports and balance sheet fetched');
     }
