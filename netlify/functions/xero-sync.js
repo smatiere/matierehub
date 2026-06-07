@@ -579,13 +579,22 @@ exports.handler = async function(event) {
   // Used to confirm xero-auth.js's writes and xero-sync.js's reads hit the same
   // Blobs store. Remove once the token-rotation issue is fully resolved.
   if (params.debug === 'token') {
+    let blobsError = null, blobsValue = null;
+    try {
+      const store = getStore('xero-tokens');
+      blobsValue = await store.get('refresh_token');
+    } catch (e) { blobsError = e.message; }
+
     const tok = await getRefreshToken();
     const t = tok || '';
     let fp = 0;
     for (let i = 0; i < t.length; i++) fp = (fp + t.charCodeAt(i) * (i + 1)) % 1000000;
+    let blobsFp = null;
+    if (blobsValue) { blobsFp = 0; for (let i=0;i<blobsValue.length;i++) blobsFp = (blobsFp + blobsValue.charCodeAt(i)*(i+1)) % 1000000; }
     return { statusCode: 200, headers, body: JSON.stringify({
       present: t.length > 0, length: t.length, fingerprint: fp,
-      source: t === process.env.XERO_REFRESH_TOKEN ? 'env_var_fallback' : 'blobs_or_other'
+      source: t === process.env.XERO_REFRESH_TOKEN ? 'env_var_fallback' : 'blobs_or_other',
+      blobsDirectRead: { error: blobsError, present: !!blobsValue, fingerprint: blobsFp }
     }) };
   }
 
