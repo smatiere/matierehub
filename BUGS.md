@@ -67,5 +67,5 @@ Format: **[Status]** Description → Fix applied
 ## Known limitations (not bugs, by design)
 
 - `expense_log` only stores chat-logged expenses, not the full Xero transaction history
-- `data.json` is the entire database — no relational queries possible
-- Quotes data (280 records) is read-only from Xero; cannot be updated via chat
+- The live database is now **Supabase** (`timesheets`, `expense_log`, `projects` tables + `xero_cache` JSON blobs) — `data.json` is a legacy local file, no longer read by the site or written by `claude-parse.js`/`xero-sync.js`. See `CLAUDE.md` and `DECISIONS.md` for the migration record
+- Quotes data (280 records) is read-only from Xero; cannot be updated via chat — but Claude *can* create new DRAFT quotes/invoices directly in Xero (see `reference_xero_quote_invoice_creation` in memory and `DECISIONS.md` → "Xero: read for financials, write for quotes/invoices")
