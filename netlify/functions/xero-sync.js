@@ -43,7 +43,14 @@ function httpRequest(options, body) {
 }
 
 // ── Token management ──────────────────────────────────────────────────────────
+// In-memory override for the current invocation only — set when the caller seeds
+// a fresh token via the request body. Takes priority over Blobs/env to avoid a
+// save-then-immediate-read propagation race that was causing "token consumed"
+// errors even right after a successful re-auth.
+let _seededRefreshToken = null;
+
 async function getRefreshToken() {
+  if (_seededRefreshToken) return _seededRefreshToken;
   try {
     const store = getStore('xero-tokens');
     const token = await store.get('refresh_token');
@@ -621,8 +628,9 @@ exports.handler = async function(event) {
     if (event.body) {
       const bodyData = JSON.parse(event.body);
       if (bodyData.refresh_token) {
-        await saveRefreshToken(bodyData.refresh_token);
-        console.log('Seeded fresh refresh token from request body into Netlify Blobs');
+        _seededRefreshToken = bodyData.refresh_token;       // used immediately by getAccessToken — no Blobs round-trip
+        await saveRefreshToken(bodyData.refresh_token);     // also persist for future invocations
+        console.log('Seeded fresh refresh token from request body (in-memory override + Blobs)');
       }
     }
   } catch(e) { /* non-fatal — body may be empty or non-JSON */ }
