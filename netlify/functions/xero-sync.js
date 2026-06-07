@@ -574,6 +574,21 @@ exports.handler = async function(event) {
   const params = event.queryStringParameters || {};
   const scope  = params.scope ? params.scope.split(',') : ['quotes', 'invoices', 'pnl', 'bank'];
 
+  // ── TEMPORARY diagnostic: ?debug=token returns a non-reversible fingerprint
+  // of whatever getRefreshToken() currently resolves to, WITHOUT exchanging it.
+  // Used to confirm xero-auth.js's writes and xero-sync.js's reads hit the same
+  // Blobs store. Remove once the token-rotation issue is fully resolved.
+  if (params.debug === 'token') {
+    const tok = await getRefreshToken();
+    const t = tok || '';
+    let fp = 0;
+    for (let i = 0; i < t.length; i++) fp = (fp + t.charCodeAt(i) * (i + 1)) % 1000000;
+    return { statusCode: 200, headers, body: JSON.stringify({
+      present: t.length > 0, length: t.length, fingerprint: fp,
+      source: t === process.env.XERO_REFRESH_TOKEN ? 'env_var_fallback' : 'blobs_or_other'
+    }) };
+  }
+
   // NOTE: We deliberately do NOT accept a refresh_token in the POST body anymore.
   // Netlify Blobs is the single source of truth for the refresh token — xero-auth.js
   // writes every rotated token there atomically as part of each browser-side refresh.
