@@ -4,11 +4,14 @@ Why things are built the way they are. Read before suggesting alternatives.
 
 ---
 
-## Database: `data.json` on GitHub
+## Database: Supabase (supersedes the original `data.json`-on-GitHub decision)
 
-**Decision:** Use a single `data.json` file committed to GitHub as the database.
-**Why:** No backend server, no paid database subscription. Netlify functions read/write via GitHub API. Netlify auto-deploys on push so the front-end always gets fresh data on page load.
-**Trade-off:** Not suitable for concurrent writes (two simultaneous saves could conflict). Acceptable for a one-person business.
+**Original decision (now superseded):** Use a single `data.json` file committed to GitHub as the database, with Netlify functions reading/writing it via the GitHub Contents API.
+**Why it was tried:** No backend server, no paid database subscription. Netlify auto-deploys on push so the front-end always gets fresh data on page load.
+**Why it was replaced:** Concurrent-write conflicts proved real, not theoretical — see `BUGS.md` "Race condition wipes entries when two saves happen close together" (Claude pushing a stale `data.json` snapshot overwrote live entries). A GitHub-commit-as-database also meant every data change triggered a full site rebuild/redeploy just to update numbers.
+**Current decision:** Migrated to **Supabase** (free tier, Postgres + REST API) as the live database. `index.html` and `claude-parse.js` read/write it directly; `xero-sync.js` writes Xero-derived data into the `xero_cache` table. `data.json` is kept locally as a legacy reference only — it is NOT read by the live site. See [[project_supabase_migration]] in memory for migration status, and `supabase_setup.sql` for the schema.
+**Trade-off:** Adds an external dependency (Supabase), but it's free at this scale, supports proper concurrent writes, and updates are instant (no rebuild/redeploy needed for data changes — only for code changes to `index.html`).
+**Rule going forward:** Never push `data.json` to GitHub as a way of updating live data (see `BUGS.md` and [[feedback_github_push]]). Code files (`index.html`, functions) still get pushed to GitHub to trigger redeploys.
 
 ---
 
