@@ -6,24 +6,27 @@ Format: **[Status]** Description → Fix applied
 
 ## Open
 
-**[OPEN — CRITICAL]** Revenue, costs, gross profit, opex and net profit are inflated ~9-10x across the board (monthly chart AND FY26 KPIs)
-- **Reported by Seb:** "the revenue showing are widely wrong, March 24 $165k is way too high, the truth should be around $10k to $15k" / "the costs are also widely inflated"
-- **Confirmed root cause:** `xero-sync.js` fetches Xero's monthly P&L via `Reports/ProfitAndLoss?periods=11&timeframe=MONTH`. The code (and its comments) assume each returned column is a **discrete single calendar month**. They are not — they are **trailing-twelve-month (TTM) rolling totals**. Proof: the value in the monthly array for the LAST month of each fiscal year exactly equals that year's annual total —
-  - `monthly.revenue[11]` (Jun '24) = `144,649.30` = `fy_summary.fy24.revenue` exactly
-  - `monthly.revenue[23]` (Jun '25) = `129,586.23` = `fy_summary.fy25.revenue` exactly
-  - Same pattern holds for `monthly.materials` (cost of sales)
-  This can only happen if each "month" column is actually "12 months ending at that date" — a TTM window that, when it lands on a fiscal year-end, exactly spans that whole FY.
-- **Two compounding effects:**
-  1. **Monthly chart is mislabeled:** every point on the Revenue/Costs charts shows a ~12-month rolling total (~$120-167k) instead of that single month's figure (~$10-15k) — roughly a 10x inflation per "month".
-  2. **FY26 annual KPIs are double-compounded:** `kpis.fy26_revenue` / `fy26_materials` / `fy26_gross_profit` / `fy26_opex` / `fy26_net_profit` and `fy_summary.fy26` are computed by SUMMING all 12 of these already-inflated TTM columns (`fyTotals()` → `sumVals(sectionTotals(...))`, line ~404 of `xero-sync.js`). Summing twelve ~12-month rolling totals produces a number ~9-10x the true annual figure: `fy26_revenue` shows **$1,797,723.71** when the true FY26 annual revenue is almost certainly in the same ~$130-200k range as FY24 ($144,649) and FY25 ($129,586). (FY24/FY25 totals in `fy_summary` are correct because they come from separate single-period report fetches — `p24`/`p25` — not the monthly breakdown.)
-- **Fix needed:** Re-fetch Xero monthly P&L using calendar-month boundaries (explicit `fromDate`/`toDate` per month, or whatever Xero parameter combination yields discrete non-overlapping months — NOT the `periods`+`timeframe=MONTH` comparison-report mechanism, which returns rolling/comparison windows). Then `fyTotals()` for FY26 should either sum genuinely-discrete monthly columns, or better, use a single-period FY26-to-date fetch (matching the `p24`/`p25` approach) rather than summing monthly columns at all.
-- **Scope:** affects Business Health, Pipeline, Profitability, Financials and P&L tabs — essentially every revenue/cost figure derived from the monthly P&L breakdown. Figures NOT affected (verified independently sourced and structurally sound): open invoices/outstanding/overdue ($9,718.07), pipeline total, top customers, cash balance — these come directly from invoice/quote records, not the broken P&L parsing.
+*(none currently — both items below were verified fixed and live on 2026-06-08)*
 
-**[OPEN]** `kpis.fy26_owner_drawings` is `0` in Supabase `xero_cache`
-- **Where it shows:** Overview tab "Owner Drawings" card and P&L tab "Owner Drawings" card both correctly read `D.kpis.fy26_owner_drawings` — but the value stored in Supabase is `0`, while an older local snapshot of `data.json` had `64421.70`.
-- **Root cause (confirmed):** `xero-sync.js` (lines 458-460, 503) looks up `'Loan - Sebastien Matiere'` and `'Wages Payable'` inside `p26.sectionMap`, which is parsed from a **Profit & Loss** report. Both accounts are confirmed **Balance Sheet LIABILITY accounts** (Chart of Accounts: codes 896 and 804, class `LIABILITY`) — they structurally never appear in a P&L report, so `findAccount()` always returns `null`/0.
-- **Supporting evidence:** raw Xero bank-transaction export shows 99 transactions tagged "Salary"/"Loan"/"Wages" paid to Sebastien Matiere totalling $190,676.82 across all years — drawings are real and substantial, just not retrievable from the P&L.
-- **Fix needed:** Source owner drawings from the Balance Sheet report (already fetched as `result.balance_sheet` for `cashBal`) or from bank-transaction categorisation (the old `data.json` value of $64,421.70 likely came from exactly this kind of bank-tx-level matching via the `normalizePnLCat` regex in `index.html`), not from the P&L sectionMap.
+---
+
+## Fixed (2026-06-07)
+
+**[FIXED]** Revenue, costs, gross profit, opex and net profit were inflated ~9-10x across the board (monthly chart AND FY26 KPIs)
+- **Reported by Seb:** "the revenue showing are widely wrong, March 24 $165k is way too high, the truth should be around $10k to $15k" / "the costs are also widely inflated"
+- **Confirmed root cause:** `xero-sync.js` fetched Xero's monthly P&L via `Reports/ProfitAndLoss?periods=11&timeframe=MONTH`, which returns **trailing-twelve-month (TTM) rolling totals**, not discrete calendar months. `fyTotals()` then summed twelve already-inflated TTM columns, producing `fy26_revenue = $1,797,723.71` against a true annual figure in the ~$130-200k range.
+- **Fix (commit `33fa00a`, 2026-06-07):** Added `fetchDiscreteMonthlyPnL()`, which fetches one bounded `fromDate`/`toDate` Xero P&L report per calendar month instead of the rolling-window comparison report. FY totals now come from single-period `p24`/`p25`/`p26` fetches via `fyTotals()` rather than summing monthly columns.
+- **Verified live in Supabase `xero_cache` (synced 2026-06-07T12:55:42Z):**
+  - `kpis.fy26_revenue = $159,228.78` (in line with FY24 $144,649.30 and FY25 $129,586.23 — no longer ~10x inflated)
+  - `kpis.fy26_gross_profit = $104,123.47`, `fy26_opex = $20,778.79`, `fy26_net_profit = $83,344.68`
+  - `monthly.revenue` now holds discrete single-month figures (e.g. `[0, 1540, 9409.77, 16820.11, ...]`) instead of ~12-month rolling totals
+- **Scope:** Business Health, Pipeline, Profitability, Financials and P&L tabs all now read correct figures.
+
+**[FIXED]** `kpis.fy26_owner_drawings` was `0` in Supabase `xero_cache`
+- **Where it shows:** Overview tab "Owner Drawings" card and P&L tab "Owner Drawings" card.
+- **Root cause (confirmed):** `xero-sync.js` looked up `'Loan - Sebastien Matiere'` / `'Wages Payable'` inside `p26.sectionMap` (parsed from a **Profit & Loss** report). Both accounts are Balance Sheet LIABILITY accounts (codes 896, 804) and structurally never appear in a P&L — `findAccount()` always returned `null`/0.
+- **Fix (commit `33fa00a`, 2026-06-07):** `ownerDrawings26` is now sourced from FY26 bank SPEND transactions matched against `DRAWING_ACCOUNT_CODES = ['896', '804']` — actual cash paid to Seb, not a P&L lookup.
+- **Verified live in Supabase `xero_cache` (synced 2026-06-07T12:55:42Z):** `kpis.fy26_owner_drawings = $59,421.70` — consistent with the ~$64,421.70 figure from the old `data.json` snapshot and the bank-transaction evidence ($190,676.82 in "Salary"/"Loan"/"Wages" payments to Sebastien Matiere across all years).
 
 ---
 
