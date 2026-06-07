@@ -333,7 +333,12 @@ function parseCashBalance(bsObj) {
 // per month is slower (N calls, batched) but each report can only return the single
 // calendar-month period we explicitly asked for — guaranteed correct, no API guesswork.
 async function fetchDiscreteMonthlyPnL(months, accessToken, tenantId, log) {
-  const BATCH = 6; // keep concurrent Xero calls modest — avoid rate limits / timeouts
+  // Xero enforces a hard concurrency limit of 5 simultaneous calls per org (429 if exceeded),
+  // plus 60/minute. BATCH=6 was tripping the concurrency limit. Drop to 3 concurrent and add
+  // a short pause between batches so we comfortably sit under both limits.
+  const BATCH = 3;
+  const PAUSE_MS = 700;
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const reports = [];
   for (let i = 0; i < months.length; i += BATCH) {
     const batch = months.slice(i, i + BATCH);
@@ -342,6 +347,7 @@ async function fetchDiscreteMonthlyPnL(months, accessToken, tenantId, log) {
     );
     reports.push(...batchResults);
     if (log) log.push(`  → fetched discrete monthly P&L: ${Math.min(i + BATCH, months.length)}/${months.length}`);
+    if (i + BATCH < months.length) await sleep(PAUSE_MS);
   }
 
   const headerPeriods = months.map(m => periodToHeaderLabel(m.period));
