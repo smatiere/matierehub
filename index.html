@@ -961,17 +961,26 @@ function renderTsCalendar() {
   for (let d=1; d<=lastDay.getDate(); d++) {
     const date = new Date(y, mo, d);
     const dStr = ds(date);
-    const isFuture = date > today;
-    const isGrey   = isWeekend(date) || isNSWHoliday(date) || isFuture;
-    const hlabel   = NSW_HOLIDAYS[dStr];
-    const entries  = dayMap[dStr] || [];
-    const totalH   = entries.reduce((a,e)=>a+e.hours,0);
-    const isPast   = date < today;
-    const isMiss   = isPast && !isGrey && totalH === 0;
-    const isOver   = totalH > 8;
+    const isFuture     = date > today;
+    const isWknd       = isWeekend(date);
+    const isHol        = isNSWHoliday(date);
+    const isOffDay     = isWknd || isHol;       // weekend or public holiday — greyed for visual context
+    const isGrey       = isOffDay || isFuture;
+    const hlabel       = NSW_HOLIDAYS[dStr];
+    const entries      = dayMap[dStr] || [];
+    const totalH       = entries.reduce((a,e)=>a+e.hours,0);
+    const isPast       = date < today;
+    const isMiss       = isPast && !isGrey && totalH === 0;
+    const isOver       = totalH > 8;
+    // Off-days (weekends/holidays) that are today-or-earlier remain clickable —
+    // tradies sometimes do work weekends/holidays and should be able to log it.
+    const offDayClickable = isOffDay && !isFuture;
 
-    if (isGrey) {
-      html += `<div class="ts-cell ts-cell-grey">
+    if (isGrey && entries.length === 0) {
+      const cls   = 'ts-cell ts-cell-grey' + (offDayClickable ? ' clickable' : '');
+      const click = offDayClickable ? ` onclick="tsDayClick('${dStr}',event)"` : '';
+      const tip   = offDayClickable ? `No hours logged — click to add (${isHol ? 'holiday' : 'weekend'})` : dStr;
+      html += `<div class="${cls}"${click} title="${tip}">
         <span class="ts-day-num" style="color:var(--ink-4)">${d}</span>
         ${hlabel ? `<span class="ts-day-label">${hlabel}</span>` : ''}
       </div>`;
