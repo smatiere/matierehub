@@ -401,6 +401,56 @@ function bucketLiabilitiesByMonth(bankTx, accountCodeMap, periods, log) {
   return out;
 }
 
+// ── Transaction-level liability detail (for Seb's BAS/Super/Drawings audit) ───
+// Same SPEND-transaction scan as bucketLiabilitiesByMonth, but instead of summing into
+// monthly totals we keep each line item — date, payee, account, description, amount —
+// so the dashboard can show Seb exactly which transactions make up a liability total
+// (he asked: "how can I audit why TAX and BAS are showing zero... I don't see the
+// details of transactions"). Grouped the same way (tax_bas / super / owner_drawings)
+// so the front-end can match them 1:1 against the monthly series and the P&L category map.
+function extractLiabilityTransactions(bankTx, accountCodeMap, log) {
+  const GROUPS = {
+    tax_bas:        { names: ['ATO/BAS Clearing'],                          fallbackCodes: [] },
+    super:          { names: ['Superannuation Payable'],                    fallbackCodes: [] },
+    owner_drawings: { names: ['Loan - Sebastien Matiere', 'Wages Payable'], fallbackCodes: ['896', '804'] }
+  };
+  const codeToName = {};
+  for (const [name, code] of Object.entries(accountCodeMap)) codeToName[code] = name;
+
+  const codeSets = {};
+  for (const [key, { names, fallbackCodes }] of Object.entries(GROUPS)) {
+    let codes = names.map(n => accountCodeMap[n]).filter(Boolean);
+    if (!codes.length && fallbackCodes.length) codes = fallbackCodes;
+    codeSets[key] = codes;
+  }
+
+  const out = { tax_bas: [], super: [], owner_drawings: [] };
+  for (const tx of bankTx) {
+    if (tx.Type !== 'SPEND') continue;
+    const date  = (tx.DateString || tx.Date || '').slice(0, 10);
+    const payee = tx.Contact?.Name || '—';
+    const ref   = tx.Reference || tx.InvoiceNumber || null;
+    for (const li of (tx.LineItems || [])) {
+      for (const key of Object.keys(GROUPS)) {
+        if (codeSets[key].includes(li.AccountCode)) {
+          out[key].push({
+            date,
+            payee,
+            account_code: li.AccountCode,
+            account_name: codeToName[li.AccountCode] || GROUPS[key].names[0],
+            description:  (li.Description || '').trim(),
+            amount:       round2(Math.abs(li.LineAmount || 0)),
+            ref
+          });
+        }
+      }
+    }
+  }
+  for (const key of Object.keys(out)) out[key].sort((a, b) => (a.date < b.date ? 1 : (a.date > b.date ? -1 : 0)));
+  if (log) for (const key of Object.keys(out)) log.push(`  → ${key}: ${out[key].length} liability transactions extracted for audit detail`);
+  return out;
+}
+
 // Recursively search balance sheet rows for "Total Bank Accounts" and return its value
 function parseCashBalance(bsObj) {
   const report = bsObj?.Reports?.[0] || bsObj;
@@ -636,7 +686,8 @@ async function writeToSupabase(result, log) {
   const accountCodeMap   = result.account_code_map  || {};
   const haveBankData     = Array.isArray(result.bank_transactions); // only present when scope included 'bank'
 
-  let freshLiability = null;
+  let freshLiability    = null;
+  let liabilityTxDetail = null;
   if (haveBankData) {
     const liability = bucketLiabilitiesByMonth(bankTx, accountCodeMap, fullHistoryPeriods, log);
     freshLiability = {
@@ -646,8 +697,9 @@ async function writeToSupabase(result, log) {
       super:          liability.super,
       owner_drawings: liability.owner_drawings
     };
+    liabilityTxDetail = extractLiabilityTransactions(bankTx, accountCodeMap, log);
   } else {
-    log.push('  ⚠ scope did not include "bank" — leaving cached BAS/Super/Owner-Drawings figures untouched');
+    log.push('  ⚠ scope did not include "bank" — leaving cached BAS/Super/Owner-Drawings figures and liability_transactions untouched');
   }
 
   // ── Merge: cached history ← fresh P&L chunk ← fresh liability series ──────────
@@ -776,6 +828,18 @@ async function writeToSupabase(result, log) {
   // above. Omitting the upsert (rather than writing an empty object) leaves the cached
   // value untouched, so a backfill run over older FYs can't blank out current-year data.
   if (costDetail) writes.push(sbUpsert('cost_detail_monthly', costDetail));
+
+  // liability_transactions — line-item audit detail (date, payee, account, amount) backing
+  // the BAS/Super/Owner-Drawings totals, so Seb can see exactly which transactions make up
+  // each figure (he asked to "audit why TAX and BAS are showing zero" and see "lines of
+  // money in and out with codes"). Only written when this run fetched bank data — same
+  // guard as freshLiability, for the same reason (must be complete, never partial).
+  if (liabilityTxDetail) {
+    writes.push(sbUpsert('liability_transactions', {
+      ...liabilityTxDetail,
+      generated_at: syncedAt
+    }));
+  }
 
   await Promise.all(writes);
 
