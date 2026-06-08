@@ -1803,22 +1803,53 @@ function pnlToggleExpand(cat) {
   renderPnLTable(buildPnLData(fromD, toD), fromD, toD);
 }
 
+// Track expanded individual accounts (transaction-level audit drill-down)
+const pnlExpandedAccts = new Set();
+
+function pnlToggleAcctExpand(acc, ev) {
+  if (ev) ev.stopPropagation();
+  if (pnlExpandedAccts.has(acc)) pnlExpandedAccts.delete(acc);
+  else pnlExpandedAccts.add(acc);
+  const { fromD, toD } = getPnLDateRange();
+  renderPnLTable(buildPnLData(fromD, toD), fromD, toD);
+}
+
+// These accounts are Balance Sheet LIABILITIES (BAS clearing, super payable, owner's
+// loan/wages payable) — they structurally never post to the P&L, so cost_detail_monthly
+// (sourced from Xero's P&L report) is always $0 for them. Real figures + line-item audit
+// detail come from D.liability_transactions instead (synced from actual bank SPEND tx —
+// see xero-sync.js bucketLiabilitiesByMonth / extractLiabilityTransactions).
+const LIABILITY_ACCOUNTS = new Set([
+  'Loan - Sebastien Matiere', 'Wages Payable', 'Superannuation Payable', 'ATO/BAS Clearing'
+]);
+
 function getCatDetailForPeriod(cat, months) {
   // months: array of 'YYYY-MM' strings
-  if (!D.cost_detail_monthly || !D.account_categories) return [];
-  const periods = D.monthly.periods || [];
-  const result = {};
+  if (!D.account_categories) return [];
+  const periods  = D.monthly?.periods || [];
+  const monthSet = new Set(months);
+  const lt       = D.liability_transactions || null;
+  const result   = [];
+
   for (const [acc, accCat] of Object.entries(D.account_categories)) {
     if (accCat !== cat) continue;
-    const arr = D.cost_detail_monthly[acc] || [];
-    let total = 0;
-    for (const m of months) {
-      const idx = periods.indexOf(m);
-      if (idx >= 0) total += arr[idx] || 0;
+
+    if (LIABILITY_ACCOUNTS.has(acc) && lt) {
+      const txns = [].concat(lt.tax_bas||[], lt.super||[], lt.owner_drawings||[])
+        .filter(t => t.account_name === acc && monthSet.has((t.date||'').slice(0,7)));
+      const total = Math.round(txns.reduce((s,t)=>s+(t.amount||0), 0) * 100) / 100;
+      if (total > 0) result.push({ acc, total, txns: txns.sort((a,b)=> a.date<b.date?1:(a.date>b.date?-1:0)) });
+    } else {
+      const arr = D.cost_detail_monthly?.[acc] || [];
+      let total = 0;
+      for (const m of months) {
+        const idx = periods.indexOf(m);
+        if (idx >= 0) total += arr[idx] || 0;
+      }
+      if (total > 0) result.push({ acc, total, txns: null });
     }
-    if (total > 0) result[acc] = total;
   }
-  return Object.entries(result).sort((a,b) => b[1]-a[1]);
+  return result.sort((a,b) => b.total - a.total);
 }
 
 function renderPnLTable(data, fromD, toD) {
@@ -1860,16 +1891,35 @@ function renderPnLTable(data, fromD, toD) {
     const expanded = pnlExpandedCats.has(catKey);
     const chevron = `<span style="display:inline-block;transition:transform .2s;transform:rotate(${expanded?'90deg':'0deg'});margin-right:6px;font-size:10px;opacity:.6">▶</span>`;
     const detail = expanded ? getCatDetailForPeriod(catKey, months) : [];
-    const detailRows = detail.map(([acc, total]) =>
-      `<tr style="background:var(--bg-2)">
-        <td style="padding-left:44px;color:var(--ink-4);font-size:11px">${acc}</td>
+    const detailRows = detail.map(({acc, total, txns}) => {
+      const hasTxns      = Array.isArray(txns) && txns.length > 0;
+      const acctExpanded = hasTxns && pnlExpandedAccts.has(acc);
+      const acctChevron  = hasTxns
+        ? `<span style="display:inline-block;transition:transform .2s;transform:rotate(${acctExpanded?'90deg':'0deg'});margin-right:4px;font-size:9px;opacity:.5">▶</span>`
+        : '';
+      const rowAttrs = hasTxns
+        ? ` style="background:var(--bg-2);cursor:pointer" onclick="pnlToggleAcctExpand('${acc.replace(/'/g,"\\'")}',event)" title="Click to see individual transactions"`
+        : ` style="background:var(--bg-2)"`;
+      const txnRows = (acctExpanded ? txns : []).map(t =>
+        `<tr style="background:var(--bg-1)">
+          <td style="padding-left:64px;color:var(--ink-4);font-size:10px">${t.date} · ${t.payee}${t.description?` — ${t.description}`:''}${t.ref?` <span style="opacity:.6">(${t.ref})</span>`:''}</td>
+          <td class="amount" style="color:var(--ink-4);font-size:10px">(${fmt(t.amount)})</td>
+          ${prev?`<td></td>`:''}${prev?`<td></td>`:''}
+        </tr>`
+      ).join('');
+      const auditHint = (hasTxns && acctExpanded)
+        ? `<tr style="background:var(--bg-1)"><td colspan="${prev?4:2}" style="padding-left:64px;font-size:10px;color:var(--ink-4);opacity:.6;padding-bottom:6px">${txns.length} transaction${txns.length===1?'':'s'} — sourced from actual bank spend, coded to ${acc}</td></tr>`
+        : '';
+      return `<tr${rowAttrs}>
+        <td style="padding-left:44px;color:var(--ink-4);font-size:11px">${acctChevron}${acc}</td>
         <td class="amount" style="color:var(--orange);font-size:11px">(${fmt(total)})</td>
         ${prev?`<td></td>`:''}${prev?`<td></td>`:''}
-      </tr>`
-    ).join('');
-    // Tax & BAS note
-    const taxNote = (catKey === 'Tax & BAS' && expanded)
-      ? `<tr style="background:var(--bg-2)"><td colspan="${prev?4:2}" style="padding-left:44px;font-size:11px;color:var(--ink-4);padding-top:2px;padding-bottom:8px">⚠ FY26 shows $0 — BAS payments not yet entered in Xero for this period.</td></tr>`
+      </tr>${txnRows}${auditHint}`;
+    }).join('');
+    // Tax & BAS note — only relevant when the (real, transaction-derived) figure is
+    // genuinely zero for the selected period, e.g. no BAS payment fell due/was made.
+    const taxNote = (catKey === 'Tax & BAS' && expanded && curV === 0)
+      ? `<tr style="background:var(--bg-2)"><td colspan="${prev?4:2}" style="padding-left:44px;font-size:11px;color:var(--ink-4);padding-top:2px;padding-bottom:8px">⚠ $0 for this period — no BAS clearing transactions found in the bank history (may mean no payment fell due, or it hasn't been recorded in Xero yet).</td></tr>`
       : '';
     return `<tr style="cursor:pointer" onclick="pnlToggleExpand('${catKey}')">
       <td style="padding-left:24px;color:var(--ink-4)">${chevron}${label}</td>
