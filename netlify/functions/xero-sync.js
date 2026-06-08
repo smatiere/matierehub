@@ -49,10 +49,23 @@ function httpRequest(options, body) {
 // errors even right after a successful re-auth.
 let _seededRefreshToken = null;
 
+// getStore('xero-tokens') cannot auto-detect its context in this deploy — it throws
+// "environment has not been configured to use Netlify Blobs". xero-auth.js works around
+// this by passing siteID/token explicitly (NETLIFY_SITE_ID / NETLIFY_BLOBS_TOKEN). This
+// function MUST do the same — otherwise it silently falls through to the auto-detect
+// branch (which throws, caught below) and ends up reading/writing a DIFFERENT store than
+// xero-auth.js, so freshly-rotated tokens saved on reconnect are never seen here, and the
+// stale `XERO_REFRESH_TOKEN` env var keeps getting reused → "Refresh token has been
+// consumed" on every sync no matter how many times Xero is reconnected. Fixed 2026-06-08
+// — see BUGS.md "Removing NETLIFY_SITE_ID/NETLIFY_BLOBS_TOKEN broke Xero token propagation".
+function tokenStore() {
+  return getStore({ name: 'xero-tokens', siteID: process.env.NETLIFY_SITE_ID, token: process.env.NETLIFY_BLOBS_TOKEN });
+}
+
 async function getRefreshToken() {
   if (_seededRefreshToken) return _seededRefreshToken;
   try {
-    const store = getStore('xero-tokens');
+    const store = tokenStore();
     const token = await store.get('refresh_token');
     if (token) return token;
   } catch (e) {
@@ -63,7 +76,7 @@ async function getRefreshToken() {
 
 async function saveRefreshToken(token) {
   try {
-    const store = getStore('xero-tokens');
+    const store = tokenStore();
     await store.set('refresh_token', token);
   } catch (e) {
     console.warn('Could not save refresh token to Blobs:', e.message);
