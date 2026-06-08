@@ -583,6 +583,11 @@ async function writeToSupabase(result, log) {
   const p25 = parsePnL(result.pnl_fy25 || {});
   const p26 = parsePnL(result.pnl_fy26 || {});
 
+  // Presence flags — only true when this run's `scope` actually included that section.
+  // Used below to guard kpis/meta/fy_summary/open_invoices/top_customers so a partial-scope
+  // run (e.g. ?scope=bank) can't blank out fields it never fetched (mirrors `haveBankData`).
+  const havePnLData     = !!result.pnl_fy26;
+
   // Discrete calendar-month P&L for the chart arrays — fetched one bounded report per
   // month (see fetchDiscreteMonthlyPnL), combined into one {headerPeriods, sectionMap}.
   // NOTE: this is now only a CHUNK of the full history (bounded by ?from=/?to=, default
@@ -616,7 +621,8 @@ async function writeToSupabase(result, log) {
   const fy26s = fyTotals(p26.sectionMap);
 
   // ── Invoice-derived values ─────────────────────────────────────────────────
-  const invoices    = result.invoices || [];
+  const invoices        = result.invoices || [];
+  const haveInvoiceData = Array.isArray(result.invoices);
   const openInvs    = invoices.filter(inv => inv.Status === 'AUTHORISED');
   const today       = new Date(); today.setHours(0, 0, 0, 0);
   const outstanding = round2(openInvs.reduce((s, inv) => s + (inv.AmountDue || inv.Total || 0), 0));
@@ -627,7 +633,8 @@ async function writeToSupabase(result, log) {
   );
 
   // ── Quote-derived values ───────────────────────────────────────────────────
-  const allQuotes = result.quotes || [];
+  const allQuotes     = result.quotes || [];
+  const haveQuoteData = Array.isArray(result.quotes);
   const pipeline  = round2(
     allQuotes
       .filter(q => q.status === 'DRAFT' || q.status === 'SENT')
@@ -764,63 +771,96 @@ async function writeToSupabase(result, log) {
     .slice(0, 10)
     .map(([name, revenue]) => ({ name, revenue: round2(revenue) }));
 
+  // ── Guarded reads of currently-cached kpis/meta ───────────────────────────
+  // `kpis` and `meta` are composite objects whose sub-fields come from FOUR different
+  // scopes (pnl, invoices, quotes, bank). A partial-scope run (e.g. ?scope=bank, used to
+  // backfill liability_transactions) must not blank out the fields it didn't fetch — that
+  // is exactly what caused the empty Cash & Invoices tab on 2026-06-08 (kpis/meta were
+  // unconditionally rewritten from `result.invoices||[]`/`result.quotes||[]`/`fy26s`, all
+  // empty when scope=bank). Fix: start from the EXISTING cached object and only overwrite
+  // the sub-fields whose source scope was actually included this run — same spirit as the
+  // `if (costDetail)` / `allQuotes.length ?` guards already used for cost_detail_monthly/quotes.
+  const existingKpis = (await sbSelect('kpis')) || {};
+  const existingMeta = (await sbSelect('meta')) || {};
+
+  const kpisOut = { ...existingKpis, sebRate_per_hour: 100 };
+  if (havePnLData) {
+    Object.assign(kpisOut, {
+      fy26_revenue:          round2(fy26s.revenue),
+      fy26_materials:        round2(fy26s.cos),
+      fy26_gross_profit:     round2(fy26s.gross_profit),
+      fy26_gp_margin:        fy26s.revenue ? round2(fy26s.gross_profit / fy26s.revenue * 100) : 0,
+      fy26_opex:             round2(fy26s.opex),
+      fy26_wages:            wages26Sum,
+      fy26_net_profit:       round2(fy26s.net_profit),
+      cash_balance:          cashBal,
+      total_revenue_alltime: round2(fy23s.revenue + fy24s.revenue + fy25s.revenue + fy26s.revenue)
+    });
+  }
+  // owner_drawings/tax_bas/super are always derived from `merged`, which carries the full
+  // history forward from `existingMonthly` regardless of this run's scope — safe to always set.
+  Object.assign(kpisOut, {
+    fy26_owner_drawings: ownerDrawings26,
+    fy26_tax_bas:        taxBas26,
+    fy26_super:          super26
+  });
+  if (haveInvoiceData) {
+    Object.assign(kpisOut, { total_outstanding: outstanding, overdue_xero: overdueXero });
+  }
+  if (haveQuoteData) {
+    Object.assign(kpisOut, { pipeline_total: pipeline });
+  }
+
   // ── Write all keys in parallel ─────────────────────────────────────────────
   const syncedAt = new Date().toISOString();
+
+  const metaOut = {
+    ...existingMeta,
+    last_updated:   syncedAt,
+    source:         'xero-sync',
+    period_count:   nPeriods,
+    bank_tx_synced: haveBankData
+  };
+  if (haveInvoiceData) metaOut.invoice_count = invoices.length;
+  if (haveQuoteData)   metaOut.quotes_count  = allQuotes.length;
+  if (havePnLData)     metaOut.pnl_chunk_range = result.pnl_chunk_range || null;
+
   const writes = [
 
-    sbUpsert('fy_summary', {
+    // fy_summary needs all four FY P&L reports — only rebuilt (and only overwrites the
+    // cache) when this run's scope included 'pnl'; otherwise the existing cached value
+    // (from a prior full sync) is left untouched.
+    havePnLData ? sbUpsert('fy_summary', {
       fy23: { revenue: fy23s.revenue, cos: fy23s.cos, gross_profit: fy23s.gross_profit, opex: fy23s.opex, net_profit: fy23s.net_profit },
       fy24: { revenue: fy24s.revenue, cos: fy24s.cos, gross_profit: fy24s.gross_profit, opex: fy24s.opex, net_profit: fy24s.net_profit },
       fy25: { revenue: fy25s.revenue, cos: fy25s.cos, gross_profit: fy25s.gross_profit, opex: fy25s.opex, net_profit: fy25s.net_profit },
       fy26: { revenue: fy26s.revenue, cos: fy26s.cos, gross_profit: fy26s.gross_profit, opex: fy26s.opex, net_profit: fy26s.net_profit }
-    }),
+    }) : Promise.resolve(),
 
-    sbUpsert('kpis', {
-      fy26_revenue:         round2(fy26s.revenue),
-      fy26_materials:       round2(fy26s.cos),
-      fy26_gross_profit:    round2(fy26s.gross_profit),
-      fy26_gp_margin:       fy26s.revenue ? round2(fy26s.gross_profit / fy26s.revenue * 100) : 0,
-      fy26_opex:            round2(fy26s.opex),
-      fy26_wages:           wages26Sum,
-      fy26_owner_drawings:  ownerDrawings26,
-      fy26_tax_bas:         taxBas26,
-      fy26_super:           super26,
-      fy26_net_profit:      round2(fy26s.net_profit),
-      cash_balance:         cashBal,
-      total_outstanding:    outstanding,
-      overdue_xero:         overdueXero,
-      pipeline_total:       pipeline,
-      total_revenue_alltime: round2(fy23s.revenue + fy24s.revenue + fy25s.revenue + fy26s.revenue),
-      sebRate_per_hour:     100
-    }),
+    // kpis/meta — built above as existing-cache ⊕ this-run's-fetched-sections, so a
+    // partial-scope run can never zero out fields belonging to scopes it didn't fetch.
+    sbUpsert('kpis', kpisOut),
+    sbUpsert('meta', metaOut),
 
     // `merged` = cached history ⊕ this run's fresh P&L chunk ⊕ (if fetched) the full
     // transaction-derived liability series — see the merge step above. Spans full
     // history (Jul'22→now) once fully backfilled, regardless of how many runs it took.
     sbUpsert('monthly', merged),
 
-    sbUpsert('open_invoices', openInvs.map(inv => ({
+    // open_invoices / top_customers are both derived purely from `result.invoices` — only
+    // refreshed (and only overwrite the cache) when this run's scope included 'invoices'.
+    haveInvoiceData ? sbUpsert('open_invoices', openInvs.map(inv => ({
       invoice: inv.InvoiceNumber,
       contact: inv.Contact?.Name || '—',
       date:    (inv.DateString || inv.Date || '').slice(0, 10),
       amount:  round2(inv.AmountDue || inv.Total || 0)
-    }))),
+    }))) : Promise.resolve(),
 
-    sbUpsert('top_customers', topCustomers),
+    haveInvoiceData ? sbUpsert('top_customers', topCustomers) : Promise.resolve(),
 
-    allQuotes.length ? sbUpsert('quotes', allQuotes) : Promise.resolve(),
+    haveQuoteData && allQuotes.length ? sbUpsert('quotes', allQuotes) : Promise.resolve(),
 
-    sbUpsert('account_categories', ACCOUNT_CATEGORIES),
-
-    sbUpsert('meta', {
-      last_updated:    syncedAt,
-      source:          'xero-sync',
-      invoice_count:   invoices.length,
-      quotes_count:    allQuotes.length,
-      period_count:    nPeriods,
-      pnl_chunk_range: result.pnl_chunk_range || null,
-      bank_tx_synced:  haveBankData
-    })
+    sbUpsert('account_categories', ACCOUNT_CATEGORIES)
 
   ];
 
