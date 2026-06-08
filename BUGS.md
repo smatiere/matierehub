@@ -6,7 +6,20 @@ Format: **[Status]** Description → Fix applied
 
 ## Open
 
-*(none currently — both items below were verified fixed and live on 2026-06-08)*
+**[OPEN]** Removing `NETLIFY_SITE_ID`/`NETLIFY_BLOBS_TOKEN` broke Xero token propagation → "Refresh token has been consumed" on every sync, no matter how many times Xero is reconnected
+- **Reported by Seb:** Cash & Invoices and Profitability tabs went blank/zeroed; a fresh Xero sync was attempted to repair the cache but kept failing with `invalid_grant: Refresh token has been consumed` — even immediately after Seb reconnected Xero (first on the Mac, then again on his iPhone).
+- **Confirmed root cause:** On 2026-06-08, `CLAUDE.md` was updated to say `GITHUB_TOKEN`, `NETLIFY_BLOBS_TOKEN`, `NETLIFY_SITE_ID` and `XERO_REDIRECT_URI` were "removed from Netlify as unused," and the first three were deleted from the Netlify env vars. **`NETLIFY_SITE_ID`/`NETLIFY_BLOBS_TOKEN` were not actually unused.** `netlify/functions/xero-auth.js` (`saveRefreshToken()`, ~line 76) explicitly needs them:
+  ```js
+  // getStore('xero-tokens') cannot auto-detect its context in this deploy — it throws
+  // "environment has not been configured to use Netlify Blobs". Pass siteID/token
+  // explicitly (NETLIFY_SITE_ID / NETLIFY_BLOBS_TOKEN — a Netlify Personal Access
+  // Token) so this lands in the SAME store xero-sync.js reads from.
+  const store = getStore({ name: 'xero-tokens', siteID: process.env.NETLIFY_SITE_ID, token: process.env.NETLIFY_BLOBS_TOKEN });
+  ```
+  Without these two vars, every time the OAuth flow issues a fresh Xero token pair, the browser successfully stores it in that device's `localStorage` — but the server-side save to the shared Netlify Blobs store (`xero-tokens`, the store `xero-sync.js` reads from) silently fails. The failure is swallowed by a `try { } catch (e) { console.warn(...) }`, so nothing visibly errors; `xero-sync.js` simply keeps reading the old, already-rotated-away token from Blobs and every sync attempt fails with "Refresh token has been consumed," regardless of how many times Seb reconnects (the fresh token never leaves whichever device/browser did the reconnecting).
+- **Diagnostic trail that confirmed it:** checked the refresh-token value and expiry timestamp stored in the Mac/Chrome browser's `localStorage` before and after a hard reload — both identical (`expiry = 2026-06-08T01:25:53Z`, hours stale), proving the dashboard the sync runs from was still holding the dead pre-reconnect token even after Seb reconnected on his iPhone (whose fresh token landed only in *that* device's localStorage, never reaching the shared Blobs store).
+- **Fix:** restore `NETLIFY_SITE_ID` (`c5358d04-2f41-4b7f-bcef-f132c44476d7` — the Netlify Project ID, not a secret) and `NETLIFY_BLOBS_TOKEN` (a Netlify Personal Access Token — a secret; Seb needs to regenerate it from his Netlify account if the original value is lost, since PATs are shown only once) to the Netlify env vars. Once both are present again, reconnecting Xero from any device will correctly propagate the fresh token to the shared store and `xero-sync.js` will pick it up on the next run.
+- **Lesson learned — verify "unused" before deleting config:** a prior pass flagged `NETLIFY_SITE_ID`/`NETLIFY_BLOBS_TOKEN` as unused and recommended removing them, based on stale/incomplete documentation rather than checking the live code. **Before removing any env var, secret, or config value flagged as "unused," grep the actual codebase (`netlify/functions/*.js` and `index.html`) for every reference to its name** — `process.env.<NAME>` calls can be buried in helper functions (here, inside `saveRefreshToken()`, several layers from the obvious entry points) and easily missed by documentation review alone. A wrong "unused" call here didn't throw a build error or a loud runtime exception — it failed silently behind a `try/catch`, which is exactly the kind of mistake that ages into a confusing, hard-to-trace outage days later.
 
 ---
 
