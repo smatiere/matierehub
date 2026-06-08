@@ -1543,7 +1543,15 @@ function buildPnLData(fromD, toD) {
   const m = D.monthly;
   const wagesMap  = {}, motorMap = {}, subconMap = {}, taxMap = {}, opMap = {};
   (m.periods||[]).forEach((p,i) => {
-    wagesMap[p]  = (m.wages_owner&&m.wages_owner[i])           || 0;
+    // "Wages & Owner Pay" = Wages & Salaries (real P&L expense, carried in m.wages_owner
+    // alongside the near-always-zero liability-account P&L figures) PLUS the transaction-
+    // based Loan/Wages-Payable and Superannuation totals (m.owner_drawings / m.super) —
+    // those liability accounts are Balance Sheet items that structurally never post to the
+    // P&L (see project_bas_tax_gap memory), so summing them here can't double-count.
+    // Mirrors the same liability-transaction-wins recalculation used in the P&L breakdown
+    // table (commit 1fcfe53) — without this the chart bars showed near-$0 every month
+    // except where a stray P&L posting happened to land (e.g. May'26).
+    wagesMap[p]  = ((m.wages_owner&&m.wages_owner[i])||0) + ((m.owner_drawings&&m.owner_drawings[i])||0) + ((m.super&&m.super[i])||0);
     motorMap[p]  = (m.motor_vehicles&&m.motor_vehicles[i])     || 0;
     subconMap[p] = (m.subcontractors&&m.subcontractors[i])     || 0;
     taxMap[p]    = (m.tax_bas&&m.tax_bas[i])                   || 0;
