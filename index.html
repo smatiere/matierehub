@@ -307,6 +307,7 @@ async function loadData() {
       quotes:               xero.quotes               || [],
       fy_summary:           xero.fy_summary           || {},
       cost_detail_monthly:  xero.cost_detail_monthly  || {},
+      liability_transactions: xero.liability_transactions || null,
       account_categories:   xero.account_categories   || {},
       meta:                 xero.meta                 || { last_updated: new Date().toISOString() }
     };
@@ -1860,11 +1861,14 @@ function renderPnLTable(data, fromD, toD) {
   const months = data.map(d => d.month);
 
   let prev = null;
+  let prevMonths = null;
   if (pnlCompare) {
     const dur  = toD.getTime() - fromD.getTime();
     const pTo  = new Date(fromD.getTime() - 86400000);
     const pFrom= new Date(fromD.getTime() - dur - 86400000);
-    prev = aggPnL(buildPnLData(pFrom, pTo));
+    const prevData = buildPnLData(pFrom, pTo);
+    prev = aggPnL(prevData);
+    prevMonths = prevData.map(d => d.month);
   }
 
   const fmtDiff = (a, b) => {
@@ -1890,8 +1894,23 @@ function renderPnLTable(data, fromD, toD) {
   const catRow = (label, catKey, curV, prevV) => {
     const expanded = pnlExpandedCats.has(catKey);
     const chevron = `<span style="display:inline-block;transition:transform .2s;transform:rotate(${expanded?'90deg':'0deg'});margin-right:6px;font-size:10px;opacity:.6">▶</span>`;
-    const detail = expanded ? getCatDetailForPeriod(catKey, months) : [];
-    const detailRows = detail.map(({acc, total, txns}) => {
+    // Always compute detail (not just when expanded) — for categories that contain
+    // liability accounts (Wages & Owner Pay, Tax & BAS), the real per-account total
+    // (sourced from actual bank transactions) can differ from the old P&L-report-based
+    // category figure. To keep the table internally consistent (category = sum of its
+    // accounts), we override the displayed category total with the sum of the real
+    // account-level figures whenever any account in it is transaction-sourced.
+    const detail = getCatDetailForPeriod(catKey, months);
+    const isLiabilityCat = detail.some(d => Array.isArray(d.txns));
+    let curVEff = curV, prevVEff = prevV;
+    if (isLiabilityCat) {
+      curVEff = Math.round(detail.reduce((s,d)=>s+d.total, 0) * 100) / 100;
+      if (prev && prevMonths) {
+        const prevDetail = getCatDetailForPeriod(catKey, prevMonths);
+        prevVEff = Math.round(prevDetail.reduce((s,d)=>s+d.total, 0) * 100) / 100;
+      }
+    }
+    const detailRows = !expanded ? '' : detail.map(({acc, total, txns}) => {
       const hasTxns      = Array.isArray(txns) && txns.length > 0;
       const acctExpanded = hasTxns && pnlExpandedAccts.has(acc);
       const acctChevron  = hasTxns
@@ -1918,14 +1937,17 @@ function renderPnLTable(data, fromD, toD) {
     }).join('');
     // Tax & BAS note — only relevant when the (real, transaction-derived) figure is
     // genuinely zero for the selected period, e.g. no BAS payment fell due/was made.
-    const taxNote = (catKey === 'Tax & BAS' && expanded && curV === 0)
+    const taxNote = (catKey === 'Tax & BAS' && expanded && curVEff === 0)
       ? `<tr style="background:var(--bg-2)"><td colspan="${prev?4:2}" style="padding-left:44px;font-size:11px;color:var(--ink-4);padding-top:2px;padding-bottom:8px">⚠ $0 for this period — no BAS clearing transactions found in the bank history (may mean no payment fell due, or it hasn't been recorded in Xero yet).</td></tr>`
+      : '';
+    const liabilityHint = (isLiabilityCat && expanded)
+      ? `<tr style="background:var(--bg-2)"><td colspan="${prev?4:2}" style="padding-left:44px;font-size:10px;color:var(--ink-4);opacity:.6;padding-top:2px;padding-bottom:6px">Total recalculated from real bank-transaction detail — more accurate than Xero's P&amp;L report for these accounts, which always shows $0 for balance-sheet liability items like loans, super and wages payable.</td></tr>`
       : '';
     return `<tr style="cursor:pointer" onclick="pnlToggleExpand('${catKey}')">
       <td style="padding-left:24px;color:var(--ink-4)">${chevron}${label}</td>
-      <td class="amount" style="color:var(--orange)">(${fmt(curV)})</td>
-      ${prev?`<td class="amount" style="color:var(--orange);opacity:.7">(${fmt(prevV||0)})</td>`:''}
-      ${prev?`<td class="amount">${fmtDiff(curV,prevV||0)}</td>`:''}
+      <td class="amount" style="color:var(--orange)">(${fmt(curVEff)})</td>
+      ${prev?`<td class="amount" style="color:var(--orange);opacity:.7">(${fmt(prevVEff||0)})</td>`:''}
+      ${prev?`<td class="amount">${fmtDiff(curVEff,prevVEff||0)}</td>`:''}
     </tr>${detailRows}${taxNote}`;
   };
 
