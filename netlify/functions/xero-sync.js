@@ -660,6 +660,18 @@ async function writeToSupabase(result, log) {
 
   const subconRow  = findAccount(pChunk.sectionMap, 'Subcontractors') || Array(nChunk).fill(0);
 
+  // 'Operating' bucket = sum of every P&L account mapped to 'Operating' in
+  // ACCOUNT_CATEGORIES (Bank Fees, Insurance, Mobile Phone, Office Expenses, etc.)
+  // — added 2026-06-08 to fix the P&L tab showing $0 for Operating (it was reading
+  // monthly.operating, which never existed; see project_wages_owner_pay_mapping_verified memory).
+  const operatingNames = Object.entries(ACCOUNT_CATEGORIES)
+    .filter(([, cat]) => cat === 'Operating')
+    .map(([name]) => name);
+  const opRows = Object.values(pChunk.sectionMap).flatMap(s =>
+    Object.entries(s).filter(([k]) => operatingNames.includes(k)).map(([, v]) => v)
+  );
+  const operatingRow = opRows.length ? addArrays(...opRows) : Array(nChunk).fill(0);
+
   const clamp = arr => arr.slice(0, nChunk).map(v => round2(Math.abs(v)));
 
   const freshChunk = {
@@ -669,7 +681,8 @@ async function writeToSupabase(result, log) {
     materials:      clamp(matsRow),
     wages_owner:    clamp(wagesOwner),
     motor_vehicles: clamp(motorVeh),
-    subcontractors: clamp(subconRow)
+    subcontractors: clamp(subconRow),
+    operating:      clamp(operatingRow)
     // NOTE: tax_bas deliberately omitted here — it used to be sourced from the P&L
     // 'ATO/BAS Clearing' account, which is a Balance Sheet liability that never posts
     // to the P&L and was therefore always $0 (see project_bas_tax_gap memory). The
