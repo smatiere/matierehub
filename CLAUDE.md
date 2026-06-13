@@ -38,12 +38,15 @@ As of June 2026 the live database is **Supabase** (project URL `https://nwpzjqbl
 **Tables** (defined in `supabase_setup.sql`):
 
 ```
-timesheets   { id, date, project, hours, rate, value, employee, notes, created_at }
-expense_log  { id, date, supplier, description, category, project, qty, unit_price, amount, created_at }
-projects     { id, name, status, quoted, notes, created_at }
-xero_cache   { key, data (JSONB), updated_at }
-             ← key is one of: kpis, monthly, open_invoices, top_customers,
-               quotes, fy_summary, cost_detail_monthly, account_categories, meta
+timesheets     { id, date, project, hours, rate, value, employee, notes, created_at }
+expense_log    { id, date, supplier, description, category, project, qty, unit_price, amount, created_at }
+projects       { id, name, status, quoted, notes, created_at }
+xero_cache     { key, data (JSONB), updated_at }
+               ← key is one of: kpis, monthly, open_invoices, top_customers,
+                 quotes, fy_summary, cost_detail_monthly, account_categories, meta
+invoice_items  { id, invoice_number, item, description, qty, unit_price, price_excl_gst,
+                 quote_number, contact, contact_id, date, due_date, status, notes, paid, created_at }
+               ← one row per invoice line item; synced from Xero via xero-sync.js?scope=invoice_items
 ```
 
 `xero_cache` stores Xero-synced financial data as JSON blobs (written by `xero-sync.js`), mirroring the old `data.json` top-level keys of the same names. `timesheets`, `expense_log`, and `projects` are proper relational tables that Claude reads/writes via `claude-parse.js`.
@@ -51,6 +54,36 @@ xero_cache   { key, data (JSONB), updated_at }
 **Important:** `expense_log` only contains entries logged via Claude chat. It does NOT contain the 1,046 Xero transactions — those feed `xero_cache.monthly` and `xero_cache.cost_detail_monthly` via `xero-sync.js`.
 
 **`days_old`** on open invoices is computed dynamically in the browser from the `date` field at render time — never trust a stored value.
+
+### invoice_items — column source map
+
+| Column | Source | Notes |
+|--------|--------|-------|
+| `id` | `li.LineItemID` (Xero UUID) | Stable primary key; fallback: `INV-XXXX-01` |
+| `invoice_number` | `inv.InvoiceNumber` | e.g. `INV-0345` |
+| `item` | `li.ItemCode` | Short code; often blank |
+| `description` | `li.Description` | Full text as on Xero invoice |
+| `qty` | `li.Quantity` | |
+| `unit_price` | `li.UnitAmount` | Excl. GST |
+| `price_excl_gst` | `li.LineAmount` | Xero's stored value — respects Xero rounding |
+| `quote_number` | `inv.Reference` | Xero's "Ref" column — auto-populated when invoice was created from a quote (e.g. `QU-0259`); blank otherwise |
+| `contact` | `inv.Contact.Name` | Customer display name |
+| `contact_id` | `inv.Contact.ContactID` | Xero UUID — foreign key for a future `contacts` table (email, suburb, address). Stored now to enable revenue-by-suburb queries later with a simple JOIN; no backfilling needed |
+| `date` | `inv.DateString` | Invoice date |
+| `due_date` | `inv.DueDateString` | Overdue = `status = 'AUTHORISED' AND due_date < today` — computed at query/display time, not stored |
+| `status` | `inv.Status` | `PAID`, `AUTHORISED`, `DRAFT`, `VOIDED` |
+| `notes` | *(blank)* | HUB input — written via claude-parse, not this sync |
+| `paid` | `li.LineAmount × (inv.AmountPaid / inv.Total)` | Same payment ratio applied to every line on an invoice. Fully paid → paid = price_excl_gst. 75% paid → paid = 75% of price_excl_gst |
+
+### invoice_items — sync details
+
+- **Triggered by:** `POST /.netlify/functions/xero-sync?scope=invoice_items` with `Authorization: Bearer <SYNC_SECRET>`
+- **Fetches:** all ACCREC invoices (no date filter — full history)
+- **Writes to:** `invoice_items` table directly (not `xero_cache`)
+- **Upsert key:** `id` (LineItemID) — safe to re-run; never creates duplicates
+- **Initial load (2026-06-13):** 341 invoices → 720 line items
+- **When to re-run:** after invoices are paid or updated in Xero, to refresh `paid`, `status`, and `due_date` values
+- **Future:** add `invoice_items` to the default sync scope once a regular cadence is set up
 
 ---
 
