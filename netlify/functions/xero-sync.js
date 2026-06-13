@@ -273,7 +273,9 @@ function transformInvoiceItems(invoices) {
         date:           (inv.DateString    || inv.Date    || '').slice(0, 10) || null,
         due_date:       (inv.DueDateString || inv.DueDate || '').slice(0, 10) || null,
         status:         inv.Status || '',
-        notes:          '',
+        // notes intentionally omitted — HUB input written by claude-parse.js and must
+        // not be overwritten by the sync. Supabase merge-duplicates only updates columns
+        // present in the payload, so leaving notes out preserves any manually-added notes.
         paid:           round2(lineAmt * payRatio)
       });
     });
