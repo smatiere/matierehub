@@ -191,6 +191,87 @@ async function sbUpsert(key, data) {
   }
 }
 
+// ── Supabase upsert for invoice_items table (separate from xero_cache) ────────
+// Rows are batched in chunks of 100 to stay within Supabase request size limits.
+// Uses Xero's LineItemID as the primary key — stable even if line items are reordered.
+async function sbUpsertInvoiceItems(rows, log) {
+  if (!rows.length) { if (log) log.push('  → 0 invoice line items to write'); return; }
+  const CHUNK = 100;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const chunk = rows.slice(i, i + CHUNK);
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/invoice_items`, {
+      method: 'POST',
+      headers: {
+        'apikey':        SUPABASE_SERVICE_KEY,
+        'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+        'Content-Type':  'application/json',
+        'Prefer':        'resolution=merge-duplicates'
+      },
+      body: JSON.stringify(chunk)
+    });
+    if (!res.ok) {
+      const msg = await res.text();
+      throw new Error(`Supabase invoice_items upsert failed (chunk ${i}): ${res.status} ${msg.slice(0, 200)}`);
+    }
+  }
+  if (log) log.push(`  → ${rows.length} invoice line items written to invoice_items table`);
+}
+
+// ── Transform Xero invoices → invoice_items rows ──────────────────────────────
+//
+// Column mapping:
+//   id             ← li.LineItemID (Xero UUID — stable primary key)
+//                    fallback: {InvoiceNumber}-{padded index} if no LineItemID
+//   invoice_number ← inv.InvoiceNumber
+//   item           ← li.ItemCode (short code, may be blank)
+//   description    ← li.Description (full text as on Xero)
+//   qty            ← li.Quantity
+//   unit_price     ← li.UnitAmount (excl. GST)
+//   price_excl_gst ← li.LineAmount (Xero's stored value — respects Xero rounding)
+//   quote_number   ← '' (not available on invoice line items; link manually if needed)
+//   contact        ← inv.Contact.Name
+//   date           ← inv.DateString (YYYY-MM-DD)
+//   status         ← inv.Status (PAID, AUTHORISED, DRAFT, VOIDED, …)
+//   notes          ← '' (no direct Xero source; can be edited manually)
+//   paid           ← li.LineAmount × (inv.AmountPaid / inv.Total)
+//                    Both AmountPaid and Total are incl. GST from Xero — ratio is correct.
+//                    A fully-paid invoice → paid = price_excl_gst.
+//                    A 75%-paid invoice   → paid = 75% of price_excl_gst.
+//                    A DRAFT/unpaid invoice → paid = 0.
+//
+// Skips line items with no Description AND no LineAmount (pure Xero discount rows, etc.)
+function transformInvoiceItems(invoices) {
+  const rows = [];
+  for (const inv of invoices) {
+    const total       = inv.Total      || 0;   // incl. GST
+    const amountPaid  = inv.AmountPaid || 0;   // incl. GST
+    const payRatio    = total > 0 ? Math.min(amountPaid / total, 1) : 0;
+
+    (inv.LineItems || []).forEach((li, idx) => {
+      const desc      = (li.Description || '').trim();
+      const lineAmt   = li.LineAmount || 0;
+      if (!desc && lineAmt === 0) return;      // skip empty placeholder rows
+
+      rows.push({
+        id:             li.LineItemID || `${inv.InvoiceNumber}-${String(idx + 1).padStart(2, '0')}`,
+        invoice_number: inv.InvoiceNumber || '',
+        item:           (li.ItemCode    || '').trim(),
+        description:    desc,
+        qty:            li.Quantity  || 1,
+        unit_price:     li.UnitAmount || 0,
+        price_excl_gst: lineAmt,
+        quote_number:   '',
+        contact:        inv.Contact?.Name || '',
+        date:           (inv.DateString || inv.Date || '').slice(0, 10) || null,
+        status:         inv.Status || '',
+        notes:          '',
+        paid:           round2(lineAmt * payRatio)
+      });
+    });
+  }
+  return rows;
+}
+
 // ── Supabase read (used to merge new chunks into previously-cached history) ───
 async function sbSelect(key) {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return null;
@@ -997,6 +1078,35 @@ exports.handler = async function(event) {
       );
       log.push(`  → ${invoices.length} invoices fetched`);
       result.invoices = invoices;
+    }
+
+    // ── Invoice line items (all-time history → invoice_items table) ────────────
+    // Fetches ALL ACCREC invoices (no date filter) so the table covers every
+    // invoice ever raised in Xero — not just FY26. Line items from each invoice
+    // are transformed by transformInvoiceItems() and upserted directly into the
+    // `invoice_items` Supabase table (not xero_cache).
+    //
+    // Run once with ?scope=invoice_items to build the initial history.
+    // Re-run any time to pick up new invoices or updated payment statuses —
+    // upsert (resolution=merge-duplicates) means it's always safe to re-run.
+    if (scope.includes('invoice_items')) {
+      log.push('Fetching all-time ACCREC invoices for line-item history…');
+      const allInvoices = await fetchAllPages(
+        'Invoices?where=Type%3D%3D%22ACCREC%22&unitdp=2&summaryOnly=false',
+        'Invoices', accessToken, tenantId
+      );
+      log.push(`  → ${allInvoices.length} invoices fetched`);
+
+      const itemRows = transformInvoiceItems(allInvoices);
+      log.push(`  → ${itemRows.length} line items extracted`);
+
+      if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+        await sbUpsertInvoiceItems(itemRows, log);
+      } else {
+        log.push('  ⚠ SUPABASE_URL/KEY not set — skipping invoice_items write');
+      }
+
+      result.invoice_items_count = itemRows.length;
     }
 
     // ── P&L reports — FY summaries + discrete monthly breakdown + balance sheet ──
