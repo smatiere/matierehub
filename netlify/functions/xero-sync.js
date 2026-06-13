@@ -191,6 +191,91 @@ async function sbUpsert(key, data) {
   }
 }
 
+// ── Supabase upsert for contacts table ───────────────────────────────────────
+// Same chunk pattern as sbUpsertInvoiceItems. Note column intentionally excluded
+// from the payload — it holds HUB-entered notes that must not be overwritten by sync.
+async function sbUpsertContacts(rows, log) {
+  if (!rows.length) { if (log) log.push('  → 0 contacts to write'); return; }
+  const CHUNK = 100;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const chunk = rows.slice(i, i + CHUNK);
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/contacts`, {
+      method: 'POST',
+      headers: {
+        'apikey':        SUPABASE_SERVICE_KEY,
+        'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+        'Content-Type':  'application/json',
+        'Prefer':        'resolution=merge-duplicates'
+      },
+      body: JSON.stringify(chunk)
+    });
+    if (!res.ok) {
+      const msg = await res.text();
+      throw new Error(`Supabase contacts upsert failed (chunk ${i}): ${res.status} ${msg.slice(0, 200)}`);
+    }
+  }
+  if (log) log.push(`  → ${rows.length} contacts written to contacts table`);
+}
+
+// ── Transform Xero contacts → contacts table rows ─────────────────────────────
+//
+// Column mapping:
+//   id            ← c.ContactID       (Xero UUID — primary key, matches invoice_items.contact_id)
+//   name          ← c.Name
+//   first_name    ← c.FirstName
+//   last_name     ← c.LastName
+//   email         ← c.EmailAddress
+//   address_line1 ← c.Addresses → prefer AddressType=POBOX, fall back to STREET
+//   city          ← same address object → City
+//   region        ← same address object → Region
+//   postal_code   ← same address object → PostalCode
+//   country       ← same address object → Country
+//   phone         ← c.Phones → prefer PhoneType=DEFAULT, fall back to MOBILE
+//                   built as: (AreaCode ? AreaCode + ' ' : '') + PhoneNumber
+//   is_customer   ← c.IsCustomer (bool) — true for Xero "Customer" contacts
+//   note          ← intentionally OMITTED — HUB-input field, never synced
+//   updated_at    ← current time (refreshed on every sync run)
+//
+function transformContacts(contacts) {
+  const rows = [];
+  const now  = new Date().toISOString();
+
+  for (const c of contacts) {
+    if (!c.ContactID) continue;
+
+    // Address: POBOX preferred, STREET as fallback
+    const addrs   = c.Addresses || [];
+    const addr    = addrs.find(a => a.AddressType === 'POBOX')
+                 || addrs.find(a => a.AddressType === 'STREET')
+                 || {};
+
+    // Phone: DEFAULT preferred, MOBILE as fallback
+    const phones  = c.Phones || [];
+    const ph      = phones.find(p => p.PhoneType === 'DEFAULT')
+                 || phones.find(p => p.PhoneType === 'MOBILE')
+                 || {};
+    const phoneStr = [ph.AreaCode, ph.PhoneNumber].filter(Boolean).join(' ').trim();
+
+    rows.push({
+      id:            c.ContactID,
+      name:          (c.Name         || '').trim(),
+      first_name:    (c.FirstName    || '').trim(),
+      last_name:     (c.LastName     || '').trim(),
+      email:         (c.EmailAddress || '').trim(),
+      address_line1: (addr.AddressLine1 || '').trim(),
+      city:          (addr.City        || '').trim(),
+      region:        (addr.Region      || '').trim(),
+      postal_code:   (addr.PostalCode  || '').trim(),
+      country:       (addr.Country     || '').trim(),
+      phone:         phoneStr,
+      is_customer:   !!c.IsCustomer,
+      updated_at:    now
+      // note intentionally omitted — written via HUB only, must survive sync runs
+    });
+  }
+  return rows;
+}
+
 // ── Supabase upsert for invoice_items table (separate from xero_cache) ────────
 // Rows are batched in chunks of 100 to stay within Supabase request size limits.
 // Uses Xero's LineItemID as the primary key — stable even if line items are reordered.
@@ -1118,6 +1203,28 @@ exports.handler = async function(event) {
       }
 
       result.invoice_items_count = itemRows.length;
+    }
+
+    // ── Contacts (all Xero contacts → contacts table) ─────────────────────────
+    // Fetches all contacts (paginated) and upserts into the `contacts` table.
+    // is_customer=true for contacts marked as customers in Xero.
+    // The `note` column is excluded from the upsert payload — it's a HUB-only field.
+    // Safe to re-run at any time; upsert key is ContactID.
+    if (scope.includes('contacts')) {
+      log.push('Fetching all Xero contacts…');
+      const allContacts = await fetchAllPages('Contacts', 'Contacts', accessToken, tenantId);
+      log.push(`  → ${allContacts.length} contacts fetched`);
+
+      const contactRows = transformContacts(allContacts);
+      log.push(`  → ${contactRows.length} contacts transformed`);
+
+      if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+        await sbUpsertContacts(contactRows, log);
+      } else {
+        log.push('  ⚠ SUPABASE_URL/KEY not set — skipping contacts write');
+      }
+
+      result.contacts_count = contactRows.length;
     }
 
     // ── P&L reports — FY summaries + discrete monthly breakdown + balance sheet ──
