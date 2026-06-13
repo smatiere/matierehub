@@ -1,0 +1,26 @@
+name: Xero Invoice Items Daily Sync
+
+on:
+  schedule:
+    - cron: "0 21 * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync invoice_items from Xero
+        run: |
+          response=$(curl -s -w "\n%{http_code}" -X POST \
+            "https://matierehub2.netlify.app/.netlify/functions/xero-sync?scope=invoice_items" \
+            -H "Authorization: Bearer ${{ secrets.SYNC_SECRET }}" \
+            -H "Content-Type: application/json")
+          http_code=$(echo "$response" | tail -1)
+          body=$(echo "$response" | head -n -1)
+          echo "HTTP status: $http_code"
+          echo "Response: $body"
+          if [ "$http_code" != "200" ]; then
+            echo "Sync failed with HTTP $http_code"
+            exit 1
+          fi
+          echo "Sync completed successfully"
