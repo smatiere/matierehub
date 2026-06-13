@@ -270,7 +270,8 @@ function transformInvoiceItems(invoices) {
         quote_number:   quoteRef,
         contact:        inv.Contact?.Name       || '',
         contact_id:     inv.Contact?.ContactID  || '',
-        date:           (inv.DateString || inv.Date || '').slice(0, 10) || null,
+        date:           (inv.DateString    || inv.Date    || '').slice(0, 10) || null,
+        due_date:       (inv.DueDateString || inv.DueDate || '').slice(0, 10) || null,
         status:         inv.Status || '',
         notes:          '',
         paid:           round2(lineAmt * payRatio)
