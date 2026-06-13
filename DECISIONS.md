@@ -57,6 +57,30 @@ Why things are built the way they are. Read before suggesting alternatives.
 
 ---
 
+## Xero sync schedule: daily invoice_items + weekly full sync
+
+**Decision (2026-06-13):** Two Claude scheduled tasks run automatically:
+- **Daily 7am** — `POST xero-sync?scope=invoice_items` only. Fast (~seconds), keeps payment statuses and new invoice line items current.
+- **Weekly Sunday 6am** — Full sync (quotes, invoices, P&L, bank) then invoice_items. Slower (~2–4 min for monthly P&L fetches), refreshes all dashboard KPIs and charts.
+
+**Why two tasks instead of one:** The full sync is slow because it fetches one Xero P&L report per calendar month (needed for correct discrete monthly figures — see the "Revenue/costs inflated ~9-10x" fix in BUGS.md). Running that daily would hit Xero's rate limits and add unnecessary latency. The `invoice_items` scope is cheap (one paginated invoice fetch, no P&L calls) and benefits most from daily freshness.
+
+**Both tasks use bash/curl** to POST to the Netlify endpoint with `Authorization: Bearer <SYNC_SECRET>`. They run as Claude scheduled tasks visible in Cowork → Scheduled sidebar. The first automated run requires pre-approval of the bash tool — click "Run now" once on each task to grant it.
+
+---
+
+## Supabase upsert: exclude HUB-owned columns from sync payloads
+
+**Decision (2026-06-13):** Any column on a Supabase table that is written by the HUB (claude-parse) and never by the Xero sync must be **omitted entirely from the sync's upsert payload** — not set to a default value.
+
+**Why:** Supabase's `Prefer: resolution=merge-duplicates` translates to `ON CONFLICT ... DO UPDATE SET col = EXCLUDED.col` for every column present in the INSERT payload. Sending `notes: ''` means every sync run silently overwrites whatever the user typed. Omitting `notes` from the payload means the DO UPDATE SET clause never references it — the column retains its current value on conflict, and new rows get the Postgres column default.
+
+**Applied to:** `invoice_items.notes` — excluded from `transformInvoiceItems()` in `xero-sync.js` since 2026-06-13.
+
+**Rule going forward:** whenever a new column is added to a table that is jointly written by both the sync and the HUB, decide at design time which side "owns" it. Sync-owned columns go in the payload; HUB-owned columns are excluded.
+
+---
+
 ## No Google Sheets, no Airtable
 
 **Decision:** Not used.
