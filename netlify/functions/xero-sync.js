@@ -222,46 +222,54 @@ async function sbUpsertInvoiceItems(rows, log) {
 // Column mapping:
 //   id             ← li.LineItemID (Xero UUID — stable primary key)
 //                    fallback: {InvoiceNumber}-{padded index} if no LineItemID
-//   invoice_number ← inv.InvoiceNumber
-//   item           ← li.ItemCode (short code, may be blank)
-//   description    ← li.Description (full text as on Xero)
+//   invoice_number ← inv.InvoiceNumber  (e.g. 'INV-0345')
+//   item           ← li.ItemCode        (short code, often blank)
+//   description    ← li.Description     (full text as on Xero)
 //   qty            ← li.Quantity
-//   unit_price     ← li.UnitAmount (excl. GST)
-//   price_excl_gst ← li.LineAmount (Xero's stored value — respects Xero rounding)
-//   quote_number   ← '' (not available on invoice line items; link manually if needed)
+//   unit_price     ← li.UnitAmount      (excl. GST)
+//   price_excl_gst ← li.LineAmount      (Xero's stored value — respects Xero rounding)
+//   quote_number   ← inv.Reference      (Xero's "Ref" column — auto-populated with the
+//                    linked quote number, e.g. 'QU-0259', when invoice was created from
+//                    a quote; blank string when no quote is linked)
 //   contact        ← inv.Contact.Name
-//   date           ← inv.DateString (YYYY-MM-DD)
-//   status         ← inv.Status (PAID, AUTHORISED, DRAFT, VOIDED, …)
-//   notes          ← '' (no direct Xero source; can be edited manually)
+//   contact_id     ← inv.Contact.ContactID (Xero UUID — foreign key for a future contacts
+//                    table that will hold email, suburb, address, etc. Storing it now means
+//                    revenue-by-suburb queries can be done with a simple JOIN later without
+//                    any backfilling.)
+//   date           ← inv.DateString     (YYYY-MM-DD)
+//   status         ← inv.Status         (PAID, AUTHORISED, DRAFT, VOIDED, …)
+//   notes          ← ''                 (HUB input — written via claude-parse, not this sync)
 //   paid           ← li.LineAmount × (inv.AmountPaid / inv.Total)
 //                    Both AmountPaid and Total are incl. GST from Xero — ratio is correct.
-//                    A fully-paid invoice → paid = price_excl_gst.
-//                    A 75%-paid invoice   → paid = 75% of price_excl_gst.
-//                    A DRAFT/unpaid invoice → paid = 0.
+//                    Fully-paid invoice  → paid = price_excl_gst.
+//                    75%-paid invoice    → paid = 75% of price_excl_gst.
+//                    DRAFT/unpaid        → paid = 0.
 //
-// Skips line items with no Description AND no LineAmount (pure Xero discount rows, etc.)
+// Skips line items with no Description AND no LineAmount (empty Xero placeholder rows).
 function transformInvoiceItems(invoices) {
   const rows = [];
   for (const inv of invoices) {
-    const total       = inv.Total      || 0;   // incl. GST
-    const amountPaid  = inv.AmountPaid || 0;   // incl. GST
-    const payRatio    = total > 0 ? Math.min(amountPaid / total, 1) : 0;
+    const total      = inv.Total      || 0;   // incl. GST
+    const amountPaid = inv.AmountPaid || 0;   // incl. GST
+    const payRatio   = total > 0 ? Math.min(amountPaid / total, 1) : 0;
+    const quoteRef   = (inv.Reference || '').trim();  // 'QU-0259' or '' when no quote linked
 
     (inv.LineItems || []).forEach((li, idx) => {
-      const desc      = (li.Description || '').trim();
-      const lineAmt   = li.LineAmount || 0;
+      const desc    = (li.Description || '').trim();
+      const lineAmt = li.LineAmount || 0;
       if (!desc && lineAmt === 0) return;      // skip empty placeholder rows
 
       rows.push({
         id:             li.LineItemID || `${inv.InvoiceNumber}-${String(idx + 1).padStart(2, '0')}`,
         invoice_number: inv.InvoiceNumber || '',
-        item:           (li.ItemCode    || '').trim(),
+        item:           (li.ItemCode || '').trim(),
         description:    desc,
-        qty:            li.Quantity  || 1,
+        qty:            li.Quantity   || 1,
         unit_price:     li.UnitAmount || 0,
         price_excl_gst: lineAmt,
-        quote_number:   '',
-        contact:        inv.Contact?.Name || '',
+        quote_number:   quoteRef,
+        contact:        inv.Contact?.Name       || '',
+        contact_id:     inv.Contact?.ContactID  || '',
         date:           (inv.DateString || inv.Date || '').slice(0, 10) || null,
         status:         inv.Status || '',
         notes:          '',
