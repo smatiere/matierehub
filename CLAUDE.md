@@ -72,7 +72,7 @@ invoice_items  { id, invoice_number, item, description, qty, unit_price, price_e
 | `date` | `inv.DateString` | Invoice date |
 | `due_date` | `inv.DueDateString` | Overdue = `status = 'AUTHORISED' AND due_date < today` — computed at query/display time, not stored |
 | `status` | `inv.Status` | `PAID`, `AUTHORISED`, `DRAFT`, `VOIDED` |
-| `notes` | *(blank)* | HUB input — written via claude-parse, not this sync |
+| `notes` | *(HUB input only — never synced)* | Written by claude-parse ACTION 5 (`INV-XXXX note: …`). **Intentionally excluded from the xero-sync upsert payload** — Supabase `merge-duplicates` updates every column present in the payload, so including `notes: ''` would wipe any manually-added notes on every sync run. Omitting it from the payload means new rows get the Postgres column default (`''`) and existing notes are never touched by the sync. |
 | `paid` | `li.LineAmount × (inv.AmountPaid / inv.Total)` | Same payment ratio applied to every line on an invoice. Fully paid → paid = price_excl_gst. 75% paid → paid = 75% of price_excl_gst |
 
 ### invoice_items — sync details
@@ -82,8 +82,11 @@ invoice_items  { id, invoice_number, item, description, qty, unit_price, price_e
 - **Writes to:** `invoice_items` table directly (not `xero_cache`)
 - **Upsert key:** `id` (LineItemID) — safe to re-run; never creates duplicates
 - **Initial load (2026-06-13):** 341 invoices → 720 line items
-- **When to re-run:** after invoices are paid or updated in Xero, to refresh `paid`, `status`, and `due_date` values
-- **Future:** add `invoice_items` to the default sync scope once a regular cadence is set up
+- **Automated schedule (set up 2026-06-13):**
+  - **Daily 7am** — `scope=invoice_items` only; fast run to refresh payment statuses and pick up new invoices
+  - **Weekly Sunday 6am** — full sync (`scope=quotes,invoices,pnl,bank`) + a second `scope=invoice_items` call; refreshes all dashboard KPIs, monthly charts, cash balance, pipeline
+  - Both run as Claude scheduled tasks (visible in Cowork → Scheduled sidebar). Click "Run now" once on each to pre-approve the bash tool, otherwise first automated run will pause for permission.
+- **Manual re-run:** `POST /.netlify/functions/xero-sync?scope=invoice_items` with `Authorization: Bearer <SYNC_SECRET>` — safe to run at any time
 
 ---
 
@@ -104,8 +107,20 @@ Seb's hourly rate: **$100/hr ex GST**
 1. User types or speaks into the Claude bar at the bottom of `index.html`
 2. `claudeBarSend()` POSTs text to `/.netlify/functions/claude-parse`
 3. The function calls **Claude Haiku** to parse the natural language into a JSON action
-4. The function writes the result directly to **Supabase** (`timesheets`/`expense_log`/`projects` tables) via the Supabase REST API — it no longer touches `data.json` or GitHub
+4. The function writes the result directly to **Supabase** via the REST API — it no longer touches `data.json` or GitHub
 5. The front-end does an optimistic in-memory update (no re-fetch needed)
+
+### claude-parse actions (as of 2026-06-13)
+
+| Action | Trigger | Writes to |
+|--------|---------|-----------|
+| ACTION 1 — Log hours | `"4h mark today"`, `"full day rob"` | `timesheets` (INSERT) |
+| ACTION 2 — Log expense | `"$280 bunnings materials"` | `expense_log` (INSERT) |
+| ACTION 3 — Edit entry | `"fix hours to 6 yesterday"`, `"add note to today mark"` | `timesheets` (PATCH) |
+| ACTION 4 — Delete entry | `"delete TS-010"`, `"undo last entry"` | `timesheets` (DELETE) |
+| ACTION 5 — Invoice note | `"INV-0345 note: client requested revision"` | `invoice_items.notes` (PATCH by `invoice_number`) |
+
+ACTION 5 matches any input containing an `INV-XXXX` invoice number and a note/comment after a separator (`note:`, `—`, `:`). It PATCHes the `notes` column on all line items for that invoice and confirms how many rows were updated. The xero-sync never touches `notes`, so manual notes survive all future sync runs.
 
 **Note:** pushing `data.json` to GitHub is NOT part of this flow and should not be done as a substitute — see `BUGS.md` "Race condition wipes entries" for why writing `data.json` directly is unsafe, and [[feedback_github_push]] in memory for the corrected push process (code files only, never `data.json`).
 
