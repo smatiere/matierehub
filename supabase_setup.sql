@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   contact         TEXT NOT NULL DEFAULT '',          -- customer/client name
   contact_id      TEXT DEFAULT '',                   -- Xero ContactID UUID — foreign key for future contacts table (email, suburb, etc.)
   date            DATE,                              -- invoice date
+  due_date        DATE,                              -- invoice due date (overdue = status AUTHORISED AND due_date < today)
   status          TEXT DEFAULT '',                   -- e.g. PAID, AUTHORISED, DRAFT, VOIDED
   notes           TEXT DEFAULT '',
   paid            NUMERIC(10,2) DEFAULT 0,           -- line-item share of amount paid
