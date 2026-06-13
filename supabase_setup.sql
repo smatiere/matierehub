@@ -59,8 +59,9 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   qty             NUMERIC(10,3) NOT NULL DEFAULT 1,
   unit_price      NUMERIC(10,2) NOT NULL DEFAULT 0,  -- excl. GST
   price_excl_gst  NUMERIC(10,2) NOT NULL DEFAULT 0,  -- stored: qty × unit_price
-  quote_number    TEXT DEFAULT '',                   -- linked quote number, if any
+  quote_number    TEXT DEFAULT '',                   -- from inv.Reference (e.g. 'QU-0259'); blank when no quote linked
   contact         TEXT NOT NULL DEFAULT '',          -- customer/client name
+  contact_id      TEXT DEFAULT '',                   -- Xero ContactID UUID — foreign key for future contacts table (email, suburb, etc.)
   date            DATE,                              -- invoice date
   status          TEXT DEFAULT '',                   -- e.g. PAID, AUTHORISED, DRAFT, VOIDED
   notes           TEXT DEFAULT '',
