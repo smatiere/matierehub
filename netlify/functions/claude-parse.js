@@ -226,6 +226,22 @@ ${recentTs || '(none yet)'}
 - Only set "new_project":true if input explicitly contains the words "new project"
 - If a project cannot be confidently identified, output {"action":"unclear","message":"brief reason"}
 
+---
+## ACTION 5 — Add a note to an invoice
+
+Schema: {"action":"note","type":"invoice_item","invoice_number":"INV-0345","notes":"client requested revision"}
+
+Triggers: "INV-XXXX note:", "note on INV-", "add note to INV-", or any input that contains an invoice number (INV-followed by 4 digits) and a note/comment.
+
+Examples:
+"INV-0345 note: client requested revision"   → {"action":"note","type":"invoice_item","invoice_number":"INV-0345","notes":"client requested revision"}
+"add note to INV-0312 — paid in cash"        → {"action":"note","type":"invoice_item","invoice_number":"INV-0312","notes":"paid in cash"}
+"note on INV-0287: warranty claim pending"   → {"action":"note","type":"invoice_item","invoice_number":"INV-0287","notes":"warranty claim pending"}
+"INV-0300 client asked for receipt copy"     → {"action":"note","type":"invoice_item","invoice_number":"INV-0300","notes":"client asked for receipt copy"}
+
+Invoice numbers always match INV-XXXX (4 digits, zero-padded). Extract the note after "note:", "—", ":", or similar separator.
+
+---
 If you cannot confidently parse the input at all: {"action":"unclear","message":"brief plain-english reason"}`;
 
     // ── 3. Call Haiku (skipped if pendingAction already set) ──────────────────
@@ -418,6 +434,27 @@ If you cannot confidently parse the input at all: {"action":"unclear","message":
       const removed = deleted[0];
       entryLabel = `Deleted ${removed.id}: ${removed.hours}h ${removed.project} (${removed.date})`;
       responseExtra = { deleted: removed };
+
+    } else if (parsed.action === 'note' && parsed.type === 'invoice_item') {
+      // Write a note to all line items on the given invoice.
+      // The xero-sync never touches the notes column (it's intentionally excluded from
+      // the upsert payload), so manual notes are never overwritten by a sync run.
+      const invNum = (parsed.invoice_number || '').trim().toUpperCase();
+      if (!invNum || !/^INV-\d{4}$/.test(invNum)) {
+        return { statusCode: 200, headers, body: JSON.stringify({
+          status: 'unclear',
+          message: `Couldn't find a valid invoice number (expected INV-XXXX format)`
+        })};
+      }
+      const updated = await sbPatch('invoice_items', `?invoice_number=eq.${encodeURIComponent(invNum)}`, { notes: parsed.notes || '' });
+      if (!updated || updated.length === 0) {
+        return { statusCode: 200, headers, body: JSON.stringify({
+          status: 'unclear',
+          message: `No invoice items found for ${invNum} — check the invoice number`
+        })};
+      }
+      entryLabel = `Note saved on ${invNum} (${updated.length} line item${updated.length !== 1 ? 's' : ''})`;
+      responseExtra = { updated };
 
     } else {
       return { statusCode: 200, headers, body: JSON.stringify({ status: 'unclear', message: 'Unrecognised action from model' }) };
