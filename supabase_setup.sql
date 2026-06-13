@@ -71,6 +71,28 @@ CREATE TABLE IF NOT EXISTS invoice_items (
 );
 
 
+-- contacts table: synced from Xero via xero-sync.js?scope=contacts
+-- PK is Xero ContactID UUID — matches invoice_items.contact_id for JOIN queries.
+-- note column is HUB-only (free text entered via Claude chat); never touched by sync.
+CREATE TABLE IF NOT EXISTS contacts (
+  id            TEXT PRIMARY KEY,         -- Xero ContactID UUID
+  name          TEXT DEFAULT '',
+  first_name    TEXT DEFAULT '',
+  last_name     TEXT DEFAULT '',
+  email         TEXT DEFAULT '',
+  address_line1 TEXT DEFAULT '',
+  city          TEXT DEFAULT '',
+  region        TEXT DEFAULT '',
+  postal_code   TEXT DEFAULT '',
+  country       TEXT DEFAULT '',
+  phone         TEXT DEFAULT '',
+  is_customer   BOOLEAN DEFAULT false,    -- true = marked as Customer in Xero
+  note          TEXT DEFAULT '',          -- HUB-only; never overwritten by sync
+  updated_at    TIMESTAMPTZ DEFAULT NOW(),
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+
 -- 2. PERMISSIONS (allow frontend to read without service_role key)
 
 GRANT SELECT ON timesheets    TO anon;
@@ -78,6 +100,7 @@ GRANT SELECT ON expense_log   TO anon;
 GRANT SELECT ON projects      TO anon;
 GRANT SELECT ON xero_cache    TO anon;
 GRANT SELECT ON invoice_items TO anon;
+GRANT SELECT ON contacts      TO anon;
 
 -- Allow the service_role (used by Netlify functions) full access
 GRANT ALL ON timesheets    TO service_role;
@@ -85,6 +108,7 @@ GRANT ALL ON expense_log   TO service_role;
 GRANT ALL ON projects      TO service_role;
 GRANT ALL ON xero_cache    TO service_role;
 GRANT ALL ON invoice_items TO service_role;
+GRANT ALL ON contacts      TO service_role;
 
 
 -- 3. DISABLE ROW LEVEL SECURITY (single-user app, no auth needed)
@@ -94,6 +118,7 @@ ALTER TABLE expense_log   DISABLE ROW LEVEL SECURITY;
 ALTER TABLE projects      DISABLE ROW LEVEL SECURITY;
 ALTER TABLE xero_cache    DISABLE ROW LEVEL SECURITY;
 ALTER TABLE invoice_items DISABLE ROW LEVEL SECURITY;
+ALTER TABLE contacts      DISABLE ROW LEVEL SECURITY;
 
 
 -- 4. MIGRATE EXISTING DATA
