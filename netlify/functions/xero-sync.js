@@ -268,9 +268,11 @@ function transformContacts(contacts) {
       postal_code:   (addr.PostalCode  || '').trim(),
       country:       (addr.Country     || '').trim(),
       phone:         phoneStr,
+      abn:           (c.TaxNumber || '').trim(),
       is_customer:   !!c.IsCustomer,
+      is_supplier:   !!c.IsSupplier,
       updated_at:    now
-      // note intentionally omitted — written via HUB only, must survive sync runs
+      // note, categories, rating intentionally omitted — HUB-only fields, never overwritten by sync
     });
   }
   return rows;
