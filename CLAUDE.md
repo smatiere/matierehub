@@ -47,6 +47,12 @@ xero_cache     { key, data (JSONB), updated_at }
 invoice_items  { id, invoice_number, item, description, qty, unit_price, price_excl_gst,
                  quote_number, contact, contact_id, date, due_date, status, notes, paid, created_at }
                ← one row per invoice line item; synced from Xero via xero-sync.js?scope=invoice_items
+contacts       { id, name, first_name, last_name, email, address_line1, city, region,
+                 postal_code, country, phone, abn, is_customer, is_supplier,
+                 categories (TEXT[]), rating (0–10), note, updated_at, created_at }
+               ← synced from Xero via xero-sync.js?scope=contacts; categories/rating/note are HUB-only
+category_list  { name (PK), created_at }
+               ← lookup table for valid contact categories; managed via HUB
 ```
 
 `xero_cache` stores Xero-synced financial data as JSON blobs (written by `xero-sync.js`), mirroring the old `data.json` top-level keys of the same names. `timesheets`, `expense_log`, and `projects` are proper relational tables that Claude reads/writes via `claude-parse.js`.
@@ -68,7 +74,7 @@ invoice_items  { id, invoice_number, item, description, qty, unit_price, price_e
 | `price_excl_gst` | `li.LineAmount` | Xero's stored value — respects Xero rounding |
 | `quote_number` | `inv.Reference` | Xero's "Ref" column — auto-populated when invoice was created from a quote (e.g. `QU-0259`); blank otherwise |
 | `contact` | `inv.Contact.Name` | Customer display name |
-| `contact_id` | `inv.Contact.ContactID` | Xero UUID — foreign key for a future `contacts` table (email, suburb, address). Stored now to enable revenue-by-suburb queries later with a simple JOIN; no backfilling needed |
+| `contact_id` | `inv.Contact.ContactID` | Xero UUID — foreign key to `contacts.id`. Enables revenue-by-suburb and other contact queries via JOIN. |
 | `date` | `inv.DateString` | Invoice date |
 | `due_date` | `inv.DueDateString` | Overdue = `status = 'AUTHORISED' AND due_date < today` — computed at query/display time, not stored |
 | `status` | `inv.Status` | `PAID`, `AUTHORISED`, `DRAFT`, `VOIDED` |
@@ -82,11 +88,42 @@ invoice_items  { id, invoice_number, item, description, qty, unit_price, price_e
 - **Writes to:** `invoice_items` table directly (not `xero_cache`)
 - **Upsert key:** `id` (LineItemID) — safe to re-run; never creates duplicates
 - **Initial load (2026-06-13):** 341 invoices → 720 line items
-- **Automated schedule (set up 2026-06-13):**
-  - **Daily 7am** — `scope=invoice_items` only; fast run to refresh payment statuses and pick up new invoices
-  - **Weekly Sunday 6am** — full sync (`scope=quotes,invoices,pnl,bank`) + a second `scope=invoice_items` call; refreshes all dashboard KPIs, monthly charts, cash balance, pipeline
-  - Both run as Claude scheduled tasks (visible in Cowork → Scheduled sidebar). Click "Run now" once on each to pre-approve the bash tool, otherwise first automated run will pause for permission.
-- **Manual re-run:** `POST /.netlify/functions/xero-sync?scope=invoice_items` with `Authorization: Bearer <SYNC_SECRET>` — safe to run at any time
+- **Automated schedule:**
+  - **Daily 7am AEST** — `scope=invoice_items` via GitHub Actions (`.github/workflows/xero-daily-sync.yml`); refreshes payment statuses and picks up new invoices
+  - **Weekly Sunday 6am AEST** — full sync not yet automated; Claude scheduled task for this was broken (sandbox proxy blocks outbound calls to matierehub2.netlify.app). Needs a GitHub Actions workflow (`.github/workflows/xero-weekly-sync.yml`) — not yet built.
+- **Manual re-run from Hub console:** `fetch('/.netlify/functions/xero-sync?scope=invoice_items', { method:'POST', headers:{'Authorization':'Bearer matiere2026'} }).then(r=>r.text()).then(console.log)`
+
+### contacts — column source map
+
+| Column | Source | Notes |
+|--------|--------|-------|
+| `id` | `c.ContactID` (Xero UUID) | Primary key; matches `invoice_items.contact_id` |
+| `name` | `c.Name` | |
+| `first_name` / `last_name` | `c.FirstName` / `c.LastName` | |
+| `email` | `c.EmailAddress` | |
+| `address_line1` | `c.Addresses` → prefer `POBOX`, fallback `STREET` | |
+| `city` / `region` / `postal_code` / `country` | same address object | |
+| `phone` | `c.Phones` → prefer `DEFAULT`, fallback `MOBILE` | AreaCode + PhoneNumber joined |
+| `abn` | `c.TaxNumber` | ABN or ACN as stored in Xero |
+| `is_customer` | `c.IsCustomer` | 168 of 404 contacts |
+| `is_supplier` | `c.IsSupplier` | Xero-sourced; can also be set manually |
+| `categories` | *(HUB-only — never synced)* | `TEXT[]` array; values must exist in `category_list` table |
+| `rating` | *(HUB-only — never synced)* | Integer 0–10; set via `"rate Bunnings 8"` in HUB |
+| `note` | *(HUB-only — never synced)* | Free text per contact |
+
+### contacts — sync details
+
+- **Triggered by:** `POST /.netlify/functions/xero-sync?scope=contacts` with `Authorization: Bearer matiere2026`
+- **Fetches:** all Xero contacts (paginated, 100/page)
+- **Writes to:** `contacts` table directly (not `xero_cache`)
+- **Upsert key:** `id` (ContactID) — safe to re-run; never creates duplicates
+- **Excluded from upsert payload:** `categories`, `rating`, `note` — HUB-only, must survive sync runs
+- **Initial load (2026-06-14):** 404 contacts
+- **Manual re-run from Hub console:** `fetch('/.netlify/functions/xero-sync?scope=contacts', { method:'POST', headers:{'Authorization':'Bearer matiere2026'} }).then(r=>r.text()).then(console.log)`
+
+### category_list table
+
+Lookup table for valid contact categories. Seeded 2026-06-14 with: Hardware, Timber & Sheet, Tools & Equipment, Subcontractor, Doors, Professional Services, Docs. New entries can be added directly in Supabase or via a future HUB command.
 
 ---
 
@@ -110,7 +147,7 @@ Seb's hourly rate: **$100/hr ex GST**
 4. The function writes the result directly to **Supabase** via the REST API — it no longer touches `data.json` or GitHub
 5. The front-end does an optimistic in-memory update (no re-fetch needed)
 
-### claude-parse actions (as of 2026-06-13)
+### claude-parse actions (as of 2026-06-14)
 
 | Action | Trigger | Writes to |
 |--------|---------|-----------|
@@ -119,8 +156,14 @@ Seb's hourly rate: **$100/hr ex GST**
 | ACTION 3 — Edit entry | `"fix hours to 6 yesterday"`, `"add note to today mark"` | `timesheets` (PATCH) |
 | ACTION 4 — Delete entry | `"delete TS-010"`, `"undo last entry"` | `timesheets` (DELETE) |
 | ACTION 5 — Invoice note | `"INV-0345 note: client requested revision"` | `invoice_items.notes` (PATCH by `invoice_number`) |
+| ACTION 6 — Rate contact | `"rate Bunnings 8"`, `"give Aussie Timber 9/10"` | `contacts.rating` (PATCH by name) |
+| ACTION 7 — Categorise contact | `"category Bunnings: Hardware"`, `"categorise Bunnings"` | `contacts.categories` (PATCH by name) |
 
-ACTION 5 matches any input containing an `INV-XXXX` invoice number and a note/comment after a separator (`note:`, `—`, `:`). It PATCHes the `notes` column on all line items for that invoice and confirms how many rows were updated. The xero-sync never touches `notes`, so manual notes survive all future sync runs.
+**ACTION 5** matches any input containing `INV-XXXX` + a note. PATCHes `notes` on all line items for that invoice. The xero-sync never touches `notes`, so manual notes survive all future sync runs.
+
+**ACTION 6** finds the contact by partial name match and sets `rating` (integer 0–10).
+
+**ACTION 7** assigns one or more categories from `category_list` to a contact. If no category is specified (e.g. `"categorise Bunnings"`), Claude looks up past `expense_log` entries for that supplier and auto-suggests a category for confirmation. Categories are stored as a `TEXT[]` array — multiple categories per contact are allowed. The `xero-sync` never touches `categories`, `rating`, or `note` — all are HUB-only fields.
 
 **Note:** pushing `data.json` to GitHub is NOT part of this flow and should not be done as a substitute — see `BUGS.md` "Race condition wipes entries" for why writing `data.json` directly is unsafe, and [[feedback_github_push]] in memory for the corrected push process (code files only, never `data.json`).
 
@@ -130,7 +173,7 @@ ACTION 5 matches any input containing an `INV-XXXX` invoice number and a note/co
 
 - `ANTHROPIC_API_KEY` — Claude API key (used by `claude-parse.js` to call Haiku)
 - `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` — live database connection (used by `claude-parse.js` and `xero-sync.js`)
-- `SYNC_SECRET` — bearer-token password Claude sends to authenticate `xero-sync` runs
+- `SYNC_SECRET` — bearer-token password for `xero-sync` calls. Value: `matiere2026`. Also stored as a GitHub Actions secret for automated workflows.
 - `XERO_CLIENT_ID` / `XERO_CLIENT_SECRET` / `XERO_REFRESH_TOKEN` — Xero OAuth (see `XERO_NOTES.md` / [[reference_xero_connection]]). The redirect URI is hardcoded in `index.html` and `xero-auth.js` (`https://matierehub2.netlify.app/xero-callback`) — there is no `XERO_REDIRECT_URI` env var
 
 **Note:** `GITHUB_TOKEN` and `XERO_REDIRECT_URI` were removed from Netlify on 2026-06-08 as genuinely unused — the only function that read `GITHUB_TOKEN` (`migrate-to-supabase.js`, a one-off helper whose job was already done) has also been deleted. **Claude pushing code changes to GitHub does NOT use any Netlify env var** — it uses a personal-access token Claude holds in memory ([[reference_github_token]]) and calls the GitHub Contents API directly from its own sandbox.
