@@ -81,12 +81,14 @@ exports.handler = async (event) => {
     if (!text && !pendingAction) return { statusCode: 400, headers, body: JSON.stringify({ error: 'No input provided' }) };
 
     // ── 1. Fetch context from Supabase ────────────────────────────────────────
-    const [projectRows, recentTimesheets, allTsIds, allExpIds] = await Promise.all([
+    const [projectRows, recentTimesheets, allTsIds, allExpIds, categoryRows] = await Promise.all([
       sbGet('projects', '?select=id,name,status&order=id.asc'),
       sbGet('timesheets', '?select=id,date,project,hours,notes&order=date.desc,id.desc&limit=15'),
       sbGet('timesheets', '?select=id'),
-      sbGet('expense_log', '?select=id')
+      sbGet('expense_log', '?select=id'),
+      sbGet('category_list', '?select=name&order=name.asc')
     ]);
+    const categoryList = categoryRows.map(c => c.name);
 
     const projectList  = projectRows.map(p => p.name);
     const projectNames = projectList.join(', ');
@@ -240,6 +242,37 @@ Examples:
 "INV-0300 client asked for receipt copy"     → {"action":"note","type":"invoice_item","invoice_number":"INV-0300","notes":"client asked for receipt copy"}
 
 Invoice numbers always match INV-XXXX (4 digits, zero-padded). Extract the note after "note:", "—", ":", or similar separator.
+
+---
+## ACTION 6 — Rate a contact/supplier
+
+Schema: {"action":"rate","contact_name":"Bunnings","rating":8}
+
+Triggers: "rate [name] [0-10]", "[name] [score]/10", "give [name] a [score]", "[name] is a [score] out of 10"
+Rating must be an integer 0–10.
+
+Examples:
+"rate Bunnings 8"          → {"action":"rate","contact_name":"Bunnings","rating":8}
+"give Bunnings 9/10"       → {"action":"rate","contact_name":"Bunnings","rating":9}
+"Aussie Timber 7 out of 10" → {"action":"rate","contact_name":"Aussie Timber","rating":7}
+
+---
+## ACTION 7 — Assign category to a contact/supplier
+
+Schema: {"action":"category","contact_name":"Bunnings","categories":["Hardware"]}
+If no category is specified by the user, set categories to null (Claude will auto-suggest from past receipts).
+
+VALID CATEGORIES: ${categoryList.join(', ')}
+
+Triggers: "category [name]: [cat]", "[name] is a [cat] supplier", "add [cat] to [name]", "tag [name] as [cat]", "categorise [name]"
+
+Examples:
+"category Bunnings: Hardware"              → {"action":"category","contact_name":"Bunnings","categories":["Hardware"]}
+"add Hardware and Tools to Bunnings"       → {"action":"category","contact_name":"Bunnings","categories":["Hardware","Tools & Equipment"]}
+"Aussie Timber is a timber supplier"       → {"action":"category","contact_name":"Aussie Timber","categories":["Timber & Sheet"]}
+"categorise Bunnings"                      → {"action":"category","contact_name":"Bunnings","categories":null}
+
+Only use categories from the VALID CATEGORIES list above. If the user's category doesn't match exactly, pick the closest valid one.
 
 ---
 If you cannot confidently parse the input at all: {"action":"unclear","message":"brief plain-english reason"}`;
@@ -434,6 +467,107 @@ If you cannot confidently parse the input at all: {"action":"unclear","message":
       const removed = deleted[0];
       entryLabel = `Deleted ${removed.id}: ${removed.hours}h ${removed.project} (${removed.date})`;
       responseExtra = { deleted: removed };
+
+    } else if (parsed.action === 'rate') {
+      // Find the contact by partial name match
+      const contactMatches = await sbGet('contacts',
+        `?name=ilike.*${encodeURIComponent(parsed.contact_name)}*&select=id,name,rating&limit=5`
+      );
+      if (!contactMatches.length) {
+        return { statusCode: 200, headers, body: JSON.stringify({
+          status: 'unclear', message: `No contact found matching "${parsed.contact_name}"`
+        })};
+      }
+      const contact = contactMatches[0];
+      const rating  = parseInt(parsed.rating, 10);
+      if (isNaN(rating) || rating < 0 || rating > 10) {
+        return { statusCode: 200, headers, body: JSON.stringify({
+          status: 'unclear', message: `Rating must be 0–10, got "${parsed.rating}"`
+        })};
+      }
+      await sbPatch('contacts', `?id=eq.${encodeURIComponent(contact.id)}`, { rating });
+      entryLabel  = `${contact.name}: rated ${rating}/10`;
+      responseExtra = { contact: { id: contact.id, name: contact.name, rating } };
+
+    } else if (parsed.action === 'category') {
+      // Find the contact by partial name match
+      const contactMatches = await sbGet('contacts',
+        `?name=ilike.*${encodeURIComponent(parsed.contact_name)}*&select=id,name,categories&limit=5`
+      );
+      if (!contactMatches.length) {
+        return { statusCode: 200, headers, body: JSON.stringify({
+          status: 'unclear', message: `No contact found matching "${parsed.contact_name}"`
+        })};
+      }
+      const contact = contactMatches[0];
+
+      let categoriesToAssign = parsed.categories; // array or null
+
+      if (!categoriesToAssign || !categoriesToAssign.length) {
+        // Auto-suggest: look up past expense_log entries for this supplier
+        const expenses = await sbGet('expense_log',
+          `?supplier=ilike.*${encodeURIComponent(parsed.contact_name)}*&select=description,category&limit=20`
+        );
+        if (!expenses.length) {
+          return { statusCode: 200, headers, body: JSON.stringify({
+            status: 'unclear',
+            message: `No past expenses found for "${contact.name}" — please specify a category, e.g. "category ${contact.name}: Hardware"`
+          })};
+        }
+        // Ask Haiku to suggest from the expense history
+        const purchaseSummary = expenses.map(e => `- ${e.description} (${e.category})`).join('\n');
+        const suggestRes = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'x-api-key': ANTHROPIC_API_KEY,
+            'anthropic-version': '2023-06-01',
+            'content-type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 60,
+            messages: [{ role: 'user', content:
+              `Based on these past purchases from ${contact.name}:\n${purchaseSummary}\n\nValid categories: ${categoryList.join(', ')}\n\nReply with a JSON array of the best matching categories, e.g. ["Hardware"]. One array only, no explanation.`
+            }]
+          })
+        });
+        const suggestData  = await suggestRes.json();
+        const suggestRaw   = (suggestData.content?.[0]?.text || '').trim();
+        const arrayMatch   = suggestRaw.match(/\[[\s\S]*?\]/);
+        try { categoriesToAssign = arrayMatch ? JSON.parse(arrayMatch[0]) : []; }
+        catch(e) { categoriesToAssign = []; }
+
+        if (!categoriesToAssign.length) {
+          return { statusCode: 200, headers, body: JSON.stringify({
+            status: 'unclear',
+            message: `Couldn't determine a category for "${contact.name}" — please specify: "category ${contact.name}: Hardware"`
+          })};
+        }
+
+        // Return as confirm so Seb can approve the suggestion
+        return { statusCode: 200, headers, body: JSON.stringify({
+          status: 'confirm',
+          message: `Suggest ${categoriesToAssign.map(c => `"${c}"`).join(', ')} for ${contact.name} based on ${expenses.length} past receipts — confirm?`,
+          suggested: categoriesToAssign,
+          pending: { ...parsed, contact_name: contact.name, categories: categoriesToAssign }
+        })};
+      }
+
+      // Validate against category_list
+      const invalidCats = categoriesToAssign.filter(c => !categoryList.includes(c));
+      if (invalidCats.length) {
+        return { statusCode: 200, headers, body: JSON.stringify({
+          status: 'unclear',
+          message: `Unknown categor${invalidCats.length > 1 ? 'ies' : 'y'}: ${invalidCats.join(', ')}. Valid: ${categoryList.join(', ')}`
+        })};
+      }
+
+      // Merge with existing categories (deduplicate)
+      const existing = contact.categories || [];
+      const merged   = [...new Set([...existing, ...categoriesToAssign])];
+      await sbPatch('contacts', `?id=eq.${encodeURIComponent(contact.id)}`, { categories: merged });
+      entryLabel    = `${contact.name}: categories → ${merged.join(', ')}`;
+      responseExtra = { contact: { id: contact.id, name: contact.name, categories: merged } };
 
     } else if (parsed.action === 'note' && parsed.type === 'invoice_item') {
       // Write a note to all line items on the given invoice.
