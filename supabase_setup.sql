@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS invoice_items (
 
 -- contacts table: synced from Xero via xero-sync.js?scope=contacts
 -- PK is Xero ContactID UUID — matches invoice_items.contact_id for JOIN queries.
--- note column is HUB-only (free text entered via Claude chat); never touched by sync.
+-- categories, rating, note are HUB-only — never touched by the Xero sync.
 CREATE TABLE IF NOT EXISTS contacts (
   id            TEXT PRIMARY KEY,         -- Xero ContactID UUID
   name          TEXT DEFAULT '',
@@ -86,11 +86,32 @@ CREATE TABLE IF NOT EXISTS contacts (
   postal_code   TEXT DEFAULT '',
   country       TEXT DEFAULT '',
   phone         TEXT DEFAULT '',
-  is_customer   BOOLEAN DEFAULT false,    -- true = marked as Customer in Xero
+  abn           TEXT DEFAULT '',          -- from Xero TaxNumber (ABN or ACN)
+  is_customer   BOOLEAN DEFAULT false,    -- from Xero IsCustomer
+  is_supplier   BOOLEAN DEFAULT false,    -- from Xero IsSupplier
+  categories    TEXT[] DEFAULT '{}',      -- HUB-only; values must exist in category_list
+  rating        SMALLINT CHECK (rating IS NULL OR (rating >= 0 AND rating <= 10)), -- HUB-only; 0-10
   note          TEXT DEFAULT '',          -- HUB-only; never overwritten by sync
   updated_at    TIMESTAMPTZ DEFAULT NOW(),
   created_at    TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Added 2026-06-14 (run ALTER TABLE if contacts already exists):
+-- ALTER TABLE contacts ADD COLUMN IF NOT EXISTS abn TEXT DEFAULT '';
+-- ALTER TABLE contacts ADD COLUMN IF NOT EXISTS is_supplier BOOLEAN DEFAULT false;
+-- ALTER TABLE contacts ADD COLUMN IF NOT EXISTS categories TEXT[] DEFAULT '{}';
+-- ALTER TABLE contacts ADD COLUMN IF NOT EXISTS rating SMALLINT CHECK (rating IS NULL OR (rating >= 0 AND rating <= 10));
+
+-- category_list: lookup table for valid contact categories. Managed via HUB or Supabase directly.
+CREATE TABLE IF NOT EXISTS category_list (
+  name        TEXT PRIMARY KEY,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+INSERT INTO category_list (name) VALUES
+  ('Hardware'), ('Timber & Sheet'), ('Tools & Equipment'),
+  ('Subcontractor'), ('Doors'), ('Professional Services'), ('Docs')
+ON CONFLICT (name) DO NOTHING;
 
 
 -- 2. PERMISSIONS (allow frontend to read without service_role key)
@@ -101,6 +122,7 @@ GRANT SELECT ON projects      TO anon;
 GRANT SELECT ON xero_cache    TO anon;
 GRANT SELECT ON invoice_items TO anon;
 GRANT SELECT ON contacts      TO anon;
+GRANT SELECT ON category_list TO anon;
 
 -- Allow the service_role (used by Netlify functions) full access
 GRANT ALL ON timesheets    TO service_role;
@@ -109,6 +131,7 @@ GRANT ALL ON projects      TO service_role;
 GRANT ALL ON xero_cache    TO service_role;
 GRANT ALL ON invoice_items TO service_role;
 GRANT ALL ON contacts      TO service_role;
+GRANT ALL ON category_list TO service_role;
 
 
 -- 3. DISABLE ROW LEVEL SECURITY (single-user app, no auth needed)
@@ -119,6 +142,7 @@ ALTER TABLE projects      DISABLE ROW LEVEL SECURITY;
 ALTER TABLE xero_cache    DISABLE ROW LEVEL SECURITY;
 ALTER TABLE invoice_items DISABLE ROW LEVEL SECURITY;
 ALTER TABLE contacts      DISABLE ROW LEVEL SECURITY;
+ALTER TABLE category_list DISABLE ROW LEVEL SECURITY;
 
 
 -- 4. MIGRATE EXISTING DATA
