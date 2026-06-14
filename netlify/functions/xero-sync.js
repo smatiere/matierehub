@@ -270,9 +270,8 @@ function transformContacts(contacts) {
       phone:         phoneStr,
       abn:           (c.TaxNumber || '').trim(),
       is_customer:   !!c.IsCustomer,
-      is_supplier:   !!c.IsSupplier,
       updated_at:    now
-      // note, categories, rating intentionally omitted — HUB-only fields, never overwritten by sync
+      // note, categories, rating, is_supplier intentionally omitted — HUB-only fields, never overwritten by sync
     });
   }
   return rows;
