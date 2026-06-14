@@ -277,6 +277,104 @@ function transformContacts(contacts) {
   return rows;
 }
 
+// ── Transform Xero bank transactions → bank_transactions table rows ───────────
+//
+// One row per BankTransaction (not per line item).
+// Multi-line-item transactions: first LineItem drives account_code/account_name;
+// all descriptions are concatenated with " | ".
+//
+// Column mapping:
+//   id            ← tx.BankTransactionID
+//   date          ← tx.DateString (YYYY-MM-DD)
+//   type          ← tx.Type  (SPEND | RECEIVE)
+//   contact       ← tx.Contact.Name
+//   contact_id    ← tx.Contact.ContactID
+//   account_code  ← tx.LineItems[0].AccountCode
+//   account_name  ← resolved via codeToName map (inverted getAccountCodeMap result)
+//   description   ← tx.LineItems[*].Description joined with " | "
+//   reference     ← tx.Reference
+//   gross         ← tx.Total (incl. GST)
+//   tax           ← tx.TotalTax
+//   net           ← tx.SubTotal (excl. GST)
+//   debit         ← tx.Total if SPEND, else 0
+//   credit        ← tx.Total if RECEIVE, else 0
+//   bank_account  ← tx.BankAccount.Name
+//   status        ← tx.Status
+//   is_reconciled ← tx.IsReconciled
+//   expense_log_id← null (manually linked or auto-matched later)
+//
+function transformBankTransactions(bankTx, accountCodeMap) {
+  // Build reverse map: code → name
+  const codeToName = {};
+  for (const [name, code] of Object.entries(accountCodeMap)) codeToName[code] = name;
+
+  const rows = [];
+  for (const tx of bankTx) {
+    if (!tx.BankTransactionID) continue;
+    if (tx.Status === 'DELETED') continue; // skip deleted transactions
+
+    const lineItems  = tx.LineItems || [];
+    const firstLI    = lineItems[0] || {};
+    const accCode    = (firstLI.AccountCode || '').trim();
+
+    // Concatenate all non-empty descriptions
+    const desc = lineItems
+      .map(li => (li.Description || '').trim())
+      .filter(Boolean)
+      .join(' | ');
+
+    const gross = round2(Math.abs(tx.Total     || 0));
+    const tax   = round2(Math.abs(tx.TotalTax  || 0));
+    const net   = round2(Math.abs(tx.SubTotal  || 0));
+
+    rows.push({
+      id:            tx.BankTransactionID,
+      date:          (tx.DateString || tx.Date || '').slice(0, 10) || null,
+      type:          tx.Type || '',
+      contact:       (tx.Contact?.Name      || '').trim(),
+      contact_id:    (tx.Contact?.ContactID || '').trim(),
+      account_code:  accCode,
+      account_name:  (codeToName[accCode] || '').trim(),
+      description:   desc,
+      reference:     (tx.Reference || '').trim(),
+      gross,
+      tax,
+      net,
+      debit:         tx.Type === 'SPEND'   ? gross : 0,
+      credit:        tx.Type === 'RECEIVE' ? gross : 0,
+      bank_account:  (tx.BankAccount?.Name || '').trim(),
+      status:        tx.Status || '',
+      is_reconciled: !!tx.IsReconciled
+      // expense_log_id intentionally omitted — defaults to NULL; manually linked or auto-matched later
+    });
+  }
+  return rows;
+}
+
+// ── Supabase upsert for bank_transactions table ───────────────────────────────
+async function sbUpsertBankTransactions(rows, log) {
+  if (!rows.length) { if (log) log.push('  → 0 bank transactions to write'); return; }
+  const CHUNK = 100;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const chunk = rows.slice(i, i + CHUNK);
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/bank_transactions`, {
+      method: 'POST',
+      headers: {
+        'apikey':        SUPABASE_SERVICE_KEY,
+        'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+        'Content-Type':  'application/json',
+        'Prefer':        'resolution=merge-duplicates'
+      },
+      body: JSON.stringify(chunk)
+    });
+    if (!res.ok) {
+      const msg = await res.text();
+      throw new Error(`Supabase bank_transactions upsert failed (chunk ${i}): ${res.status} ${msg.slice(0, 200)}`);
+    }
+  }
+  if (log) log.push(`  → ${rows.length} bank transactions written to bank_transactions table`);
+}
+
 // ── Supabase upsert for invoice_items table (separate from xero_cache) ────────
 // Rows are batched in chunks of 100 to stay within Supabase request size limits.
 // Uses Xero's LineItemID as the primary key — stable even if line items are reordered.
@@ -1291,6 +1389,46 @@ exports.handler = async function(event) {
 
       log.push('Looking up chart-of-accounts codes for liability accounts…');
       result.account_code_map = await getAccountCodeMap(accessToken, tenantId);
+    }
+
+    // ── bank_transactions scope — write ALL bank transactions to the bank_transactions ──
+    // Supabase table for full drill-down (date, contact, account, debit/credit, ref).
+    // This is the raw transaction ledger — every line of real money in/out.
+    // Separate from the `bank` scope which only computes liability bucket totals for the
+    // P&L dashboard. Run once to seed history; safe to re-run any time (upsert by ID).
+    // Requires the bank_transactions table to exist (see supabase_bank_transactions.sql).
+    if (scope.includes('bank_transactions')) {
+      log.push('Fetching full bank transaction history for bank_transactions table…');
+      // Re-use already-fetched data if `bank` scope also ran this request
+      let bankAll = result.bank_transactions;
+      if (!bankAll) {
+        bankAll = await fetchAllPages(
+          'BankTransactions?where=Date%3E%3DDateTime(2022%2C12%2C1)&unitdp=2',
+          'BankTransactions', accessToken, tenantId
+        );
+        log.push(`  → ${bankAll.length} bank transactions fetched`);
+      } else {
+        log.push(`  → re-using ${bankAll.length} bank transactions already fetched by 'bank' scope`);
+      }
+
+      // Need the account code map to resolve account names
+      let codeMap = result.account_code_map;
+      if (!codeMap) {
+        log.push('Looking up chart-of-accounts codes…');
+        codeMap = await getAccountCodeMap(accessToken, tenantId);
+        result.account_code_map = codeMap;
+      }
+
+      const txRows = transformBankTransactions(bankAll, codeMap);
+      log.push(`  → ${txRows.length} rows transformed (${bankAll.length - txRows.length} DELETED skipped)`);
+
+      if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+        await sbUpsertBankTransactions(txRows, log);
+      } else {
+        log.push('  ⚠ SUPABASE_URL/KEY not set — skipping bank_transactions write');
+      }
+
+      result.bank_transactions_count = txRows.length;
     }
 
     result.duration_ms = Date.now() - startTime;
