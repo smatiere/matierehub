@@ -1,4 +1,4 @@
-name: Xero Invoice Items Daily Sync
+name: Xero Daily Sync
 
 on:
   schedule:
@@ -20,7 +20,23 @@ jobs:
           echo "HTTP status: $http_code"
           echo "Response: $body"
           if [ "$http_code" != "200" ]; then
-            echo "Sync failed with HTTP $http_code"
+            echo "invoice_items sync failed with HTTP $http_code"
             exit 1
           fi
-          echo "Sync completed successfully"
+          echo "invoice_items sync completed"
+
+      - name: Sync contacts from Xero
+        run: |
+          response=$(curl -s -w "\n%{http_code}" -X POST \
+            "https://matierehub2.netlify.app/.netlify/functions/xero-sync?scope=contacts" \
+            -H "Authorization: Bearer ${{ secrets.SYNC_SECRET }}" \
+            -H "Content-Type: application/json")
+          http_code=$(echo "$response" | tail -1)
+          body=$(echo "$response" | head -n -1)
+          echo "HTTP status: $http_code"
+          echo "Response: $body"
+          if [ "$http_code" != "200" ]; then
+            echo "contacts sync failed with HTTP $http_code"
+            exit 1
+          fi
+          echo "contacts sync completed"
