@@ -38,21 +38,29 @@ As of June 2026 the live database is **Supabase** (project URL `https://nwpzjqbl
 **Tables** (defined in `supabase_setup.sql`):
 
 ```
-timesheets     { id, date, project, hours, rate, value, employee, notes, created_at }
-expense_log    { id, date, supplier, description, category, project, qty, unit_price, amount, created_at }
-projects       { id, name, status, quoted, notes, created_at }
-xero_cache     { key, data (JSONB), updated_at }
-               ← key is one of: kpis, monthly, open_invoices, top_customers,
-                 quotes, fy_summary, cost_detail_monthly, account_categories, meta
-invoice_items  { id, invoice_number, item, description, qty, unit_price, price_excl_gst,
-                 quote_number, contact, contact_id, date, due_date, status, notes, paid, created_at }
-               ← one row per invoice line item; synced from Xero via xero-sync.js?scope=invoice_items
-contacts       { id, name, first_name, last_name, email, address_line1, city, region,
-                 postal_code, country, phone, abn, is_customer, is_supplier,
-                 categories (TEXT[]), rating (0–10), note, updated_at, created_at }
-               ← synced from Xero via xero-sync.js?scope=contacts; categories/rating/note are HUB-only
-category_list  { name (PK), created_at }
-               ← lookup table for valid contact categories; managed via HUB
+timesheets         { id, date, project, hours, rate, value, employee, notes, created_at }
+expense_log        { id, date, supplier, description, category, project, qty, unit_price, amount, created_at }
+projects           { id, name, status, quoted, notes, created_at }
+xero_cache         { key, data (JSONB), updated_at }
+                   ← key is one of: kpis, monthly, open_invoices, top_customers,
+                     quotes, fy_summary, cost_detail_monthly, account_categories, meta
+invoice_items      { id, invoice_number, item, description, qty, unit_price, price_excl_gst,
+                     quote_number, contact, contact_id, date, due_date, status, notes, paid, created_at }
+                   ← one row per invoice line item; synced from Xero via xero-sync.js?scope=invoice_items
+contacts           { id, name, first_name, last_name, email, address_line1, city, region,
+                     postal_code, country, phone, abn, is_customer, is_supplier,
+                     categories (TEXT[]), rating (0–10), note, updated_at, created_at }
+                   ← synced from Xero via xero-sync.js?scope=contacts; categories/rating/note are HUB-only
+category_list      { name (PK), created_at }
+                   ← lookup table for valid contact categories; managed via HUB
+bank_transactions  { id, date, type, contact, contact_id, account_code, account_name,
+                     description, reference, gross, tax, net, debit, credit,
+                     bank_account, status, is_reconciled, expense_log_id, created_at }
+                   ← one row per Xero bank transaction (DELETED rows skipped); synced via
+                     xero-sync.js?scope=bank_transactions (DDL: supabase_bank_transactions.sql)
+                   ← expense_log_id: nullable FK to expense_log.id — for manual or auto-matched linking
+                   ← Initial load 2026-06-14: 1,373 rows (1,406 fetched, 33 DELETED skipped)
+                   ← debit = gross if SPEND (money out); credit = gross if RECEIVE (money in)
 ```
 
 `xero_cache` stores Xero-synced financial data as JSON blobs (written by `xero-sync.js`), mirroring the old `data.json` top-level keys of the same names. `timesheets`, `expense_log`, and `projects` are proper relational tables that Claude reads/writes via `claude-parse.js`.
