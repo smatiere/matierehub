@@ -337,7 +337,10 @@ If you cannot confidently parse the input at all: {"action":"unclear","message":
         }
         const imageInstruction = text && text !== 'Parse this receipt and log the expense.'
           ? text.trim()
-          : 'This is a receipt photo. Output ONE single JSON object only — no arrays, no explanations. Use ACTION 2 format with the receipt total as the amount (divide by 1.1 to get ex-GST). Use today\'s date if no date is visible.';
+          : `This is a receipt photo. Extract EVERY individual line item as a separate expense entry.
+Return a JSON ARRAY — one ACTION 2 object per product line. No totals, no subtotals, individual items only.
+Format: [{"action":"new","type":"expense","date":"${todayStr}","supplier":"StoreName","description":"Item name","category":"Category","qty":1,"unit_price":9.09,"amount":9.09}, ...]
+Rules: all amounts ex-GST (divide inc-GST price by 1.1 and round to 2dp). Same supplier for all items. Today's date if none visible. Pick category from the system prompt category list.`;
         userContent.push({ type: 'text', text: imageInstruction });
       } else {
         userContent = text.trim();
@@ -375,12 +378,24 @@ If you cannot confidently parse the input at all: {"action":"unclear","message":
       rawText = rawText.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim();
       try {
         const candidate = JSON.parse(rawText);
-        // If model returned an array (e.g. multiple line items), take the first element
-        parsed = Array.isArray(candidate) ? candidate[0] : candidate;
+        if (hasImages && Array.isArray(candidate)) {
+          // Image returned multiple line items — wrap for batch processing
+          parsed = { action: 'expense_batch', items: candidate };
+        } else {
+          parsed = Array.isArray(candidate) ? candidate[0] : candidate;
+        }
       } catch(e) {
-        const match = rawText.match(/\{[\s\S]*?\}/);
+        // Try to extract first JSON object from mixed text
+        const match = rawText.match(/\[[\s\S]*\]/) || rawText.match(/\{[\s\S]*?\}/);
         if (match) {
-          try { parsed = JSON.parse(match[0]); }
+          try {
+            const c2 = JSON.parse(match[0]);
+            if (hasImages && Array.isArray(c2)) {
+              parsed = { action: 'expense_batch', items: c2 };
+            } else {
+              parsed = Array.isArray(c2) ? c2[0] : c2;
+            }
+          }
           catch(e2) { throw new Error(`Bad JSON from model: ${rawText.slice(0, 200)}`); }
         } else {
           throw new Error(`Bad JSON from model: ${rawText.slice(0, 200)}`);
@@ -788,6 +803,40 @@ If you cannot confidently parse the input at all: {"action":"unclear","message":
       entryLabel = `Note saved on ${invNum} (${updated.length} line item${updated.length !== 1 ? 's' : ''})`;
       responseExtra = { updated };
 
+    } else if (parsed.action === 'expense_batch') {
+      // ── Multi-item receipt scan ───────────────────────────────────────────────
+      const items = (parsed.items || []).filter(i => i && (i.type === 'expense' || i.action === 'new'));
+      if (!items.length) {
+        return { statusCode: 200, headers, body: JSON.stringify({ status: 'unclear', message: 'No expense line items found in the receipt image' }) };
+      }
+
+      let expIdCounter = nextExpNum;
+      const insertedEntries = [];
+
+      for (const item of items) {
+        const qty       = parseFloat(item.qty) || 1;
+        const unitPrice = parseFloat(item.unit_price) || (parseFloat(item.amount) / qty) || 0;
+        const amount    = Math.round(qty * unitPrice * 100) / 100;
+        const entry = {
+          id:          `EXP-${String(expIdCounter++).padStart(3, '0')}`,
+          date:        item.date || todayStr,
+          supplier:    item.supplier || '',
+          description: item.description || '',
+          category:    item.category   || 'Sundry Expenses',
+          project:     item.project    || '',
+          qty,
+          unit_price:  Math.round(unitPrice * 100) / 100,
+          amount
+        };
+        await sbPost('expense_log', entry);
+        insertedEntries.push(entry);
+      }
+
+      const totalAmt  = Math.round(insertedEntries.reduce((s, e) => s + e.amount, 0) * 100) / 100;
+      const supplier  = insertedEntries[0]?.supplier || '';
+      entryLabel = `${insertedEntries.length} item${insertedEntries.length > 1 ? 's' : ''} from ${supplier} · $${totalAmt} total`;
+      responseExtra = { entries: insertedEntries, count: insertedEntries.length, total: totalAmt };
+
     } else {
       console.error('Unrecognised action:', JSON.stringify(parsed).slice(0, 300));
       return { statusCode: 200, headers, body: JSON.stringify({ status: 'unclear', message: `Unrecognised action "${parsed.action || 'unknown'}" — try describing the expense in words` }) };
@@ -799,7 +848,7 @@ If you cannot confidently parse the input at all: {"action":"unclear","message":
       body: JSON.stringify({
         status: 'success',
         action: parsed.action,
-        type:   parsed.type || parsed.action,
+        type:   parsed.action === 'expense_batch' ? 'expense_batch' : (parsed.type || parsed.action),
         label:  entryLabel,
         ...responseExtra
       })
