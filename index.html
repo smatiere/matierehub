@@ -298,11 +298,12 @@ async function sbPatch(table, query, body) {
 // ── Data load — live from Supabase ────────────────────────────────────────────
 async function loadData() {
   try {
-    const [timesheets, expenses, projects, xeroRows] = await Promise.all([
+    const [timesheets, expenses, projects, xeroRows, invoiceItems] = await Promise.all([
       sbGet('/rest/v1/timesheets?select=*&order=date.asc,id.asc'),
       sbGet('/rest/v1/expense_log?select=*&order=date.asc,id.asc'),
       sbGet('/rest/v1/projects?select=*&order=id.asc'),
-      sbGet('/rest/v1/xero_cache?select=key,data')
+      sbGet('/rest/v1/xero_cache?select=key,data'),
+      sbGet('/rest/v1/invoice_items?select=invoice_number,quote_number,contact,contact_id,price_excl_gst,paid,status,date,description,item')
     ]);
 
     const xero = {};
@@ -312,6 +313,7 @@ async function loadData() {
       timesheets,
       expense_log:          expenses,
       projects,
+      invoice_items:        invoiceItems,
       kpis:                 xero.kpis                 || {},
       monthly:              xero.monthly              || { labels:[], periods:[], revenue:[], materials:[], wages_owner:[] },
       open_invoices:        xero.open_invoices        || [],
@@ -351,6 +353,7 @@ function showTab(name, el) {
   if (name === 'timesheet') renderTimesheet();
   if (name === 'pnl') renderPnL();
   if (name === 'transactions') renderTransactions();
+  if (name === 'projects' && D) renderProjects(D.kpis);
 }
 
 function kpi(label, value, sub, style='') {
@@ -589,65 +592,248 @@ function renderMaterials(k, m) {
 // ── Projects ──────────────────────────────────────────────────────────────────
 function renderProjects(k) {
   const definedProjects = D.projects || [];
-  const timesheets = D.timesheets || [];
-  const expenses = D.expense_log || [];
-  const rate = k.sebRate_per_hour || 100;
-  const definedNames = new Set(definedProjects.map(p => p.name));
+  const timesheets      = D.timesheets || [];
+  const expenses        = D.expense_log || [];
+  const invoiceItems    = D.invoice_items || [];
+  const xeroQuotes      = (D.quotes && D.quotes.length) ? D.quotes : [];
+  const rate            = k.sebRate_per_hour || 100;
+
+  // ── Lookup helpers ────────────────────────────────────────────────────────
   const definedMap = {};
-  definedProjects.forEach(p => definedMap[p.name] = p);
+  definedProjects.forEach(p => { definedMap[p.name] = p; });
+
   const allNames = new Set(definedProjects.map(p => p.name));
   timesheets.forEach(t => t.project && allNames.add(t.project));
   expenses.forEach(e => e.project && allNames.add(e.project));
+
+  // Xero quotes indexed by QuoteNumber for fast item lookup
+  const xeroQuoteByNum = {};
+  xeroQuotes.forEach(q => {
+    const num = q.QuoteNumber || q.number || '';
+    if (num) xeroQuoteByNum[num] = q;
+  });
+
+  // Working days Mon–Fri between two YYYY-MM-DD strings (inclusive)
+  function workingDays(start, end) {
+    if (!start || !end) return null;
+    const s = new Date(start + 'T00:00:00');
+    const e = new Date(end   + 'T00:00:00');
+    let count = 0;
+    const d = new Date(s);
+    while (d <= e) {
+      const dow = d.getDay();
+      if (dow > 0 && dow < 6) count++;
+      d.setDate(d.getDate() + 1);
+    }
+    return count || 1;   // minimum 1 so same-day projects don't divide by zero
+  }
+
+  // ── Build per-project aggregates ──────────────────────────────────────────
   const pData = {};
   allNames.forEach(name => {
     const def = definedMap[name] || {};
-    pData[name] = { name, status: def.status || 'Active', quoted: def.quoted != null ? def.quoted : null, hours: 0, laborValue: 0, expenses: 0 };
+    pData[name] = {
+      id: def.id || '—', name,
+      status: def.status || 'Active',
+      quoted: def.quoted != null ? def.quoted : null,
+      clientName: name.split(' - ')[0].trim(),
+      hours: 0, laborValue: 0,
+      players: new Set(),
+      dates: [],
+      expensesTotal: 0,
+      invoicedValue: 0,
+      quoteNumbers: new Set(),
+      invoiceContactName: null,
+    };
   });
-  timesheets.forEach(t => { if (t.project && pData[t.project]) { pData[t.project].hours += (t.hours||0); pData[t.project].laborValue += (t.hours||0) * rate; } });
-  expenses.forEach(e => { if (e.project && pData[e.project]) pData[e.project].expenses += (e.amount||0); });
-  const sorted = Object.values(pData).sort((a,b) => {
-    const aD = definedNames.has(a.name) ? 0 : 1, bD = definedNames.has(b.name) ? 0 : 1;
+
+  timesheets.forEach(t => {
+    if (!t.project || !pData[t.project]) return;
+    const p = pData[t.project];
+    p.hours      += (t.hours || 0);
+    p.laborValue += (t.hours || 0) * rate;
+    if (t.employee) p.players.add(t.employee);
+    if (t.date) p.dates.push(t.date);
+  });
+
+  expenses.forEach(e => {
+    if (!e.project || !pData[e.project]) return;
+    pData[e.project].expensesTotal += (e.amount || 0);
+  });
+
+  // Match invoice_items → projects by contact name containing client name
+  invoiceItems.forEach(ii => {
+    if (!ii.contact) return;
+    const contact = ii.contact.toLowerCase();
+    Object.values(pData).forEach(p => {
+      const cl = p.clientName.toLowerCase();
+      if (!cl || cl === 'admin') return;
+      if (contact.includes(cl)) {
+        p.invoicedValue += (ii.price_excl_gst || 0);
+        if (ii.quote_number) p.quoteNumbers.add(ii.quote_number);
+        if (!p.invoiceContactName) p.invoiceContactName = ii.contact;
+      }
+    });
+  });
+
+  // ── Derive final metrics per project ─────────────────────────────────────
+  const dash = '<span style="color:var(--ink-4)">—</span>';
+
+  const sorted = Object.values(pData).map(p => {
+    const sortedDates = [...p.dates].sort();
+    const startDate   = sortedDates[0] || null;
+    const endDate     = sortedDates[sortedDates.length - 1] || null;
+    const span        = workingDays(startDate, endDate);
+
+    const hasInv = p.invoicedValue > 0;
+    const profit       = hasInv ? p.invoicedValue - p.expensesTotal - p.laborValue : null;
+    const profitPct    = hasInv && p.invoicedValue ? profit / p.invoicedValue * 100 : null;
+    const adjRate      = hasInv && p.hours > 0 ? (p.invoicedValue - p.expensesTotal) / p.hours : null;
+    const hrPerDay     = span && p.hours > 0 ? p.hours / span : null;
+    const dilutionPct  = hrPerDay != null ? (hrPerDay / 8) * 100 : null;
+
+    // Quote item descriptions from Xero quotes (if cached)
+    let quoteItemsHtml = '';
+    const quoteNums = [...p.quoteNumbers];
+    quoteNums.forEach(qn => {
+      const q = xeroQuoteByNum[qn];
+      if (q) {
+        const lineItems = (q.LineItems || q.line_items || []);
+        lineItems.forEach(li => {
+          const code = li.ItemCode || li.item || '';
+          const desc = li.Description || li.description || '';
+          if (code || desc) quoteItemsHtml += (code ? code + ': ' : '') + desc + '<br>';
+        });
+      }
+    });
+
+    return {
+      ...p,
+      players: [...p.players],
+      quoteNums,
+      quoteItemsHtml,
+      contactDisplay: p.invoiceContactName || p.clientName,
+      startDate, endDate, span,
+      profit, profitPct, adjRate, hrPerDay, dilutionPct,
+    };
+  }).sort((a, b) => {
+    const aD = definedMap[a.name] ? 0 : 1, bD = definedMap[b.name] ? 0 : 1;
     if (aD !== bD) return aD - bD;
+    if (a.startDate && b.startDate) return b.startDate.localeCompare(a.startDate);
     return a.name.localeCompare(b.name);
   });
-  const projectRows = sorted.map(p => {
-    const remaining = p.quoted != null ? p.quoted - p.laborValue - p.expenses : null;
+
+  // ── Row renderer ──────────────────────────────────────────────────────────
+  function pc(v, pos='var(--sage)', neg='var(--pink)') { return v === null ? 'var(--ink-4)' : v >= 0 ? pos : neg; }
+
+  const rows = sorted.map(p => {
     const safeName = p.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-    return `<tr class="project-row" onclick="showProjectDetail('${safeName}')">
-      <td><strong>${p.name}</strong></td>
-      <td><span class="badge ${p.status==='Active'?'badge-green':'badge-gray'}">${p.status}</span></td>
-      <td class="amount">${p.quoted != null ? fmt(p.quoted) : '<span style="color:var(--ink-4)">TBD</span>'}</td>
-      <td class="amount">${p.hours > 0 ? p.hours + 'h' : '—'}</td>
-      <td class="amount">${p.laborValue > 0 ? fmt(p.laborValue) : '—'}</td>
-      <td class="amount" style="color:var(--orange)">${p.expenses > 0 ? fmt(p.expenses) : '—'}</td>
-      <td class="amount" style="color:${remaining===null?'var(--ink-4)':remaining>=0?'var(--sage)':'var(--pink)'}">
-        ${remaining !== null ? fmt(remaining) : '—'}</td>
+    const adjRateColor = p.adjRate !== null ? (p.adjRate >= rate ? 'var(--sage)' : 'var(--pink)') : 'var(--ink-4)';
+
+    const profitCell = p.profit !== null
+      ? `<span style="color:${pc(p.profit)};font-weight:600">${fmt(p.profit)}</span><br>
+         <span style="font-size:10px;color:${pc(p.profitPct)}">${p.profitPct >= 0 ? '+' : ''}${p.profitPct.toFixed(1)}%</span>`
+      : dash;
+
+    const dilutionCell = p.hrPerDay != null
+      ? `${p.hrPerDay.toFixed(1)}h/d<br><span style="font-size:10px;color:var(--ink-4)">${p.dilutionPct.toFixed(0)}%</span>`
+      : dash;
+
+    // Separate Quote Item (codes) and Description from matched quote line items
+    let quoteItemCode = dash, quoteItemDesc = dash;
+    if (p.quoteItemsHtml) {
+      // Already formatted above; for table cells we need two separate values
+      const allLI = p.quoteNums.flatMap(qn => {
+        const q = xeroQuoteByNum[qn];
+        return q ? (q.LineItems || q.line_items || []) : [];
+      });
+      const codes = allLI.map(li => li.ItemCode || li.item || '').filter(Boolean);
+      const descs = allLI.map(li => li.Description || li.description || '').filter(Boolean);
+      if (codes.length) quoteItemCode = `<span style="font-size:10px;color:var(--ink-3)">${codes.join('<br>')}</span>`;
+      if (descs.length) quoteItemDesc = `<span style="font-size:11px">${descs.map(d => d.length > 40 ? d.slice(0,40) + '…' : d).join('<br>')}</span>`;
+    }
+
+    return `<tr onclick="showProjectDetail('${safeName}')" style="cursor:pointer">
+      <td style="font-size:11px;color:var(--ink-4);white-space:nowrap">#${p.id}</td>
+      <td><strong style="white-space:nowrap">${p.name}</strong>
+          <div style="margin-top:2px"><span class="badge ${p.status==='Active'?'badge-green':'badge-gray'}" style="font-size:9px">${p.status}</span></div>
+      </td>
+      <td style="font-size:12px;white-space:nowrap">${p.contactDisplay}</td>
+      <td style="font-size:11px;color:var(--ink-3)">${p.players.length ? p.players.join(', ') : dash}</td>
+      <td style="font-size:11px;color:var(--blue);white-space:nowrap">${p.quoteNums.length ? p.quoteNums.join('<br>') : dash}</td>
+      <td style="font-size:11px">${quoteItemCode}</td>
+      <td style="font-size:11px;max-width:160px">${quoteItemDesc}</td>
+      <td class="amount">${p.quoted != null ? fmt(p.quoted) : dash}</td>
+      <td class="amount" style="color:var(--blue)">${p.invoicedValue > 0 ? fmt(p.invoicedValue) : dash}</td>
+      <td class="amount">${p.hours > 0 ? p.hours.toFixed(1) + 'h' : dash}</td>
+      <td class="amount" style="color:var(--amber)">${p.laborValue > 0 ? fmt(p.laborValue) : dash}</td>
+      <td class="amount" style="color:var(--orange)">${p.expensesTotal > 0 ? fmt(p.expensesTotal) : dash}</td>
+      <td class="amount">${profitCell}</td>
+      <td class="amount" style="color:${adjRateColor};white-space:nowrap">${p.adjRate !== null ? '$' + Math.round(p.adjRate) + '/h' : dash}</td>
+      <td style="font-size:11px;color:var(--ink-3);white-space:nowrap">${p.startDate || dash}</td>
+      <td style="font-size:11px;color:var(--ink-3);white-space:nowrap">${p.endDate || dash}</td>
+      <td class="amount">${p.span != null ? p.span + 'd' : dash}</td>
+      <td class="amount" style="white-space:nowrap">${dilutionCell}</td>
     </tr>`;
   }).join('');
-  const recentHours = timesheets.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'')).slice(0,10);
-  const hoursRows = recentHours.length
-    ? recentHours.map(t => `<tr><td>${t.date||'—'}</td><td>${t.project||'—'}</td><td style="color:var(--ink-4)">${t.notes||'—'}</td><td class="amount">${t.hours}h</td><td class="amount" style="color:var(--amber)">${fmt(t.hours*rate)}</td></tr>`).join('')
-    : '<tr><td colspan="5"><div class="empty" style="padding:20px">No hours logged yet.</div></td></tr>';
-  const totalQuoted = definedProjects.reduce((a,p)=>a+(p.quoted||0),0);
-  const totalHoursAll = timesheets.reduce((a,t)=>a+(t.hours||0),0);
-  const totalExpensesAll = expenses.reduce((a,e)=>a+(e.amount||0),0);
+
+  // ── Summary KPIs ──────────────────────────────────────────────────────────
+  const totalQuoted     = definedProjects.reduce((a,p)=>a+(p.quoted||0),0);
+  const totalHoursAll   = timesheets.reduce((a,t)=>a+(t.hours||0),0);
+  const totalExpAll     = expenses.reduce((a,e)=>a+(e.amount||0),0);
+  const totalInvoicedAll= sorted.reduce((a,p)=>a+p.invoicedValue,0);
+  const totalLabourAll  = totalHoursAll * rate;
+  const totalProfitAll  = totalInvoicedAll > 0 ? totalInvoicedAll - totalExpAll - totalLabourAll : null;
+
   document.getElementById('page-projects').innerHTML = `
-    <div class="divider">Projects — All Active</div>
+    <div class="divider">Projects — Performance Analysis</div>
     <div class="kpi-grid">
-      ${kpi('Tracked Projects', sorted.length, 'From logs + defined', 'highlight')}
-      ${kpi('Total Quoted', fmt(totalQuoted), 'Defined projects only', '')}
-      ${kpi('Hours Logged', totalHoursAll + 'h', 'All projects', '')}
-      ${kpi('Expenses Logged', fmt(totalExpensesAll), 'All projects', 'warn')}
+      ${kpi('Projects', sorted.length, 'All tracked', 'highlight')}
+      ${kpi('Total Quoted', fmt(totalQuoted), 'Defined projects', '')}
+      ${kpi('Total Invoiced', fmt(totalInvoicedAll), 'Matched from Xero', 'good')}
+      ${kpi('Total Hours', totalHoursAll.toFixed(1) + 'h', 'All projects', '')}
+      ${kpi('Labour Value', fmt(totalLabourAll), 'At $' + rate + '/hr', '')}
+      ${kpi('Gross Profit', totalProfitAll !== null ? fmt(totalProfitAll) : '—',
+             totalProfitAll !== null ? (totalProfitAll >= 0 ? '+' : '') + (totalInvoicedAll > 0 ? (totalProfitAll/totalInvoicedAll*100).toFixed(1) : '0') + '% margin' : 'Need invoiced data',
+             totalProfitAll === null ? '' : totalProfitAll >= 0 ? 'good' : 'warn')}
     </div>
     <div class="section">
-      <div class="section-head"><h2>Project Overview</h2><span class="chart-clickable-hint">click a row for details</span></div>
-      <table><thead><tr><th>Project</th><th>Status</th><th style="text-align:right">Quoted</th><th style="text-align:right">Hours</th><th style="text-align:right">Labour</th><th style="text-align:right">Expenses</th><th style="text-align:right">Remaining</th></tr></thead>
-      <tbody>${projectRows || '<tr><td colspan="7"><div class="empty">No projects yet</div></td></tr>'}</tbody></table>
-    </div>
-    <div class="section">
-      <div class="section-head"><h2>Recent Timesheet Entries</h2></div>
-      <table><thead><tr><th>Date</th><th>Project</th><th>Notes</th><th style="text-align:right">Hours</th><th style="text-align:right">Value</th></tr></thead>
-      <tbody>${hoursRows}</tbody></table>
+      <div class="section-head">
+        <h2>Project Table</h2>
+        <span class="chart-clickable-hint">click a row for full detail · values excl. GST</span>
+      </div>
+      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+        <table style="min-width:1500px;font-size:12px">
+          <thead><tr>
+            <th>ID</th>
+            <th>Project</th>
+            <th>Contact</th>
+            <th>Players</th>
+            <th style="white-space:nowrap">Quote No.</th>
+            <th style="white-space:nowrap">Quote Item</th>
+            <th>Description</th>
+            <th style="text-align:right;white-space:nowrap">Est. Value</th>
+            <th style="text-align:right;white-space:nowrap">Invoiced</th>
+            <th style="text-align:right">Hrs</th>
+            <th style="text-align:right">Labour</th>
+            <th style="text-align:right">Expenses</th>
+            <th style="text-align:right">Profitability</th>
+            <th style="text-align:right;white-space:nowrap">Adj. Rate</th>
+            <th style="white-space:nowrap">Start</th>
+            <th style="white-space:nowrap">End</th>
+            <th style="text-align:right">Span</th>
+            <th style="text-align:right;white-space:nowrap">Dilution</th>
+          </tr></thead>
+          <tbody>${rows || '<tr><td colspan="18"><div class="empty" style="padding:20px">No projects yet</div></td></tr>'}</tbody>
+        </table>
+      </div>
+      <div style="font-size:10px;color:var(--ink-4);padding:10px 14px;border-top:1px solid var(--border)">
+        Invoiced = sum of Xero invoice line items matched by client name ·
+        Profitability = Invoiced − Expenses − Labour ·
+        Adj. Rate = (Invoiced − Expenses) ÷ Hrs ·
+        Span = working days (Mon–Fri) between first &amp; last timesheet entry ·
+        Dilution = Hrs ÷ Span (% of an 8h/day pace)
+      </div>
     </div>`;
 }
 
