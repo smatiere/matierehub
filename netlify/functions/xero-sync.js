@@ -329,7 +329,7 @@ function transformBankTransactions(bankTx, accountCodeMap) {
 
     rows.push({
       id:            tx.BankTransactionID,
-      date:          (tx.DateString || tx.Date || '').slice(0, 10) || null,
+      date:          parseXeroDate(tx.DateString || tx.Date),
       type:          tx.Type || '',
       contact:       (tx.Contact?.Name      || '').trim(),
       contact_id:    (tx.Contact?.ContactID || '').trim(),
@@ -380,7 +380,7 @@ function transformPayments(payments) {
     const invNum  = inv.InvoiceNumber || p.Reference || '';
     rows.push({
       id:            p.PaymentID,
-      date:          (p.DateString || p.Date || '').slice(0, 10) || null,
+      date:          parseXeroDate(p.DateString || p.Date),
       type:          'RECEIVE',
       contact:       (contact.Name      || '').trim(),
       contact_id:    (contact.ContactID || '').trim(),
@@ -664,6 +664,16 @@ function addArrays(...arrays) {
 }
 
 function round2(n) { return Math.round((n || 0) * 100) / 100; }
+
+// Xero returns dates either as ISO "YYYY-MM-DD" (via DateString) or the legacy
+// "/Date(1670000000000+0000)/" format. This helper normalises both to "YYYY-MM-DD".
+function parseXeroDate(val) {
+  if (!val) return null;
+  if (/^\d{4}-\d{2}-\d{2}/.test(val)) return val.slice(0, 10);   // already ISO
+  const m = val.match(/\/Date\((\d+)/);
+  if (m) return new Date(parseInt(m[1], 10)).toISOString().slice(0, 10);
+  return null;
+}
 
 // ── Merge monthly chunks into the persisted history ───────────────────────────
 // Lets us backfill years of history in several short runs (each run only fetches a
