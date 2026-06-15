@@ -233,6 +233,7 @@ body{padding-bottom:62px}
   <div class="tab" onclick="showTab('projects',this)">Projects</div>
   <div class="tab" onclick="showTab('quotes',this)">Quotes & Pricing</div>
   <div class="tab" onclick="showTab('log',this)">Activity Log</div>
+  <div class="tab" onclick="showTab('transactions',this)">Transactions</div>
 </div>
 
 <div class="page active" id="page-overview"></div>
@@ -244,6 +245,7 @@ body{padding-bottom:62px}
 <div class="page" id="page-projects"></div>
 <div class="page" id="page-quotes"></div>
 <div class="page" id="page-log"></div>
+<div class="page" id="page-transactions"></div>
 
 <div id="modal-overlay" class="modal-overlay" onclick="if(event.target===this)closeModal()">
   <div class="modal">
@@ -280,6 +282,16 @@ const SB_HDR  = { 'apikey': SB_ANON, 'Authorization': 'Bearer ' + SB_ANON };
 async function sbGet(path) {
   const r = await fetch(SB_URL + path, { headers: SB_HDR });
   if (!r.ok) throw new Error('Supabase error ' + r.status + ' on ' + path);
+  return r.json();
+}
+
+async function sbPatch(table, query, body) {
+  const r = await fetch(SB_URL + '/rest/v1/' + table + query, {
+    method: 'PATCH',
+    headers: { ...SB_HDR, 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
+    body: JSON.stringify(body)
+  });
+  if (!r.ok) throw new Error('Supabase PATCH error ' + r.status);
   return r.json();
 }
 
@@ -338,6 +350,7 @@ function showTab(name, el) {
   if (name === 'quotes') renderQuotes();
   if (name === 'timesheet') renderTimesheet();
   if (name === 'pnl') renderPnL();
+  if (name === 'transactions') renderTransactions();
 }
 
 function kpi(label, value, sub, style='') {
@@ -1806,8 +1819,15 @@ function renderPnLChart(data) {
 const pnlExpandedCats = new Set();
 
 function pnlToggleExpand(cat) {
-  if (pnlExpandedCats.has(cat)) pnlExpandedCats.delete(cat);
-  else pnlExpandedCats.add(cat);
+  // Clear bank tx cache when category is collapsed so a re-expand always re-fetches
+  // for the current date range (avoids stale data if user changes the P&L date filter)
+  if (pnlExpandedCats.has(cat)) {
+    pnlExpandedCats.delete(cat);
+    pnlExpandedAccts.clear();
+    Object.keys(pnlBankTxCache).forEach(k => delete pnlBankTxCache[k]);
+  } else {
+    pnlExpandedCats.add(cat);
+  }
   const { fromD, toD } = getPnLDateRange();
   renderPnLTable(buildPnLData(fromD, toD), fromD, toD);
 }
@@ -1815,10 +1835,36 @@ function pnlToggleExpand(cat) {
 // Track expanded individual accounts (transaction-level audit drill-down)
 const pnlExpandedAccts = new Set();
 
-function pnlToggleAcctExpand(acc, ev) {
+// Cache of fetched bank_transactions per account + date-range key.
+// Populated lazily when a non-liability account row is expanded.
+const pnlBankTxCache = {};
+
+async function pnlToggleAcctExpand(acc, ev) {
   if (ev) ev.stopPropagation();
-  if (pnlExpandedAccts.has(acc)) pnlExpandedAccts.delete(acc);
-  else pnlExpandedAccts.add(acc);
+  const wasExpanded = pnlExpandedAccts.has(acc);
+  if (wasExpanded) {
+    pnlExpandedAccts.delete(acc);
+  } else {
+    pnlExpandedAccts.add(acc);
+    // Fetch bank_transactions for this account if not a liability account and not yet cached
+    if (!LIABILITY_ACCOUNTS.has(acc)) {
+      const { fromD, toD } = getPnLDateRange();
+      const dateFrom = fromD.toISOString().slice(0, 10);
+      const dateTo   = toD.toISOString().slice(0, 10);
+      const cacheKey = acc + '|' + dateFrom + '|' + dateTo;
+      if (!pnlBankTxCache[cacheKey]) {
+        try {
+          const rows = await sbGet(
+            `/rest/v1/bank_transactions?account_name=eq.${encodeURIComponent(acc)}&date=gte.${dateFrom}&date=lte.${dateTo}&order=date.desc&select=id,date,contact,description,reference,gross,debit,credit,type`
+          );
+          pnlBankTxCache[cacheKey] = rows;
+        } catch(e) {
+          pnlBankTxCache[cacheKey] = [];
+          console.warn('Could not fetch bank_transactions for', acc, e.message);
+        }
+      }
+    }
+  }
   const { fromD, toD } = getPnLDateRange();
   renderPnLTable(buildPnLData(fromD, toD), fromD, toD);
 }
@@ -1855,7 +1901,21 @@ function getCatDetailForPeriod(cat, months) {
         const idx = periods.indexOf(m);
         if (idx >= 0) total += arr[idx] || 0;
       }
-      if (total > 0) result.push({ acc, total, txns: null });
+      if (total > 0) {
+        // Check cache for live bank_transactions (populated when user expands this account row)
+        const { fromD, toD } = getPnLDateRange();
+        const cacheKey = acc + '|' + fromD.toISOString().slice(0,10) + '|' + toD.toISOString().slice(0,10);
+        const cachedTx = pnlBankTxCache[cacheKey] || null;
+        // Map to same shape as liability txns: {date, payee, description, amount, ref}
+        const txns = cachedTx ? cachedTx.map(t => ({
+          date:        t.date,
+          payee:       t.contact || '—',
+          description: t.description || '',
+          amount:      t.debit || t.credit || t.gross || 0,
+          ref:         t.reference || ''
+        })) : null;
+        result.push({ acc, total, txns });
+      }
     }
   }
   return result.sort((a,b) => b.total - a.total);
@@ -2535,6 +2595,229 @@ async function handleXeroCallback() {
 
   history.replaceState({}, '', '/');
   return true;
+}
+
+// ── Transactions tab ─────────────────────────────────────────────────────────
+// State persists across tab switches so filters aren't lost when the user navigates away.
+const TX = {
+  from: null,   // YYYY-MM-DD
+  to:   null,   // YYYY-MM-DD
+  type: 'ALL',  // ALL | SPEND | RECEIVE
+  contact: '',
+  account: '',
+  rows: null,   // fetched bank_transactions rows
+  loading: false
+};
+
+function txDefaultDates() {
+  const today = new Date();
+  TX.to   = today.toISOString().slice(0, 10);
+  const from = new Date(today - 30 * 86400000);
+  TX.from = from.toISOString().slice(0, 10);
+}
+
+async function renderTransactions() {
+  const el = document.getElementById('page-transactions');
+  if (!el) return;
+  if (!TX.from) txDefaultDates();
+
+  el.innerHTML = txShell();
+  await txFetch();
+}
+
+function txShell() {
+  const accs = D.account_categories ? [...new Set(Object.keys(D.account_categories))].sort() : [];
+  const accOptions = accs.map(a => `<option value="${a}"${TX.account===a?' selected':''}>${a}</option>`).join('');
+  return `
+  <div style="padding:20px">
+    <h2 style="margin:0 0 16px;font-size:18px;font-weight:600">Bank Transactions</h2>
+
+    <!-- Filter bar -->
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:18px;padding:14px;background:var(--bg-2);border-radius:10px">
+      <div>
+        <div style="font-size:11px;color:var(--ink-4);margin-bottom:4px">From</div>
+        <input type="date" id="tx-from" value="${TX.from}" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:13px">
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--ink-4);margin-bottom:4px">To</div>
+        <input type="date" id="tx-to" value="${TX.to}" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:13px">
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--ink-4);margin-bottom:4px">Type</div>
+        <select id="tx-type" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:13px">
+          <option value="ALL"${TX.type==='ALL'?' selected':''}>All</option>
+          <option value="SPEND"${TX.type==='SPEND'?' selected':''}>Spend (out)</option>
+          <option value="RECEIVE"${TX.type==='RECEIVE'?' selected':''}>Receive (in)</option>
+        </select>
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--ink-4);margin-bottom:4px">Contact</div>
+        <input type="text" id="tx-contact" value="${TX.contact}" placeholder="e.g. Bunnings" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:13px;width:140px">
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--ink-4);margin-bottom:4px">Account</div>
+        <select id="tx-account" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:13px;max-width:180px">
+          <option value="">All accounts</option>
+          ${accOptions}
+        </select>
+      </div>
+      <button onclick="txApplyFilters()" style="padding:7px 16px;background:var(--sage);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;align-self:flex-end">Refresh</button>
+    </div>
+
+    <!-- Results -->
+    <div id="tx-table-wrap" style="overflow-x:auto">
+      <div style="color:var(--ink-4);padding:20px;text-align:center">Loading…</div>
+    </div>
+
+    <!-- Expense match review -->
+    <div id="tx-match-wrap" style="margin-top:28px"></div>
+  </div>`;
+}
+
+async function txApplyFilters() {
+  TX.from    = document.getElementById('tx-from')?.value    || TX.from;
+  TX.to      = document.getElementById('tx-to')?.value      || TX.to;
+  TX.type    = document.getElementById('tx-type')?.value    || TX.type;
+  TX.contact = document.getElementById('tx-contact')?.value || '';
+  TX.account = document.getElementById('tx-account')?.value || '';
+  TX.rows    = null;
+  await txFetch();
+}
+
+async function txFetch() {
+  const wrap = document.getElementById('tx-table-wrap');
+  if (wrap) wrap.innerHTML = '<div style="color:var(--ink-4);padding:20px;text-align:center">Loading…</div>';
+
+  let q = `/rest/v1/bank_transactions?date=gte.${TX.from}&date=lte.${TX.to}&order=date.desc,id.desc&limit=500&select=id,date,type,contact,account_code,account_name,description,reference,gross,tax,net,debit,credit,bank_account,project,notes,expense_log_id`;
+  if (TX.type !== 'ALL') q += `&type=eq.${TX.type}`;
+  if (TX.contact)        q += `&contact=ilike.*${encodeURIComponent(TX.contact)}*`;
+  if (TX.account)        q += `&account_name=eq.${encodeURIComponent(TX.account)}`;
+
+  try {
+    TX.rows = await sbGet(q);
+    txRenderTable();
+    await txRenderMatches();
+  } catch(e) {
+    if (wrap) wrap.innerHTML = `<div style="color:var(--pink);padding:20px">Error: ${e.message}</div>`;
+  }
+}
+
+function txRenderTable() {
+  const wrap = document.getElementById('tx-table-wrap');
+  if (!wrap) return;
+  const rows = TX.rows || [];
+
+  if (!rows.length) {
+    wrap.innerHTML = '<div style="color:var(--ink-4);padding:20px;text-align:center">No transactions found for this filter.</div>';
+    return;
+  }
+
+  const totalIn  = rows.reduce((s,r) => s + (r.credit||0), 0);
+  const totalOut = rows.reduce((s,r) => s + (r.debit||0), 0);
+
+  wrap.innerHTML = `
+    <div style="display:flex;gap:16px;margin-bottom:12px">
+      <span style="font-size:13px;color:var(--ink-4)">${rows.length} transactions</span>
+      <span style="font-size:13px;color:var(--sage)">▲ ${fmt(totalIn)} in</span>
+      <span style="font-size:13px;color:var(--pink)">▼ ${fmt(totalOut)} out</span>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead>
+        <tr style="background:var(--bg-2);text-align:left">
+          <th style="padding:8px 10px;font-weight:600;white-space:nowrap">Date</th>
+          <th style="padding:8px 10px;font-weight:600">Contact</th>
+          <th style="padding:8px 10px;font-weight:600">Account</th>
+          <th style="padding:8px 10px;font-weight:600">Description</th>
+          <th style="padding:8px 10px;font-weight:600">Reference</th>
+          <th style="padding:8px 10px;font-weight:600;text-align:right">Debit</th>
+          <th style="padding:8px 10px;font-weight:600;text-align:right">Credit</th>
+          <th style="padding:8px 10px;font-weight:600">Project</th>
+          <th style="padding:8px 10px;font-weight:600">Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map((r, i) => `
+          <tr style="border-top:1px solid var(--border);background:${i%2===0?'var(--bg-1)':'var(--bg-2)'}${r.expense_log_id?' border-left:3px solid var(--sage)':''}">
+            <td style="padding:7px 10px;white-space:nowrap;color:var(--ink-3)">${r.date||''}</td>
+            <td style="padding:7px 10px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.contact||'—'}</td>
+            <td style="padding:7px 10px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-3)">${r.account_name||r.account_code||'—'}</td>
+            <td style="padding:7px 10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-4)">${r.description||''}</td>
+            <td style="padding:7px 10px;color:var(--ink-4)">${r.reference||''}</td>
+            <td style="padding:7px 10px;text-align:right;color:var(--pink);font-weight:${r.debit?'600':'400'}">${r.debit?fmt(r.debit):'—'}</td>
+            <td style="padding:7px 10px;text-align:right;color:var(--sage);font-weight:${r.credit?'600':'400'}">${r.credit?fmt(r.credit):'—'}</td>
+            <td style="padding:7px 10px;color:var(--ink-3);font-size:11px">${r.project||''}</td>
+            <td style="padding:7px 10px;color:var(--ink-4);font-size:11px">${r.notes||''}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+// ── Expense auto-match ────────────────────────────────────────────────────────
+// For each expense_log entry in the current window, look for unlinked bank_transactions
+// that are: same date ±1 day AND gross ≈ expense.amount × 1.1 (within $0.55 tolerance).
+// Potential matches are shown for manual review with a Link button.
+
+async function txRenderMatches() {
+  const wrap = document.getElementById('tx-match-wrap');
+  if (!wrap || !TX.rows) return;
+
+  // Fetch expense_log entries for the same date window
+  let exps = [];
+  try {
+    exps = await sbGet(`/rest/v1/expense_log?date=gte.${TX.from}&date=lte.${TX.to}&select=id,date,supplier,description,amount&order=date.desc`);
+  } catch(e) { wrap.innerHTML = ''; return; }
+
+  // Find unlinked bank_transactions (no expense_log_id yet)
+  const unlinked = TX.rows.filter(t => !t.expense_log_id && t.type === 'SPEND');
+
+  const matches = [];
+  for (const exp of exps) {
+    const targetGross = Math.round(exp.amount * 1.1 * 100) / 100;
+    const expMs = new Date(exp.date).getTime();
+    const candidates = unlinked.filter(t => {
+      const dayDiff  = Math.abs(new Date(t.date).getTime() - expMs) / 86400000;
+      const grossDiff = Math.abs((t.gross||0) - targetGross);
+      return dayDiff <= 1 && grossDiff <= 0.55;
+    });
+    if (candidates.length) matches.push({ exp, candidates });
+  }
+
+  if (!matches.length) {
+    wrap.innerHTML = `<div style="font-size:12px;color:var(--ink-4);margin-top:4px">✓ No unmatched expenses found in this date window.</div>`;
+    return;
+  }
+
+  wrap.innerHTML = `
+    <h3 style="font-size:14px;font-weight:600;margin:0 0 12px">Expense Match Review <span style="font-weight:400;color:var(--ink-4);font-size:12px">(${matches.length} potential match${matches.length===1?'':'es'})</span></h3>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      ${matches.map(({exp, candidates}) => `
+        <div style="background:var(--bg-2);border-radius:8px;padding:12px 14px;border-left:3px solid var(--orange)">
+          <div style="font-size:12px;color:var(--ink-3);margin-bottom:8px">
+            <strong>Expense logged:</strong> ${exp.date} · ${exp.supplier||'(no supplier)'} · ${exp.description} · ${fmt(exp.amount)} ex GST
+            <span style="color:var(--ink-4)">(≈ ${fmt(exp.amount*1.1)} incl GST)</span>
+          </div>
+          ${candidates.map(t => `
+            <div style="display:flex;align-items:center;gap:12px;padding:7px 10px;background:var(--bg-1);border-radius:6px;margin-bottom:6px;font-size:12px">
+              <span style="color:var(--ink-3);white-space:nowrap">${t.date}</span>
+              <span style="color:var(--ink-2)">${t.contact||'—'}</span>
+              <span style="color:var(--ink-4);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.description||''}</span>
+              <span style="color:var(--pink);font-weight:600;white-space:nowrap">${fmt(t.gross)}</span>
+              <button onclick="txLinkExpense('${t.id}',${exp.id})" style="padding:4px 10px;background:var(--sage);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:11px;font-weight:600;white-space:nowrap">Link ✓</button>
+            </div>`).join('')}
+        </div>`).join('')}
+    </div>`;
+}
+
+async function txLinkExpense(bankTxId, expenseLogId) {
+  try {
+    await sbPatch('bank_transactions', `?id=eq.${encodeURIComponent(bankTxId)}`, { expense_log_id: expenseLogId });
+    // Refresh the matches display without re-fetching everything
+    TX.rows = TX.rows.map(r => r.id === bankTxId ? { ...r, expense_log_id: expenseLogId } : r);
+    txRenderTable();
+    await txRenderMatches();
+  } catch(e) {
+    alert('Could not link: ' + e.message);
+  }
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
