@@ -1359,7 +1359,7 @@ async function fileToBase64(file) {
       const url = URL.createObjectURL(file);
       img.onload = () => {
         URL.revokeObjectURL(url);
-        const maxDim = 1200;
+        const maxDim = 900;
         let w = img.width, h = img.height;
         if (w > maxDim || h > maxDim) {
           if (w > h) { h = Math.round(h * maxDim / w); w = maxDim; }
@@ -1368,7 +1368,7 @@ async function fileToBase64(file) {
         const canvas = document.createElement('canvas');
         canvas.width = w; canvas.height = h;
         canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-        resolve({ data: canvas.toDataURL('image/jpeg', 0.85).split(',')[1], type: 'image/jpeg' });
+        resolve({ data: canvas.toDataURL('image/jpeg', 0.80).split(',')[1], type: 'image/jpeg' });
       };
       img.onerror = reject;
       img.src = url;
@@ -1450,13 +1450,19 @@ async function claudeBarSend() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    const data = await res.json();
+    let data;
+    try { data = await res.json(); }
+    catch(e) {
+      claudeSetState('idle');
+      claudeToast(`⚠ Server error (${res.status}) — check Netlify logs`, 'error');
+      return;
+    }
     claudeSetState('idle');
     claudeHandleResponse(data, inp);
 
   } catch (err) {
     claudeSetState('idle');
-    claudeToast('⚠ Connection error — try again', 'error');
+    claudeToast('⚠ ' + (err.message || 'Connection error — try again'), 'error');
   }
 }
 
