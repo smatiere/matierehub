@@ -1473,7 +1473,9 @@ function claudeHandleResponse(data, inp) {
     renderChips();
     const action = data.action || '';
     let msg = '';
-    if (action === 'new' && data.entry) {
+    if (data.type === 'expense_batch' && data.entries) {
+      msg = `✓ ${data.label}`;
+    } else if (action === 'new' && data.entry) {
       const e = data.entry;
       msg = data.type === 'timesheet'
         ? `✓ Logged ${e.hours}h · ${e.project} · ${e.date}`
@@ -1485,7 +1487,10 @@ function claudeHandleResponse(data, inp) {
 
     // Optimistic in-memory update — no re-fetch needed
     if (D) {
-      if (action === 'new' && data.entry) {
+      if (data.type === 'expense_batch' && data.entries) {
+        D.expense_log = D.expense_log || [];
+        data.entries.forEach(e => D.expense_log.push(e));
+      } else if (action === 'new' && data.entry) {
         if (data.type === 'timesheet') {
           D.timesheets = D.timesheets || [];
           D.timesheets.push(data.entry);
