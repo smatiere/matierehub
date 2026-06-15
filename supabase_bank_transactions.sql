@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS bank_transactions (
   status          TEXT        DEFAULT '',                    -- AUTHORISED | DELETED
   is_reconciled   BOOLEAN     DEFAULT FALSE,
   expense_log_id  INTEGER,                                   -- optional link to expense_log.id (manual or auto-matched)
+  project         TEXT        DEFAULT '',                    -- HUB-only: project this tx belongs to (never overwritten by sync)
+  notes           TEXT        DEFAULT '',                    -- HUB-only: free text note (never overwritten by sync)
   created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -46,3 +48,10 @@ CREATE POLICY "service_role_all" ON bank_transactions
   TO service_role
   USING (true)
   WITH CHECK (true);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- If the table already exists (run on 2026-06-14), add the HUB-only columns:
+-- ─────────────────────────────────────────────────────────────────────────────
+ALTER TABLE bank_transactions
+  ADD COLUMN IF NOT EXISTS project TEXT DEFAULT '',
+  ADD COLUMN IF NOT EXISTS notes   TEXT DEFAULT '';
