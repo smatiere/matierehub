@@ -184,11 +184,14 @@ tr:hover td{background:var(--bg-3)}
 #claude-bar-input:focus{border-color:var(--amber)}
 #claude-bar-input::placeholder{color:var(--ink-4)}
 #claude-bar-input:disabled{opacity:.5}
-#claude-mic-btn{width:38px;height:38px;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;transition:all .2s;background:var(--bg-3);border:1px solid var(--border-2)}
-#claude-mic-btn:hover{border-color:var(--ink-4)}
-#claude-mic-btn.listening{background:var(--pink);border-color:var(--pink);animation:pulse .9s infinite}
-#claude-mic-btn.processing{background:var(--bg-3);border-color:var(--border-2);pointer-events:none}
-@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(255,0,110,.4)}50%{box-shadow:0 0 0 8px rgba(255,0,110,0)}}
+#claude-add-btn{width:38px;height:38px;border-radius:50%;border:1px solid var(--border-2);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:22px;line-height:1;flex-shrink:0;transition:all .2s;background:var(--bg-3);color:var(--ink-3)}
+#claude-add-btn:hover:not(:disabled){border-color:var(--ink-4);color:var(--ink)}
+#claude-add-btn:disabled{opacity:.4;cursor:not-allowed}
+#claude-file-chips{display:none;flex-wrap:wrap;gap:4px}
+.claude-chip{display:flex;align-items:center;gap:4px;background:var(--bg-3);border:1px solid var(--border-2);border-radius:12px;padding:2px 6px 2px 4px;font-size:11px;color:var(--ink-3)}
+.claude-chip-name{max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.claude-chip-rm{cursor:pointer;color:var(--ink-4);font-size:10px;flex-shrink:0;padding-left:2px}
+.claude-chip-rm:hover{color:var(--ink)}
 #claude-send-btn{background:var(--amber);color:#000;border:none;padding:9px 16px;border-radius:24px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;letter-spacing:.04em;transition:all .15s;flex-shrink:0}
 #claude-send-btn:hover:not(:disabled){background:var(--gold-2)}
 #claude-send-btn:disabled{opacity:.4;cursor:not-allowed}
@@ -263,8 +266,12 @@ body{padding-bottom:62px}
 
 <!-- Floating Claude input bar -->
 <div id="claude-bar">
-  <button id="claude-mic-btn" onclick="claudeMicToggle()" title="Hold to speak">🎤</button>
-  <input id="claude-bar-input" type="text" placeholder='e.g. "6h mark today" · "$85 bunnings screws" · "sick day" · "fix hours to 5"' autocomplete="off">
+  <button id="claude-add-btn" onclick="claudeAddClick()" title="Attach photo or document">+</button>
+  <input id="claude-file-input" type="file" accept="image/*,.pdf" multiple style="display:none" onchange="claudeFilesSelected(this.files)">
+  <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">
+    <div id="claude-file-chips"></div>
+    <input id="claude-bar-input" type="text" placeholder='e.g. "6h mark today" · "$85 bunnings screws" · "sick day" · "fix hours to 5"' autocomplete="off">
+  </div>
   <span id="claude-bar-status"></span>
   <button id="claude-send-btn" onclick="claudeBarSend()">Log</button>
 </div>
@@ -1304,33 +1311,23 @@ function tsDismissPopup() {
   document.getElementById('ts-popup-overlay').style.display = 'none';
 }
 
-// ── Claude bar — voice + text → Netlify function → data.json ─────────────────
-let recognition = null;
-let micActive   = false;
+// ── Claude bar — text + attachments → Netlify function → Supabase ────────────
+let _attachedFiles = []; // [{name, type, data(base64)}]
 
 function claudeSetState(state) {
-  // states: idle | listening | processing
-  const mic    = document.getElementById('claude-mic-btn');
+  // states: idle | processing
+  const addBtn = document.getElementById('claude-add-btn');
   const inp    = document.getElementById('claude-bar-input');
   const btn    = document.getElementById('claude-send-btn');
   const status = document.getElementById('claude-bar-status');
-  mic.className = '';
-  if (state === 'listening') {
-    mic.classList.add('listening');
-    mic.textContent = '⏹';
-    inp.disabled = true;
-    btn.disabled = true;
-    status.style.display = 'block';
-    status.textContent = 'Listening…';
-  } else if (state === 'processing') {
-    mic.classList.add('processing');
-    mic.textContent = '⏳';
+  if (state === 'processing') {
+    if (addBtn) addBtn.disabled = true;
     inp.disabled = true;
     btn.disabled = true;
     status.style.display = 'block';
     status.textContent = 'Parsing…';
   } else {
-    mic.textContent = '🎤';
+    if (addBtn) addBtn.disabled = false;
     inp.disabled = false;
     btn.disabled = false;
     status.style.display = 'none';
@@ -1338,37 +1335,73 @@ function claudeSetState(state) {
   }
 }
 
-function claudeMicToggle() {
-  if (micActive) { recognition && recognition.stop(); return; }
+// ── File attachment helpers ────────────────────────────────────────────────────
+function claudeAddClick() {
+  document.getElementById('claude-file-input').click();
+}
 
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) {
-    claudeToast('Microphone not supported in this browser', 'error'); return;
+async function claudeFilesSelected(files) {
+  for (const file of files) {
+    if (!file.type.startsWith('image/') && file.type !== 'application/pdf') continue;
+    try {
+      const { data, type } = await fileToBase64(file);
+      _attachedFiles.push({ name: file.name, type, data });
+    } catch(e) { claudeToast('Could not read file: ' + file.name, 'error'); }
   }
+  renderChips();
+  document.getElementById('claude-file-input').value = '';
+}
 
-  recognition = new SpeechRecognition();
-  recognition.lang = 'en-AU';
-  recognition.interimResults = false;
-  recognition.maxAlternatives = 1;
+async function fileToBase64(file) {
+  if (file.type.startsWith('image/')) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const maxDim = 1200;
+        let w = img.width, h = img.height;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) { h = Math.round(h * maxDim / w); w = maxDim; }
+          else { w = Math.round(w * maxDim / h); h = maxDim; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve({ data: canvas.toDataURL('image/jpeg', 0.85).split(',')[1], type: 'image/jpeg' });
+      };
+      img.onerror = reject;
+      img.src = url;
+    });
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve({ data: reader.result.split(',')[1], type: file.type });
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
-  recognition.onstart = () => { micActive = true; claudeSetState('listening'); };
+function claudeRemoveFile(i) {
+  _attachedFiles.splice(i, 1);
+  renderChips();
+}
 
-  recognition.onresult = (e) => {
-    const transcript = e.results[0][0].transcript;
-    document.getElementById('claude-bar-input').value = transcript;
-    micActive = false;
-    claudeBarSend();
-  };
-
-  recognition.onerror = (e) => {
-    micActive = false;
-    claudeSetState('idle');
-    if (e.error !== 'aborted') claudeToast('Mic error: ' + e.error, 'error');
-  };
-
-  recognition.onend = () => { micActive = false; };
-
-  recognition.start();
+function renderChips() {
+  const container = document.getElementById('claude-file-chips');
+  if (!_attachedFiles.length) {
+    container.style.display = 'none';
+    container.innerHTML = '';
+    return;
+  }
+  container.style.display = 'flex';
+  container.innerHTML = _attachedFiles.map((f, i) => {
+    const preview = f.type.startsWith('image/')
+      ? `<img src="data:${f.type};base64,${f.data}" style="width:18px;height:18px;object-fit:cover;border-radius:3px;flex-shrink:0">`
+      : `<span style="font-size:13px;flex-shrink:0">📄</span>`;
+    const name = f.name.length > 18 ? f.name.slice(0, 15) + '…' : f.name;
+    return `<span class="claude-chip">${preview}<span class="claude-chip-name">${name.replace(/</g,'&lt;')}</span><span class="claude-chip-rm" onclick="claudeRemoveFile(${i})">✕</span></span>`;
+  }).join('');
 }
 
 // Stores a pending action awaiting "yes" confirmation from the user
@@ -1377,7 +1410,7 @@ window._pendingConfirm = null;
 async function claudeBarSend() {
   const inp  = document.getElementById('claude-bar-input');
   const text = inp.value.trim();
-  if (!text) return;
+  if (!text && !_attachedFiles.length) return;
 
   // ── Check for confirmation ("yes"/"yep"/"ok" etc.) ───────────────────────
   const isYes = /^(yes|yeah|yep|yup|ok|correct|confirm|sure|go ahead)$/i.test(text);
@@ -1408,10 +1441,14 @@ async function claudeBarSend() {
   claudeSetState('processing');
 
   try {
+    const payload = { text: text || 'Parse this receipt and log the expense.' };
+    if (_attachedFiles.length) {
+      payload.images = _attachedFiles.map(f => ({ name: f.name, mediaType: f.type, data: f.data }));
+    }
     const res = await fetch('/.netlify/functions/claude-parse', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text })
+      body: JSON.stringify(payload)
     });
     const data = await res.json();
     claudeSetState('idle');
@@ -1426,6 +1463,8 @@ async function claudeBarSend() {
 function claudeHandleResponse(data, inp) {
   if (data.status === 'success') {
     inp.value = '';
+    _attachedFiles = [];
+    renderChips();
     const action = data.action || '';
     let msg = '';
     if (action === 'new' && data.entry) {
