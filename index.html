@@ -636,6 +636,10 @@ function renderProjects(k) {
       id: def.id || '—', name,
       status: def.status || 'Active',
       quoted: def.quoted != null ? def.quoted : null,
+      // stored links (exact, from Supabase projects table)
+      storedContactId:  def.contact_id   || null,
+      storedQuoteNum:   def.quote_number || null,
+      // fallback fuzzy key (first segment of project name)
       clientName: name.split(' - ')[0].trim(),
       hours: 0, laborValue: 0,
       players: new Set(),
@@ -661,18 +665,24 @@ function renderProjects(k) {
     pData[e.project].expensesTotal += (e.amount || 0);
   });
 
-  // Match invoice_items → projects by contact name containing client name
+  // Match invoice_items → projects
+  // Priority: exact contact_id match (stored) > fuzzy client name match (fallback)
   invoiceItems.forEach(ii => {
     if (!ii.contact) return;
-    const contact = ii.contact.toLowerCase();
+    const contactLower = ii.contact.toLowerCase();
     Object.values(pData).forEach(p => {
-      const cl = p.clientName.toLowerCase();
-      if (!cl || cl === 'admin') return;
-      if (contact.includes(cl)) {
-        p.invoicedValue += (ii.price_excl_gst || 0);
-        if (ii.quote_number) p.quoteNumbers.add(ii.quote_number);
-        if (!p.invoiceContactName) p.invoiceContactName = ii.contact;
+      // Exact match via stored contact_id
+      if (p.storedContactId) {
+        if (ii.contact_id !== p.storedContactId) return;
+      } else {
+        // Fuzzy fallback: contact name must contain client name
+        const cl = p.clientName.toLowerCase();
+        if (!cl || cl === 'admin') return;
+        if (!contactLower.includes(cl)) return;
       }
+      p.invoicedValue += (ii.price_excl_gst || 0);
+      if (ii.quote_number) p.quoteNumbers.add(ii.quote_number);
+      if (!p.invoiceContactName) p.invoiceContactName = ii.contact;
     });
   });
 
@@ -692,9 +702,14 @@ function renderProjects(k) {
     const hrPerDay     = span && p.hours > 0 ? p.hours / span : null;
     const dilutionPct  = hrPerDay != null ? (hrPerDay / 8) * 100 : null;
 
+    // Quote numbers: stored value takes priority, then derive from matched invoice_items
+    const derivedQuoteNums = [...p.quoteNumbers];
+    const quoteNums = p.storedQuoteNum
+      ? [p.storedQuoteNum, ...derivedQuoteNums.filter(q => q !== p.storedQuoteNum)]
+      : derivedQuoteNums;
+
     // Quote item descriptions from Xero quotes (if cached)
     let quoteItemsHtml = '';
-    const quoteNums = [...p.quoteNumbers];
     quoteNums.forEach(qn => {
       const q = xeroQuoteByNum[qn];
       if (q) {
@@ -707,12 +722,16 @@ function renderProjects(k) {
       }
     });
 
+    // Contact display: prefer the name resolved from stored contact_id match,
+    // then from fuzzy match, then fall back to client name extracted from project name
+    const contactDisplay = p.invoiceContactName || p.clientName;
+
     return {
       ...p,
       players: [...p.players],
       quoteNums,
       quoteItemsHtml,
-      contactDisplay: p.invoiceContactName || p.clientName,
+      contactDisplay,
       startDate, endDate, span,
       profit, profitPct, adjRate, hrPerDay, dilutionPct,
     };
