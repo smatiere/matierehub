@@ -337,7 +337,7 @@ If you cannot confidently parse the input at all: {"action":"unclear","message":
         }
         const imageInstruction = text && text !== 'Parse this receipt and log the expense.'
           ? text.trim()
-          : 'This is a receipt photo. Extract the main expense and output a single ACTION 2 JSON object. Use the total amount shown (convert to ex-GST by dividing by 1.1 if GST is included). Use today\'s date if no date is clearly visible on the receipt.';
+          : 'This is a receipt photo. Output ONE single JSON object only — no arrays, no explanations. Use ACTION 2 format with the receipt total as the amount (divide by 1.1 to get ex-GST). Use today\'s date if no date is visible.';
         userContent.push({ type: 'text', text: imageInstruction });
       } else {
         userContent = text.trim();
@@ -374,9 +374,11 @@ If you cannot confidently parse the input at all: {"action":"unclear","message":
 
       rawText = rawText.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim();
       try {
-        parsed = JSON.parse(rawText);
+        const candidate = JSON.parse(rawText);
+        // If model returned an array (e.g. multiple line items), take the first element
+        parsed = Array.isArray(candidate) ? candidate[0] : candidate;
       } catch(e) {
-        const match = rawText.match(/\{[\s\S]*\}/);
+        const match = rawText.match(/\{[\s\S]*?\}/);
         if (match) {
           try { parsed = JSON.parse(match[0]); }
           catch(e2) { throw new Error(`Bad JSON from model: ${rawText.slice(0, 200)}`); }
@@ -787,7 +789,8 @@ If you cannot confidently parse the input at all: {"action":"unclear","message":
       responseExtra = { updated };
 
     } else {
-      return { statusCode: 200, headers, body: JSON.stringify({ status: 'unclear', message: 'Unrecognised action from model' }) };
+      console.error('Unrecognised action:', JSON.stringify(parsed).slice(0, 300));
+      return { statusCode: 200, headers, body: JSON.stringify({ status: 'unclear', message: `Unrecognised action "${parsed.action || 'unknown'}" — try describing the expense in words` }) };
     }
 
     return {
