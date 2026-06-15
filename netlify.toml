@@ -5,6 +5,9 @@
 [functions]
   node_bundler = "esbuild"
 
+[functions."claude-parse"]
+  timeout = 26
+
 # SPA routing — serve index.html for all non-file paths (enables /xero-callback)
 [[redirects]]
   from   = "/*"
