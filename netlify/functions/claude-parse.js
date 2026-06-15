@@ -77,8 +77,9 @@ exports.handler = async (event) => {
 
   try {
     const body = JSON.parse(event.body || '{}');
-    const { text, pendingAction } = body;
-    if (!text && !pendingAction) return { statusCode: 400, headers, body: JSON.stringify({ error: 'No input provided' }) };
+    const { text, pendingAction, images } = body;
+    const hasImages = images && images.length > 0;
+    if (!text && !pendingAction && !hasImages) return { statusCode: 400, headers, body: JSON.stringify({ error: 'No input provided' }) };
 
     // ── 1. Fetch context from Supabase ────────────────────────────────────────
     const [projectRows, recentTimesheets, allTsIds, allExpIds, categoryRows] = await Promise.all([
@@ -316,6 +317,32 @@ If you cannot confidently parse the input at all: {"action":"unclear","message":
     let parsed = pendingAction || null;
 
     if (!parsed) {
+      // Build user message — vision content blocks if images are attached
+      let userContent;
+      if (hasImages) {
+        userContent = [];
+        for (const img of images) {
+          if (img.mediaType && img.mediaType.startsWith('image/')) {
+            userContent.push({
+              type: 'image',
+              source: { type: 'base64', media_type: img.mediaType, data: img.data }
+            });
+          } else if (img.mediaType === 'application/pdf') {
+            // PDF document block (supported by claude-haiku-4-5+)
+            userContent.push({
+              type: 'document',
+              source: { type: 'base64', media_type: 'application/pdf', data: img.data }
+            });
+          }
+        }
+        userContent.push({
+          type: 'text',
+          text: (text || 'Parse this receipt/document and extract all expense line items.').trim()
+        });
+      } else {
+        userContent = text.trim();
+      }
+
       const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -325,9 +352,9 @@ If you cannot confidently parse the input at all: {"action":"unclear","message":
         },
         body: JSON.stringify({
           model: 'claude-haiku-4-5-20251001',
-          max_tokens: 300,
+          max_tokens: hasImages ? 600 : 300,
           system: systemPrompt,
-          messages: [{ role: 'user', content: text.trim() }]
+          messages: [{ role: 'user', content: userContent }]
         })
       });
 
