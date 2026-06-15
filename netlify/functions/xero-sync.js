@@ -351,6 +351,57 @@ function transformBankTransactions(bankTx, accountCodeMap) {
   return rows;
 }
 
+// ── Transform Xero ACCRECPAYMENT records → bank_transactions rows ─────────────
+// Xero's BankTransactions API only returns standalone Spend/Receive Money entries.
+// Client invoice payments live in the Payments API (type=ACCRECPAYMENT) — that's
+// where the bulk of revenue (invoice receipts) comes from. We map each Payment to a
+// bank_transactions row so the Transactions tab and P&L drill-down reflect real cash in.
+//
+// id          ← PaymentID (Xero UUID, stable PK)
+// type        ← 'RECEIVE' (money in — client paying an invoice)
+// contact     ← Invoice.Contact.Name
+// contact_id  ← Invoice.Contact.ContactID
+// account_name← 'Sales' (ACCRECPAYMENT always credits the Sales / Debtors control)
+// description ← 'Invoice payment: INV-XXXX'
+// reference   ← Invoice.InvoiceNumber
+// gross       ← Payment.Amount (already excl. of rounding; client paid this much)
+// credit      ← gross (money in)
+// debit       ← 0
+// is_reconciled ← true (AUTHORISED payments are always reconciled)
+//
+function transformPayments(payments) {
+  const rows = [];
+  for (const p of payments) {
+    if (!p.PaymentID) continue;
+    if (p.Status === 'DELETED') continue;
+    const inv     = p.Invoice || {};
+    const contact = inv.Contact || {};
+    const gross   = round2(Math.abs(p.Amount || 0));
+    const invNum  = inv.InvoiceNumber || p.Reference || '';
+    rows.push({
+      id:            p.PaymentID,
+      date:          (p.DateString || p.Date || '').slice(0, 10) || null,
+      type:          'RECEIVE',
+      contact:       (contact.Name      || '').trim(),
+      contact_id:    (contact.ContactID || '').trim(),
+      account_code:  '',
+      account_name:  'Sales',
+      description:   invNum ? `Invoice payment: ${invNum}` : 'Invoice payment',
+      reference:     invNum,
+      gross,
+      tax:           0,
+      net:           gross,
+      debit:         0,
+      credit:        gross,
+      bank_account:  (p.Account?.Name || '').trim(),
+      status:        p.Status || 'AUTHORISED',
+      is_reconciled: true
+      // expense_log_id intentionally omitted — defaults to NULL
+    });
+  }
+  return rows;
+}
+
 // ── Supabase upsert for bank_transactions table ───────────────────────────────
 async function sbUpsertBankTransactions(rows, log) {
   if (!rows.length) { if (log) log.push('  → 0 bank transactions to write'); return; }
@@ -1422,13 +1473,27 @@ exports.handler = async function(event) {
       const txRows = transformBankTransactions(bankAll, codeMap);
       log.push(`  → ${txRows.length} rows transformed (${bankAll.length - txRows.length} DELETED skipped)`);
 
+      // Also fetch Xero Payments (ACCRECPAYMENT) — client invoice receipts.
+      // These are NOT in the BankTransactions API; they're the bulk of revenue.
+      log.push('Fetching invoice payments (ACCRECPAYMENT) from Xero Payments API…');
+      const payments = await fetchAllPages(
+        'Payments?where=PaymentType%3D%3D%22ACCRECPAYMENT%22%26%26Date%3E%3DDateTime(2022%2C12%2C1)',
+        'Payments', accessToken, tenantId
+      );
+      log.push(`  → ${payments.length} ACCRECPAYMENT records fetched`);
+      const paymentRows = transformPayments(payments);
+      log.push(`  → ${paymentRows.length} payment rows transformed`);
+
+      const allRows = txRows.concat(paymentRows);
+
       if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
-        await sbUpsertBankTransactions(txRows, log);
+        await sbUpsertBankTransactions(allRows, log);
       } else {
         log.push('  ⚠ SUPABASE_URL/KEY not set — skipping bank_transactions write');
       }
 
-      result.bank_transactions_count = txRows.length;
+      result.bank_transactions_count = allRows.length;
+      result.bank_transactions_payments_count = paymentRows.length;
     }
 
     result.duration_ms = Date.now() - startTime;
