@@ -294,6 +294,22 @@ project: exact name from ACTIVE PROJECTS, or empty string "". Apply same matchin
 notes: free text, or empty string "" if none.
 
 ---
+## ACTION 9 — Link a project to a contact and/or quote number
+
+Schema: {"action":"link_project","project":"Exact Project Name","contact_name":"Full Contact Name or empty","quote_number":"QU-0259 or empty"}
+
+At least one of contact_name or quote_number must be non-empty.
+
+Triggers: "link [project] to [QU-XXXX]", "link [project] to contact [name]", "set quote for [project]", "set contact for [project]", "connect [project] to [name]", "assign quote [QU-XXXX] to [project]"
+
+Examples:
+"link Mark project to QU-0259"                   → {"action":"link_project","project":"${exampleProject}","contact_name":"","quote_number":"QU-0259"}
+"set contact for Rob project: Rob Anderson"       → {"action":"link_project","project":"${exampleProject2}","contact_name":"Rob Anderson","quote_number":""}
+"link IBK project to contact IBK Constructions and quote QU-0241" → {"action":"link_project","project":"${exampleProject3}","contact_name":"IBK Constructions","quote_number":"QU-0241"}
+
+Quote numbers always start with QU- followed by digits. Use exact project name from ACTIVE PROJECTS.
+
+---
 If you cannot confidently parse the input at all: {"action":"unclear","message":"brief plain-english reason"}`;
 
     // ── 3. Call Haiku (skipped if pendingAction already set) ──────────────────
@@ -654,6 +670,66 @@ If you cannot confidently parse the input at all: {"action":"unclear","message":
       const tagSummary = [resolvedProject && `project: ${resolvedProject}`, txNotes && `note: "${txNotes}"`].filter(Boolean).join(', ');
       entryLabel  = `Tagged ${updatedTx.length} transaction${updatedTx.length !== 1 ? 's' : ''} on ${txDate} — ${tagSummary}`;
       responseExtra = { tagged: matches.map(t => ({ id: t.id, contact: t.contact, gross: t.gross })) };
+
+    } else if (parsed.action === 'link_project') {
+      // Link a project row to a Xero contact_id and/or a quote_number.
+      // At least one of contact_name / quote_number must be provided.
+      const lpContactName = (parsed.contact_name || '').trim();
+      const lpQuoteNum    = (parsed.quote_number || '').trim();
+      const lpProjectName = (parsed.project || '').trim();
+
+      if (!lpContactName && !lpQuoteNum) {
+        return { statusCode: 200, headers, body: JSON.stringify({
+          status: 'unclear', message: 'Please provide a contact name, a quote number (QU-XXXX), or both'
+        })};
+      }
+
+      // Find the project row
+      const lpProject = projectRows.find(p => p.name.toLowerCase() === lpProjectName.toLowerCase());
+      if (!lpProject) {
+        return { statusCode: 200, headers, body: JSON.stringify({
+          status: 'unclear',
+          message: `Project "${lpProjectName}" not found. Active projects: ${projectList.join(', ')}`
+        })};
+      }
+
+      const patch = {};
+
+      // Resolve contact → contact_id via Supabase contacts table
+      if (lpContactName) {
+        const contactMatches = await sbGet('contacts',
+          `?name=ilike.*${encodeURIComponent(lpContactName)}*&select=id,name&limit=5`
+        );
+        if (!contactMatches.length) {
+          return { statusCode: 200, headers, body: JSON.stringify({
+            status: 'unclear',
+            message: `No contact found matching "${lpContactName}" — check the name and try again`
+          })};
+        }
+        if (contactMatches.length > 1) {
+          const names = contactMatches.map(c => c.name).join(', ');
+          return { statusCode: 200, headers, body: JSON.stringify({
+            status: 'confirm',
+            message: `Multiple contacts match "${lpContactName}": ${names}. Did you mean "${contactMatches[0].name}"?`,
+            suggested: contactMatches[0].name,
+            pending: { ...parsed, contact_name: contactMatches[0].name }
+          })};
+        }
+        patch.contact_id = contactMatches[0].id;
+        entryLabel = `${lpProject.name}: contact → ${contactMatches[0].name}`;
+        responseExtra.contact = { id: contactMatches[0].id, name: contactMatches[0].name };
+      }
+
+      if (lpQuoteNum) {
+        patch.quote_number = lpQuoteNum.toUpperCase();
+        entryLabel = entryLabel
+          ? entryLabel + `, quote → ${patch.quote_number}`
+          : `${lpProject.name}: quote → ${patch.quote_number}`;
+        responseExtra.quote_number = patch.quote_number;
+      }
+
+      await sbPatch('projects', `?id=eq.${encodeURIComponent(lpProject.id)}`, patch);
+      responseExtra.project = lpProject.name;
 
     } else if (parsed.action === 'note' && parsed.type === 'invoice_item') {
       // Write a note to all line items on the given invoice.
