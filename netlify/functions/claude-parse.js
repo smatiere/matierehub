@@ -335,13 +335,16 @@ If you cannot confidently parse the input at all: {"action":"unclear","message":
             });
           }
         }
-        userContent.push({
-          type: 'text',
-          text: (text || 'Parse this receipt/document and extract all expense line items.').trim()
-        });
+        const imageInstruction = text && text !== 'Parse this receipt and log the expense.'
+          ? text.trim()
+          : 'This is a receipt photo. Extract the main expense and output a single ACTION 2 JSON object. Use the total amount shown (convert to ex-GST by dividing by 1.1 if GST is included). Use today\'s date if no date is clearly visible on the receipt.';
+        userContent.push({ type: 'text', text: imageInstruction });
       } else {
         userContent = text.trim();
       }
+
+      // Use Sonnet for image requests (vision-capable); Haiku for text-only
+      const model = hasImages ? 'claude-sonnet-4-6' : 'claude-haiku-4-5-20251001';
 
       const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -351,15 +354,19 @@ If you cannot confidently parse the input at all: {"action":"unclear","message":
           'content-type': 'application/json'
         },
         body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: hasImages ? 600 : 300,
+          model,
+          max_tokens: hasImages ? 800 : 300,
           system: systemPrompt,
           messages: [{ role: 'user', content: userContent }]
         })
       });
 
       const claudeData = await claudeRes.json();
-      if (!claudeRes.ok) throw new Error(`Claude API error: ${claudeData.error?.message || claudeRes.status}`);
+      if (!claudeRes.ok) {
+        const errMsg = claudeData.error?.message || JSON.stringify(claudeData).slice(0, 200);
+        console.error(`Claude API error (${model}):`, errMsg);
+        throw new Error(`Claude API error: ${errMsg}`);
+      }
 
       let rawText = claudeData.content[0].text.trim();
       console.log('INPUT:', text.trim());
