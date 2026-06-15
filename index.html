@@ -2932,7 +2932,7 @@ async function txFetch() {
   const wrap = document.getElementById('tx-table-wrap');
   if (wrap) wrap.innerHTML = '<div style="color:var(--ink-4);padding:20px;text-align:center">Loading…</div>';
 
-  let q = `/rest/v1/bank_transactions?date=gte.${TX.from}&date=lte.${TX.to}&order=date.desc,id.desc&limit=500&select=id,date,type,contact,account_code,account_name,description,reference,gross,tax,net,debit,credit,bank_account,project,notes,expense_log_id`;
+  let q = `/rest/v1/bank_transactions?date=gte.${TX.from}&date=lte.${TX.to}&order=date.desc,id.desc&limit=2000&select=id,date,type,contact,account_code,account_name,description,reference,gross,tax,net,debit,credit,bank_account,project,notes,expense_log_id`;
   if (TX.type !== 'ALL') q += `&type=eq.${TX.type}`;
   if (TX.contact)        q += `&contact=ilike.*${encodeURIComponent(TX.contact)}*`;
   if (TX.account)        q += `&account_name=eq.${encodeURIComponent(TX.account)}`;
