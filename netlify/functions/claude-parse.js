@@ -275,6 +275,25 @@ Examples:
 Only use categories from the VALID CATEGORIES list above. If the user's category doesn't match exactly, pick the closest valid one.
 
 ---
+## ACTION 8 — Tag a bank transaction with project and/or notes
+
+Schema: {"action":"bank_tx_tag","date":"YYYY-MM-DD","contact":"partial name","project":"Exact Project Name or empty","notes":"free text or empty"}
+
+Triggers: "tx [date] [contact] project:", "tag tx", "bank tx", "mark tx", "tx [date] [contact] note:"
+At least one of project or notes must be set. Both can be set together.
+date: resolve same as other actions (today, yesterday, day name, explicit date).
+contact: the payee name (or partial) as it appears in the bank — e.g. "Bunnings", "ATO", "Mariane".
+
+Examples:
+"tx today Bunnings project: Mark"                       → {"action":"bank_tx_tag","date":"${todayStr}","contact":"Bunnings","project":"${exampleProject}","notes":""}
+"tx 2026-06-01 ATO project: Admin note: BAS Q3 payment" → {"action":"bank_tx_tag","date":"2026-06-01","contact":"ATO","project":"Admin","notes":"BAS Q3 payment"}
+"tag tx yesterday plasterer note: subcontractor Rob job" → {"action":"bank_tx_tag","date":"${yesterdayStr}","contact":"plasterer","project":"${exampleProject2}","notes":"subcontractor Rob job"}
+"bank tx 14/06/2026 Bunnings note: wrong screws returned"→ {"action":"bank_tx_tag","date":"2026-06-14","contact":"Bunnings","project":"","notes":"wrong screws returned"}
+
+project: exact name from ACTIVE PROJECTS, or empty string "". Apply same matching rules as ACTION 1.
+notes: free text, or empty string "" if none.
+
+---
 If you cannot confidently parse the input at all: {"action":"unclear","message":"brief plain-english reason"}`;
 
     // ── 3. Call Haiku (skipped if pendingAction already set) ──────────────────
@@ -568,6 +587,73 @@ If you cannot confidently parse the input at all: {"action":"unclear","message":
       await sbPatch('contacts', `?id=eq.${encodeURIComponent(contact.id)}`, { categories: merged });
       entryLabel    = `${contact.name}: categories → ${merged.join(', ')}`;
       responseExtra = { contact: { id: contact.id, name: contact.name, categories: merged } };
+
+    } else if (parsed.action === 'bank_tx_tag') {
+      // Tag bank transactions with project and/or notes.
+      // Matches by date + partial contact name (ilike). Updates ALL matching rows on that date
+      // (e.g. two Bunnings receipts on the same day both get tagged). project/notes are
+      // HUB-only columns — xero-sync.js never touches them, so tags survive all future syncs.
+      const txDate    = parsed.date;
+      const txContact = (parsed.contact || '').trim();
+      const txProject = (parsed.project || '').trim();
+      const txNotes   = (parsed.notes   || '').trim();
+
+      if (!txDate) {
+        return { statusCode: 200, headers, body: JSON.stringify({ status: 'unclear', message: 'Could not determine a date for the bank transaction' }) };
+      }
+      if (!txProject && !txNotes) {
+        return { statusCode: 200, headers, body: JSON.stringify({ status: 'unclear', message: 'Please specify a project, a note, or both' }) };
+      }
+
+      // Build search query — date is required; contact is optional but narrows the match
+      let txQuery = `?date=eq.${txDate}`;
+      if (txContact) txQuery += `&contact=ilike.*${encodeURIComponent(txContact)}*`;
+      txQuery += '&select=id,date,contact,gross,description';
+
+      const matches = await sbGet('bank_transactions', txQuery);
+      if (!matches.length) {
+        return { statusCode: 200, headers, body: JSON.stringify({
+          status: 'unclear',
+          message: `No bank transactions found for ${txDate}${txContact ? ' / ' + txContact : ''} — try a broader date or contact name`
+        })};
+      }
+
+      // Validate project against active projects list if provided
+      let resolvedProject = txProject;
+      if (txProject) {
+        const validProjects = [...projectList, ...NON_BILLABLE];
+        const { match, score } = fuzzyMatchProject(txProject, validProjects);
+        if (score >= 0.75) {
+          resolvedProject = match;
+        } else if (score >= 0.35) {
+          return { statusCode: 200, headers, body: JSON.stringify({
+            status: 'confirm', message: `Did you mean project "${match}"?`,
+            suggested: match,
+            pending: { ...parsed, project: match }
+          })};
+        } else {
+          return { statusCode: 200, headers, body: JSON.stringify({
+            status: 'unclear',
+            message: `I don't recognise "${txProject}" as a project. Active projects: ${projectList.join(', ')}`
+          })};
+        }
+      }
+
+      // Build patch — only include fields the user actually set
+      const patch = {};
+      if (resolvedProject !== '') patch.project = resolvedProject;
+      if (txNotes !== '')         patch.notes   = txNotes;
+
+      // Patch all matching transactions
+      const updatedTx = [];
+      for (const tx of matches) {
+        const result = await sbPatch('bank_transactions', `?id=eq.${encodeURIComponent(tx.id)}`, patch);
+        updatedTx.push(...(Array.isArray(result) ? result : [result]));
+      }
+
+      const tagSummary = [resolvedProject && `project: ${resolvedProject}`, txNotes && `note: "${txNotes}"`].filter(Boolean).join(', ');
+      entryLabel  = `Tagged ${updatedTx.length} transaction${updatedTx.length !== 1 ? 's' : ''} on ${txDate} — ${tagSummary}`;
+      responseExtra = { tagged: matches.map(t => ({ id: t.id, contact: t.contact, gross: t.gross })) };
 
     } else if (parsed.action === 'note' && parsed.type === 'invoice_item') {
       // Write a note to all line items on the given invoice.
