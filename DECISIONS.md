@@ -57,15 +57,16 @@ Why things are built the way they are. Read before suggesting alternatives.
 
 ---
 
-## Xero sync schedule: daily invoice_items + weekly full sync
+## Xero sync schedule: daily relational sync + weekly dashboard sync
 
-**Decision (2026-06-13):** Two Claude scheduled tasks run automatically:
-- **Daily 7am** — `POST xero-sync?scope=invoice_items` only. Fast (~seconds), keeps payment statuses and new invoice line items current.
-- **Weekly Sunday 6am** — Full sync (quotes, invoices, P&L, bank) then invoice_items. Slower (~2–4 min for monthly P&L fetches), refreshes all dashboard KPIs and charts.
+**Decision (2026-06-13, superseded 2026-06-16):** Originally planned as two Claude scheduled tasks. The weekly one never worked — Claude's sandbox proxy blocks outbound calls to `matierehub2.netlify.app` (403 Forbidden), so a Claude-scheduled-task approach for this is a dead end. **Both syncs are now GitHub Actions workflows instead** (GitHub's runners have no such restriction — proven working for the daily workflow since 2026-06-08 and for the weekly one since 2026-06-16):
 
-**Why two tasks instead of one:** The full sync is slow because it fetches one Xero P&L report per calendar month (needed for correct discrete monthly figures — see the "Revenue/costs inflated ~9-10x" fix in BUGS.md). Running that daily would hit Xero's rate limits and add unnecessary latency. The `invoice_items` scope is cheap (one paginated invoice fetch, no P&L calls) and benefits most from daily freshness.
+- **`.github/workflows/xero-sync.yml`** ("Xero Daily Sync") — daily at 21:00 UTC (~7am AEST). Runs `scope=invoice_items`, `scope=contacts`, `scope=bank_transactions` — the three relational tables (`invoice_items`, `contacts`, `bank_transactions`). Fast (~seconds each), keeps payment statuses, new invoices, contact details and the full bank ledger current.
+- **`.github/workflows/xero-weekly-sync.yml`** ("Xero Weekly Dashboard Sync") — weekly, Saturday 20:00 UTC = Sunday 6am AEST (cron `0 20 * * 6`; note day-of-week in cron is UTC, so it's specified as Saturday to land Sunday morning in AEST). Runs `scope=quotes,invoices,pnl,bank` — the dashboard-facing `xero_cache` keys (`kpis`, `monthly`, `quotes`, `open_invoices`, `top_customers`, `fy_summary`, `cost_detail_monthly`, BAS/Super/Owner-Drawings liability buckets). This is the scope the daily workflow does NOT cover.
 
-**Both tasks use bash/curl** to POST to the Netlify endpoint with `Authorization: Bearer <SYNC_SECRET>`. They run as Claude scheduled tasks visible in Cowork → Scheduled sidebar. The first automated run requires pre-approval of the bash tool — click "Run now" once on each task to grant it.
+**Why two workflows instead of one:** The dashboard sync's `pnl` scope is slow — one Xero P&L report per calendar month. A full 47-month re-fetch would risk a Netlify function timeout, so the weekly workflow passes `&from=<1 month ago>&to=<this month>` (computed dynamically each run) to refresh only the trailing 2 months; older months stay as already-cached values (merged, never dropped — see `mergeMonthly` in `xero-sync.js`). Running the full dashboard sync daily would also add unnecessary Xero API load for data (quotes pipeline, P&L) that doesn't change that often.
+
+**Both workflows use the same curl/http-code-check bash pattern** and the same `SYNC_SECRET` GitHub Actions secret. See `BUGS.md` → "Fixed (2026-06-16)" for a YAML pitfall to avoid when editing these: `curl -w "\n%{http_code}"` must stay on one line (literal `\n` escape) — an actual embedded newline breaks the `run: |` block scalar.
 
 ---
 
