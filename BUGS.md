@@ -23,6 +23,16 @@ Format: **[Status]** Description → Fix applied
 
 ---
 
+## Fixed (2026-06-16)
+
+**[FIXED]** `xero-sync.yml` GitHub Actions workflow failing with "Invalid workflow file... error in your yaml syntax on line 15" — 4 failure emails from GitHub
+- **Problem:** Each of the 3 `run: |` blocks used `curl -s -w "\n%{http_code}" ...`, but the `\n` had been written as an actual embedded newline inside the quoted string rather than the two-character escape `\n`. The continuation line (`%{http_code}" -X POST ...`) had zero indentation, which is less than the block scalar's content indentation — YAML treats that as the block scalar ending early, so the next line is parsed as a new (invalid) node at the mapping level.
+- **Fix (commit `164adbd`, 2026-06-16):** Rewrote all 3 curl commands as single lines using the literal two-character `\n` escape inside the `-w` flag (`curl -s -w "\n%{http_code}" ...`), which is the standard idiom — curl itself interprets `\n`/`\r` in `-w` format strings, so this doesn't need an actual newline.
+- **Verified:** Validated locally with `yaml.safe_load`, pushed to `main`, confirmed workflow registration state is `active`, triggered a `workflow_dispatch` run — all 3 steps (invoice_items, contacts, bank_transactions) completed successfully.
+- **Doc correction:** The workflow file is `.github/workflows/xero-sync.yml`, not `xero-daily-sync.yml`/`xero-weekly-sync.yml` as `CLAUDE.md` previously stated — and it already syncs all three scopes (invoice_items, contacts, bank_transactions) daily at 21:00 UTC, not just invoice_items. `CLAUDE.md` updated to match.
+
+---
+
 ## Fixed (2026-06-07)
 
 **[FIXED]** Revenue, costs, gross profit, opex and net profit were inflated ~9-10x across the board (monthly chart AND FY26 KPIs)
