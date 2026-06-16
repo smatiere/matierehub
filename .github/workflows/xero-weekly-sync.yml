@@ -2,7 +2,8 @@ name: Xero Weekly Dashboard Sync
 
 on:
   schedule:
-    - cron: "0 20 * * 6"
+    - cron: "13 20 * * 6"
+    - cron: "58 20 * * 6"
   workflow_dispatch:
 
 jobs:
