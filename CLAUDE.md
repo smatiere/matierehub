@@ -96,8 +96,10 @@ bank_transactions  { id, date, type, contact, contact_id, account_code, account_
 - **Writes to:** `invoice_items` table directly (not `xero_cache`)
 - **Upsert key:** `id` (LineItemID) — safe to re-run; never creates duplicates
 - **Initial load (2026-06-13):** 341 invoices → 720 line items
-- **Automated schedule:** single GitHub Actions workflow `.github/workflows/xero-sync.yml` ("Xero Daily Sync") runs **daily at 21:00 UTC (~7am AEST)** and covers all three scopes back-to-back — `invoice_items`, `contacts`, `bank_transactions`. There is no separate weekly workflow; this one workflow is the full sync.
-  - Fixed 2026-06-16: every run had been failing with an "Invalid workflow file" YAML error (a literal newline inside a `curl -w "..."` string broke the `run: |` block scalar). See `BUGS.md` → "Fixed (2026-06-16)".
+- **Automated schedule — two GitHub Actions workflows:**
+  - **`.github/workflows/xero-sync.yml`** ("Xero Daily Sync") — daily at 21:00 UTC (~7am AEST). Runs `scope=invoice_items`, `scope=contacts`, `scope=bank_transactions` back-to-back — writes the three relational tables.
+  - **`.github/workflows/xero-weekly-sync.yml`** ("Xero Weekly Dashboard Sync") — weekly, Saturday 20:00 UTC = Sunday 6am AEST (cron `0 20 * * 6`). Runs `scope=quotes,invoices,pnl,bank&from=<1mo ago>&to=<this month>` — refreshes the dashboard-facing `xero_cache` keys (`kpis`, `monthly`, `quotes`, `open_invoices`, `top_customers`, `fy_summary`, BAS/Super/Owner-Drawings). The `from`/`to` window is computed dynamically each run (trailing 2 months only) to avoid a Netlify timeout on the slow monthly P&L fetch — older months stay as already-cached values.
+  - Fixed 2026-06-16: the daily workflow had been failing every run with an "Invalid workflow file" YAML error (a literal newline inside a `curl -w "..."` string broke the `run: |` block scalar). See `BUGS.md` → "Fixed (2026-06-16)". Same day, added the weekly workflow — it replaces an earlier Claude-scheduled-task attempt that never worked (sandbox proxy blocks outbound calls to matierehub2.netlify.app).
 - **Manual re-run from Hub console:** `fetch('/.netlify/functions/xero-sync?scope=invoice_items', { method:'POST', headers:{'Authorization':'Bearer matiere2026'} }).then(r=>r.text()).then(console.log)`
 
 ### contacts — column source map
