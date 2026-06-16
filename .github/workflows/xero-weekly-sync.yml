@@ -1,0 +1,32 @@
+name: Xero Weekly Dashboard Sync
+
+on:
+  schedule:
+    - cron: "0 20 * * 6"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compute P&L refresh window (last 2 months)
+        id: daterange
+        run: |
+          FROM=$(date -u -d "1 month ago" +%Y-%m)
+          TO=$(date -u +%Y-%m)
+          echo "Refreshing discrete monthly P&L for $FROM to $TO"
+          echo "from=$FROM" >> "$GITHUB_OUTPUT"
+          echo "to=$TO" >> "$GITHUB_OUTPUT"
+
+      - name: Sync dashboard data (quotes, invoices, P&L, bank liabilities) from Xero
+        run: |
+          response=$(curl -s -w "\n%{http_code}" -X POST "https://matierehub2.netlify.app/.netlify/functions/xero-sync?scope=quotes,invoices,pnl,bank&from=${{ steps.daterange.outputs.from }}&to=${{ steps.daterange.outputs.to }}" -H "Authorization: Bearer ${{ secrets.SYNC_SECRET }}" -H "Content-Type: application/json")
+          http_code=$(echo "$response" | tail -1)
+          body=$(echo "$response" | head -n -1)
+          echo "HTTP status: $http_code"
+          echo "Response: $body"
+          if [ "$http_code" != "200" ]; then
+            echo "dashboard sync failed with HTTP $http_code"
+            exit 1
+          fi
+          echo "dashboard sync completed"
