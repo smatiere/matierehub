@@ -96,9 +96,8 @@ bank_transactions  { id, date, type, contact, contact_id, account_code, account_
 - **Writes to:** `invoice_items` table directly (not `xero_cache`)
 - **Upsert key:** `id` (LineItemID) — safe to re-run; never creates duplicates
 - **Initial load (2026-06-13):** 341 invoices → 720 line items
-- **Automated schedule:**
-  - **Daily 7am AEST** — `scope=invoice_items` via GitHub Actions (`.github/workflows/xero-daily-sync.yml`); refreshes payment statuses and picks up new invoices
-  - **Weekly Sunday 6am AEST** — full sync not yet automated; Claude scheduled task for this was broken (sandbox proxy blocks outbound calls to matierehub2.netlify.app). Needs a GitHub Actions workflow (`.github/workflows/xero-weekly-sync.yml`) — not yet built.
+- **Automated schedule:** single GitHub Actions workflow `.github/workflows/xero-sync.yml` ("Xero Daily Sync") runs **daily at 21:00 UTC (~7am AEST)** and covers all three scopes back-to-back — `invoice_items`, `contacts`, `bank_transactions`. There is no separate weekly workflow; this one workflow is the full sync.
+  - Fixed 2026-06-16: every run had been failing with an "Invalid workflow file" YAML error (a literal newline inside a `curl -w "..."` string broke the `run: |` block scalar). See `BUGS.md` → "Fixed (2026-06-16)".
 - **Manual re-run from Hub console:** `fetch('/.netlify/functions/xero-sync?scope=invoice_items', { method:'POST', headers:{'Authorization':'Bearer matiere2026'} }).then(r=>r.text()).then(console.log)`
 
 ### contacts — column source map
