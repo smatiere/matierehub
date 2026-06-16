@@ -6,12 +6,6 @@ Format: **[Status]** Description → Fix applied
 
 ## Open
 
-**[OPEN]** GitHub Actions `schedule` trigger appears unreliable for the daily Xero sync — cron fires inconsistently, sometimes not at all
-- **Spotted:** 2026-06-16, checking whether the ~7am AEST (21:00 UTC) daily sync ran. No `schedule`-triggered run of `xero-sync.yml` appeared for 2026-06-16 even ~2h41m after the scheduled time. The two most recent confirmed `schedule` runs before that (`2026-06-15T16:24:17Z`, `2026-06-14T08:56:12Z`) don't line up with the cron's `21:00 UTC` value either, and are ~31.5h apart — not the expected ~24h — implying at least one daily firing was silently skipped.
-- **Cron itself is correct:** `.github/workflows/xero-sync.yml` has had `cron: "0 21 * * *"` unchanged since it was created (commit `cbe422a`, 2026-06-13); repo isn't archived/disabled; Actions permissions are `enabled: true`. So this isn't a config mistake — it's GitHub's own scheduler being unreliable for a once-a-day cron (a documented GitHub limitation: low-frequency scheduled workflows can be delayed or dropped during high platform load, with no retry).
-- **Mitigation applied:** Manually triggered `workflow_dispatch` on 2026-06-16 (run `27655578614`) to backfill the missed day — completed successfully, all 3 steps (invoice_items, contacts, bank_transactions) passed.
-- **Not yet fixed:** there's no automated retry/alerting for a silently-skipped cron run. Options if this keeps happening: (a) Seb periodically asks Claude to spot-check "did the daily sync run", (b) add a second, slightly different cron time as a backup trigger, (c) accept it as a known platform limitation and rely on the weekly dashboard sync (`xero-weekly-sync.yml`) plus manual re-runs to catch up. No action taken yet — flagging for Seb's awareness.
-
 **[OPEN]** Removing `NETLIFY_SITE_ID`/`NETLIFY_BLOBS_TOKEN` broke Xero token propagation → "Refresh token has been consumed" on every sync, no matter how many times Xero is reconnected
 - **Reported by Seb:** Cash & Invoices and Profitability tabs went blank/zeroed; a fresh Xero sync was attempted to repair the cache but kept failing with `invalid_grant: Refresh token has been consumed` — even immediately after Seb reconnected Xero (first on the Mac, then again on his iPhone).
 - **Confirmed root cause:** On 2026-06-08, `CLAUDE.md` was updated to say `GITHUB_TOKEN`, `NETLIFY_BLOBS_TOKEN`, `NETLIFY_SITE_ID` and `XERO_REDIRECT_URI` were "removed from Netlify as unused," and the first three were deleted from the Netlify env vars. **`NETLIFY_SITE_ID`/`NETLIFY_BLOBS_TOKEN` were not actually unused.** `netlify/functions/xero-auth.js` (`saveRefreshToken()`, ~line 76) explicitly needs them:
@@ -28,6 +22,17 @@ Format: **[Status]** Description → Fix applied
 - **Lesson learned — verify "unused" before deleting config:** a prior pass flagged `NETLIFY_SITE_ID`/`NETLIFY_BLOBS_TOKEN` as unused and recommended removing them, based on stale/incomplete documentation rather than checking the live code. **Before removing any env var, secret, or config value flagged as "unused," grep the actual codebase (`netlify/functions/*.js` and `index.html`) for every reference to its name** — `process.env.<NAME>` calls can be buried in helper functions (here, inside `saveRefreshToken()`, several layers from the obvious entry points) and easily missed by documentation review alone. A wrong "unused" call here didn't throw a build error or a loud runtime exception — it failed silently behind a `try/catch`, which is exactly the kind of mistake that ages into a confusing, hard-to-trace outage days later.
 
 ---
+
+## Fixed (2026-06-17)
+
+**[FIXED]** GitHub Actions `schedule` trigger unreliable for both Xero sync workflows — cron fires inconsistently, sometimes not at all
+- **Root cause identified:** Both `xero-sync.yml` (`cron: "0 21 * * *"`) and `xero-weekly-sync.yml` (`cron: "0 20 * * 6"`) were scheduled exactly on the hour. GitHub's own docs warn that the `schedule` event is delayed or dropped most often "during periods of high load... at the start of every hour," and recommend scheduling jobs at an off-the-hour minute to reduce that risk. Both workflows were squarely in the highest-congestion slot — every other GitHub Actions cron in the world competing for the same `:00` tick.
+- **Evidence this was the mechanism, not a config error:** the cron value itself was correct and unchanged since creation; repo/Actions weren't disabled; the two confirmed historical `schedule` runs landed nowhere near `21:00 UTC` and were ~31.5h apart instead of ~24h — consistent with GitHub silently delaying/dropping `:00`-aligned runs rather than a broken trigger.
+- **Fix (commits `9ef0721`/`fcb1d82`, 2026-06-17):**
+  1. Moved both crons off the top of the hour: daily primary `7 21 * * *` (~7:07am AEST), weekly primary `13 20 * * 6` (~6:13am AEST Sunday).
+  2. Added a second, independent backup trigger ~45 min after each primary: daily backup `52 21 * * *`, weekly backup `58 20 * * 6`. Both syncs are upsert-based and safe to run twice (see `invoice_items`/`contacts`/`bank_transactions` sync details in `CLAUDE.md`) — a normal day now gets two independent shots at firing instead of one, and even if GitHub drops one, the other almost certainly isn't dropped by the same load spike.
+- **Verified:** both workflow files re-fetched from GitHub post-push — `state: active`, schedule blocks match exactly what was pushed. Job steps themselves were untouched (already verified working via manual `workflow_dispatch` on 2026-06-16), so no fresh dispatch test was needed.
+- **Not eliminated, just made much less likely:** GitHub does not give a 100%-guaranteed schedule SLA even off-hour. If a daily/weekly run is ever missed despite this, the next escalation step (not yet built, no need unless this recurs) would be an external trigger path independent of GitHub's own scheduler — e.g. a free cron-ping service hitting the GitHub Actions dispatch API, or a Claude scheduled task doing the same. Flagging as a future option only; not needed today.
 
 ## Fixed (2026-06-16)
 
