@@ -2,7 +2,8 @@ name: Xero Daily Sync
 
 on:
   schedule:
-    - cron: "0 21 * * *"
+    - cron: "7 21 * * *"
+    - cron: "52 21 * * *"
   workflow_dispatch:
 
 jobs:
