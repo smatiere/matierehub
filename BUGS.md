@@ -23,9 +23,18 @@ Format: **[Status]** Description → Fix applied
 
 ---
 
-## Fixed (2026-06-17)
+## Open (reopened 2026-06-18)
 
-**[FIXED]** GitHub Actions `schedule` trigger unreliable for both Xero sync workflows — cron fires inconsistently, sometimes not at all
+**[OPEN]** GitHub Actions `schedule` trigger still not firing — off-hour+backup cron fix's first eligible day (06-17) had ZERO scheduled runs
+- **Reported by Seb:** Transactions tab hadn't shown 3 new Xero bank transactions since ~12 June.
+- **Diagnosis:** Run history for the daily sync (`295295013`) showed the last run of any kind before this check was a manual `workflow_dispatch` on 2026-06-16T23:43:29Z. The off-hour/backup cron fix (commit `9ef0721`) went live at 2026-06-16T23:55:27Z — well before 06-17's first window — yet neither the primary (21:07 UTC) nor backup (21:52 UTC) trigger produced a run record. This is a complete miss, not a delay, and both independent triggers failing on the same day is a worse outcome than the "much less likely" framing from the 06-17 fix assumed.
+- **Backfilled manually:** triggered `workflow_dispatch` on 2026-06-18T07:30:40Z (run `27743904944`) — succeeded in 40s. Confirmed live: `bank_transactions` row count 1,373→1,679, with the 3 newest rows (Hardware and General $236 on 06-18, Proactive Business Services $568 on 06-16, Mark Shippen INV-0345 payment $9,943 on 06-15) now showing on the Transactions tab.
+- **New escalation option (network-confirmed, not yet built):** `api.github.com` is reachable from Claude's sandbox (confirmed via multiple successful calls this session) — unlike `matierehub2.netlify.app`, which is blocked. A Claude scheduled task hitting `POST /repos/smatiere/matierehub/actions/workflows/{id}/dispatches` directly would not depend on GitHub's own internal `schedule:` event at all, sidestepping this failure mode entirely. Not yet created — needs Seb's go-ahead since it's a new standing trigger. See `project_xero_sync_schedule_reliability` in memory.
+- **Next check:** tonight's window (2026-06-18, 21:07/21:52 UTC) — if it also fires zero runs, that's a strong signal to build the GitHub-dispatch-API fallback rather than waiting longer.
+
+## Partially fixed (2026-06-17)
+
+**[PARTIAL]** GitHub Actions `schedule` trigger unreliable for both Xero sync workflows — cron fires inconsistently, sometimes not at all
 - **Root cause identified:** Both `xero-sync.yml` (`cron: "0 21 * * *"`) and `xero-weekly-sync.yml` (`cron: "0 20 * * 6"`) were scheduled exactly on the hour. GitHub's own docs warn that the `schedule` event is delayed or dropped most often "during periods of high load... at the start of every hour," and recommend scheduling jobs at an off-the-hour minute to reduce that risk. Both workflows were squarely in the highest-congestion slot — every other GitHub Actions cron in the world competing for the same `:00` tick.
 - **Evidence this was the mechanism, not a config error:** the cron value itself was correct and unchanged since creation; repo/Actions weren't disabled; the two confirmed historical `schedule` runs landed nowhere near `21:00 UTC` and were ~31.5h apart instead of ~24h — consistent with GitHub silently delaying/dropping `:00`-aligned runs rather than a broken trigger.
 - **Fix (commits `9ef0721`/`fcb1d82`, 2026-06-17):**
