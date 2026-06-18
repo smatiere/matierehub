@@ -179,6 +179,22 @@ Seb's hourly rate: **$100/hr ex GST**
 
 ---
 
+## External scheduling (cron-job.org) — backstop for GitHub's own scheduler
+
+GitHub Actions' `schedule:` trigger has repeatedly dropped runs even after off-hour + backup-cron tuning (see `BUGS.md` → "Open (reopened 2026-06-18)" and `project_xero_sync_schedule_reliability` in memory) — both the daily and weekly Xero sync workflows have gone a full day with zero scheduled runs.
+
+**Fix:** a free external cron-ping service, **cron-job.org**, running entirely on its own servers — independent of GitHub's internal scheduler AND independent of Seb's laptop/Cowork being open — calls the GitHub Actions dispatch API directly on a schedule:
+
+- Daily job → `POST https://api.github.com/repos/smatiere/matierehub/actions/workflows/295295013/dispatches`
+- Weekly job → `POST https://api.github.com/repos/smatiere/matierehub/actions/workflows/296974339/dispatches`
+- Both: headers `Authorization: token <PAT>`, `Accept: application/vnd.github+json`, `Content-Type: application/json`; body `{"ref":"main"}`
+
+**Auth:** a fine-grained GitHub PAT scoped to ONLY `smatiere/matierehub`, ONLY "Actions: Read and write" — deliberately narrower than the broad PAT Claude uses for code pushes, since a third-party service holds it. **This token's literal value is intentionally never written into this repo** (it's public) — it lives only in Claude's memory (`reference_github_actions_pat`). It's entered directly into Seb's cron-job.org account by Seb himself — Claude does not enter API tokens into third-party services on anyone's behalf.
+
+Runs **alongside** the existing GitHub-internal crons below, not replacing them — both syncs are idempotent upserts, so extra trigger sources just mean more independent chances to fire, with zero risk of duplicate data.
+
+---
+
 ## Environment variables (set in Netlify dashboard)
 
 - `ANTHROPIC_API_KEY` — Claude API key (used by `claude-parse.js` to call Haiku)
