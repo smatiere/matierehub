@@ -1156,7 +1156,7 @@ function renderTimesheet() {
 
     <!-- Treemap -->
     <div class="section">
-      <div class="section-head"><h2>Time Distribution</h2><span class="chart-clickable-hint">click a block for name + hours</span></div>
+      <div class="section-head"><h2>Time Distribution</h2><span class="chart-clickable-hint">click "Not logged" to fill missing days</span></div>
       <div class="section-body" style="padding:12px">
         <div id="ts-treemap" style="min-height:160px;width:100%"></div>
         <div id="ts-treemap-legend" style="display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:12px"></div>
@@ -1756,12 +1756,12 @@ function renderTsTreemap() {
     const showLabel = r.rw > 40 && r.rh > 30;
     const clickAttr = r.isGap
       ? `onclick="tsShowMissing('${ds(from)}','${ds(to)}')" title="Click to see and fill the missing days"`
-      : `onclick="tsTmTip(this,'${r.name.replace(/'/g,"\\'")}',${r.hrs})"`;
+      : '';
     return `<div
       ${clickAttr}
       style="position:absolute;left:${r.rx+gap}px;top:${r.ry+gap}px;
              width:${Math.max(0,r.rw-gap*2)}px;height:${Math.max(0,r.rh-gap*2)}px;
-             background:${r.color};border-radius:5px;cursor:pointer;overflow:hidden;
+             background:${r.color};border-radius:5px;cursor:${r.isGap?'pointer':'default'};overflow:hidden;
              display:flex;flex-direction:column;align-items:center;justify-content:center;
              border:${r.isGap?'1px dashed rgba(255,0,110,0.4)':'none'};
              box-sizing:border-box;padding:4px;text-align:center">
@@ -1776,18 +1776,6 @@ function renderTsTreemap() {
       <span>${i.name} — ${i.hrs.toFixed(0)}h</span>
     </div>`
   ).join('');
-}
-
-function tsTmTip(el, name, hrs) {
-  // Remove existing tips
-  document.querySelectorAll('.ts-tm-tip').forEach(t=>t.remove());
-  const tip = document.createElement('div');
-  tip.className = 'ts-tm-tip';
-  tip.style.cssText = 'position:absolute;top:4px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.85);color:#fff;font-size:11px;padding:4px 10px;border-radius:4px;pointer-events:none;white-space:nowrap;z-index:5;border:1px solid var(--border-2)';
-  tip.textContent = name + ' · ' + hrs.toFixed(0) + 'h';
-  el.style.position = 'relative';
-  el.appendChild(tip);
-  setTimeout(() => tip.remove(), 2500);
 }
 
 // ── Timesheet table ───────────────────────────────────────────────────────────
