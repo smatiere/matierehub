@@ -15,6 +15,24 @@ A single-page business operating system for **Matiere Pty Ltd**, a carpentry and
 
 ---
 
+## Deploying changes — minimise Netlify builds (credits)
+
+Netlify builds **once per push event**, and each build burns credits. Seb watches this closely. So the rule is: **batch many edits locally, deploy once.**
+
+Workflow proven 2026-06-20 (Batches 1–3 = ~13 changes shipped in a single build):
+
+1. **Edit locally only.** The Cowork workspace folder (`/…/MatiereHub`) is a git repo whose `origin/main` = the live/deployed code. Editing files does NOT deploy anything.
+2. **Commit each logical change to the LOCAL git** (free, no deploy). This is the rollback safety net — revert any one change without disturbing others. (Note: the Cowork folder blocks file deletion by default; if git needs to delete a lock file, request delete permission for the folder.)
+3. **Track the batch in `CHANGES_PENDING.md`** — log every requested change before touching code; tick off as built.
+4. **Preview locally** by opening `index.html` in a browser — it reads live Supabase via `SB_URL`, so it shows real data. (Caveat: anything that calls a Netlify **function** — i.e. all `hubWrite` saves — only works on the deployed site, not the local file. UI/layout previews fine.)
+5. **Deploy = ONE push of all batched commits:** `git push <https-with-PAT> master:main` (local branch is `master`, remote is `main`). One push event → one build → many changes live. **Do NOT push file-by-file via the GitHub Contents API** — that's one commit (= one build) per file, defeating the batching. PAT is in memory ([[reference_github_token]]).
+6. **Never push `data.json`** (see BUGS.md race condition) — it's gitignored locally. Only push code files (`index.html`, `netlify/functions/*`, docs).
+7. **Verify live** via Claude-in-Chrome (the sandbox CANNOT reach matierehub2.netlify.app — web_fetch times out). Open the site, check tabs render + console clean, and run a self-reverting `hubWrite` test in the page console to confirm writes persist.
+
+`CHANGES_PENDING.md` holds the current/most-recent batch + a "Shipped" changelog + the rollback command.
+
+---
+
 ## File map
 
 | File | Purpose |
@@ -63,9 +81,8 @@ As of June 2026 the live database is **Supabase** (project URL `https://nwpzjqbl
 ```
 timesheets         { id, date, project, hours, rate, value, employee, notes, created_at }
 expense_log        { id, date, supplier, description, category, project, qty, unit_price, amount, notes, created_at }
-                   ← notes column added 2026-06-20 for the Expenses tab (HUB-only annotation).
-                     SQL: ALTER TABLE expense_log ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT '';
-                     Editable from the Expenses tab via hub-write (project, category, description, notes).
+                   ← notes column ADDED & LIVE 2026-06-20 (ran: ALTER TABLE expense_log ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT '';).
+                     HUB-only annotation. Editable from the Expenses tab via hub-write (project, category, description, notes).
 projects           { id, name, status, quoted, notes, created_at }
 xero_cache         { key, data (JSONB), updated_at }
                    ← key is one of: kpis, monthly, open_invoices, top_customers,
