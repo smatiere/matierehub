@@ -237,6 +237,7 @@ body{padding-bottom:62px}
   <div class="tab" onclick="showTab('quotes',this)">Quotes & Pricing</div>
   <div class="tab" onclick="showTab('log',this)">Activity Log</div>
   <div class="tab" onclick="showTab('transactions',this)">Transactions</div>
+  <div class="tab" onclick="showTab('action',this)">For Action <span id="fa-count" style="display:none;background:var(--orange);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;font-weight:600;margin-left:4px"></span></div>
 </div>
 
 <div class="page active" id="page-overview"></div>
@@ -249,6 +250,7 @@ body{padding-bottom:62px}
 <div class="page" id="page-quotes"></div>
 <div class="page" id="page-log"></div>
 <div class="page" id="page-transactions"></div>
+<div class="page" id="page-action"></div>
 
 <div id="modal-overlay" class="modal-overlay" onclick="if(event.target===this)closeModal()">
   <div class="modal">
@@ -360,6 +362,7 @@ function showTab(name, el) {
   if (name === 'timesheet') renderTimesheet();
   if (name === 'pnl') renderPnL();
   if (name === 'transactions') renderTransactions();
+  if (name === 'action') renderForAction();
   if (name === 'projects' && D) renderProjects(D.kpis);
 }
 
@@ -400,6 +403,7 @@ function renderAll() {
   renderMaterials(k, m);
   renderProjects(k);
   renderLog();
+  renderForAction();   // pre-populates the For Action tab + count badge on load
 }
 
 // ── Overview ──────────────────────────────────────────────────────────────────
@@ -2852,11 +2856,75 @@ async function handleXeroCallback() {
   return true;
 }
 
+// ── Smart Suggest — reusable type-ahead ──────────────────────────────────────
+// Attaches a filtered suggestion dropdown to a text input. The dropdown is
+// position:fixed and appended to <body> so it is never clipped by a scrolling
+// table/overflow container. getItems() returns the candidate string list.
+function smartSuggest(input, getItems, onPick) {
+  if (!input || input.dataset.ssWired) return;
+  input.dataset.ssWired = '1';
+  input.setAttribute('autocomplete', 'off');
+  let box = null;
+  const close = () => { if (box) { box.remove(); box = null; } };
+  const open = () => {
+    const v = (input.value || '').trim().toLowerCase();
+    close();
+    let items = (getItems() || []).filter(Boolean);
+    if (v) items = items.filter(x => x.toLowerCase().includes(v));
+    items = [...new Set(items)].slice(0, 8);
+    if (!items.length) return;
+    box = document.createElement('div');
+    box.style.cssText = 'position:fixed;z-index:99999;background:var(--bg-1);border:1px solid var(--border);border-radius:6px;max-height:230px;overflow:auto;box-shadow:0 6px 22px rgba(0,0,0,.45)';
+    const r = input.getBoundingClientRect();
+    box.style.left = r.left + 'px';
+    box.style.top = (r.bottom + 2) + 'px';
+    box.style.minWidth = r.width + 'px';
+    items.forEach(it => {
+      const o = document.createElement('div');
+      o.textContent = it;
+      o.style.cssText = 'padding:7px 10px;font-size:13px;cursor:pointer;color:var(--ink-2);white-space:nowrap';
+      o.onmouseenter = () => o.style.background = 'var(--bg-2)';
+      o.onmouseleave = () => o.style.background = '';
+      o.onmousedown = e => { e.preventDefault(); input.value = it; close(); if (onPick) onPick(it); };
+      box.appendChild(o);
+    });
+    document.body.appendChild(box);
+  };
+  input.addEventListener('input', open);
+  input.addEventListener('focus', open);
+  input.addEventListener('blur', () => setTimeout(close, 150));
+}
+
+// Cached contact-name list for Smart Suggest (loaded once per session)
+let SS_CONTACTS = null;
+async function ssLoadContacts() {
+  if (SS_CONTACTS) return SS_CONTACTS;
+  try {
+    const rows = await sbGet('/rest/v1/contacts?select=name&order=name.asc');
+    SS_CONTACTS = [...new Set(rows.map(r => r.name).filter(Boolean))];
+  } catch (e) { SS_CONTACTS = []; }
+  return SS_CONTACTS;
+}
+const ssProjectNames = () => (D && D.projects ? D.projects.map(p => p.name).filter(Boolean) : []);
+
+// Escape a value for safe use inside an HTML attribute (value="…")
+function attrEsc(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Format a YYYY-MM-DD (or ISO) string as dd/mm/yyyy
+function fmtDMY(s) {
+  if (!s) return '';
+  const p = String(s).slice(0, 10).split('-');
+  return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : s;
+}
+
 // ── Transactions tab ─────────────────────────────────────────────────────────
 // State persists across tab switches so filters aren't lost when the user navigates away.
 const TX = {
   from: null,   // YYYY-MM-DD
   to:   null,   // YYYY-MM-DD
+  preset: '30d',// 30d | month | 3mo | fy | all | custom
   type: 'ALL',  // ALL | SPEND | RECEIVE
   contact: '',
   account: '',
@@ -2864,12 +2932,21 @@ const TX = {
   loading: false
 };
 
-function txDefaultDates() {
+// Preset → from/to date range. Returns nothing for 'custom' (keeps existing dates).
+function txSetPreset(p) {
+  TX.preset = p;
+  if (p === 'custom') return;
   const today = new Date();
-  TX.to   = today.toISOString().slice(0, 10);
-  const from = new Date(today - 30 * 86400000);
-  TX.from = from.toISOString().slice(0, 10);
+  const iso = d => d.toISOString().slice(0, 10);
+  TX.to = iso(today);
+  if (p === '30d')        TX.from = iso(new Date(today.getTime() - 30 * 86400000));
+  else if (p === 'month') TX.from = iso(new Date(today.getFullYear(), today.getMonth(), 1));
+  else if (p === '3mo')   TX.from = iso(new Date(today.getFullYear(), today.getMonth() - 3, today.getDate()));
+  else if (p === 'fy')  { const y = today.getMonth() >= 6 ? today.getFullYear() : today.getFullYear() - 1; TX.from = `${y}-07-01`; }
+  else if (p === 'all')   TX.from = '2022-01-01';
 }
+
+function txDefaultDates() { txSetPreset('30d'); }
 
 async function renderTransactions() {
   const el = document.getElementById('page-transactions');
@@ -2877,65 +2954,89 @@ async function renderTransactions() {
   if (!TX.from) txDefaultDates();
 
   el.innerHTML = txShell();
+  // Smart Suggest on the contact filter (warms cache, then attaches)
+  ssLoadContacts().then(() => {
+    smartSuggest(document.getElementById('tx-contact'), () => SS_CONTACTS || [], () => txApplyFilters());
+  });
+  await txFetch();
+}
+
+// Capture the current filter-input values into TX before re-rendering the shell
+function txCaptureFilters() {
+  const t = document.getElementById('tx-type');
+  const c = document.getElementById('tx-contact');
+  const a = document.getElementById('tx-account');
+  if (t) TX.type = t.value;
+  if (c) TX.contact = c.value;
+  if (a) TX.account = a.value;
+}
+
+// A preset chip was clicked: keep current filters, switch range, re-render
+async function txChip(p) {
+  txCaptureFilters();
+  txSetPreset(p);
+  TX.rows = null;
+  await renderTransactions();
+}
+
+// Apply a custom date range from the two custom inputs
+async function txApplyCustom() {
+  txCaptureFilters();
+  TX.from = document.getElementById('tx-from')?.value || TX.from;
+  TX.to   = document.getElementById('tx-to')?.value   || TX.to;
+  TX.preset = 'custom';
+  TX.rows = null;
   await txFetch();
 }
 
 function txShell() {
   const accs = D.account_categories ? [...new Set(Object.keys(D.account_categories))].sort() : [];
   const accOptions = accs.map(a => `<option value="${a}"${TX.account===a?' selected':''}>${a}</option>`).join('');
+  const presets = [
+    ['30d', 'Last 30 days'], ['month', 'This month'], ['3mo', 'Last 3 mo'],
+    ['fy', 'This FY'], ['all', 'All']
+  ];
+  const chip = (p, label) => {
+    const on = TX.preset === p;
+    return `<button onclick="txChip('${p}')" style="padding:6px 12px;font-size:13px;border-radius:6px;cursor:pointer;border:1px solid ${on?'var(--sage)':'var(--border)'};background:${on?'var(--sage)':'var(--bg-1)'};color:${on?'#fff':'var(--ink-2)'};font-weight:${on?'600':'400'}">${label}</button>`;
+  };
+  const customOn = TX.preset === 'custom';
   return `
   <div style="padding:20px">
-    <h2 style="margin:0 0 16px;font-size:18px;font-weight:600">Bank Transactions</h2>
-
     <!-- Filter bar -->
-    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:18px;padding:14px;background:var(--bg-2);border-radius:10px">
-      <div>
-        <div style="font-size:11px;color:var(--ink-4);margin-bottom:4px">From</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:18px;padding:14px;background:var(--bg-2);border-radius:10px">
+      ${presets.map(([p, l]) => chip(p, l)).join('')}
+      ${chip('custom', '<i style="font-style:normal">📅</i> Custom')}
+      <div id="tx-custom" style="display:${customOn?'flex':'none'};gap:6px;align-items:center;margin-left:4px">
         <input type="date" id="tx-from" value="${TX.from}" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:13px">
-      </div>
-      <div>
-        <div style="font-size:11px;color:var(--ink-4);margin-bottom:4px">To</div>
+        <span style="color:var(--ink-4)">→</span>
         <input type="date" id="tx-to" value="${TX.to}" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:13px">
+        <button onclick="txApplyCustom()" style="padding:6px 12px;background:var(--sage);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600">Apply</button>
       </div>
-      <div>
-        <div style="font-size:11px;color:var(--ink-4);margin-bottom:4px">Type</div>
-        <select id="tx-type" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:13px">
-          <option value="ALL"${TX.type==='ALL'?' selected':''}>All</option>
-          <option value="SPEND"${TX.type==='SPEND'?' selected':''}>Spend (out)</option>
-          <option value="RECEIVE"${TX.type==='RECEIVE'?' selected':''}>Receive (in)</option>
-        </select>
-      </div>
-      <div>
-        <div style="font-size:11px;color:var(--ink-4);margin-bottom:4px">Contact</div>
-        <input type="text" id="tx-contact" value="${TX.contact}" placeholder="e.g. Bunnings" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:13px;width:140px">
-      </div>
-      <div>
-        <div style="font-size:11px;color:var(--ink-4);margin-bottom:4px">Account</div>
-        <select id="tx-account" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:13px;max-width:180px">
-          <option value="">All accounts</option>
-          ${accOptions}
-        </select>
-      </div>
-      <button onclick="txApplyFilters()" style="padding:7px 16px;background:var(--sage);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;align-self:flex-end">Refresh</button>
+      <span style="width:1px;height:24px;background:var(--border);margin:0 4px"></span>
+      <select id="tx-type" onchange="txApplyFilters()" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:13px">
+        <option value="ALL"${TX.type==='ALL'?' selected':''}>All types</option>
+        <option value="SPEND"${TX.type==='SPEND'?' selected':''}>Spend (out)</option>
+        <option value="RECEIVE"${TX.type==='RECEIVE'?' selected':''}>Receive (in)</option>
+      </select>
+      <input type="text" id="tx-contact" value="${attrEsc(TX.contact)}" placeholder="Contact…" onkeydown="if(event.key==='Enter')txApplyFilters()" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:13px;width:150px">
+      <select id="tx-account" onchange="txApplyFilters()" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:13px;max-width:180px">
+        <option value="">All accounts</option>
+        ${accOptions}
+      </select>
+      <button onclick="txApplyFilters()" style="padding:6px 14px;background:var(--bg-1);color:var(--ink-2);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:13px">Refresh</button>
     </div>
 
     <!-- Results -->
     <div id="tx-table-wrap" style="overflow-x:auto">
       <div style="color:var(--ink-4);padding:20px;text-align:center">Loading…</div>
     </div>
-
-    <!-- Expense match review -->
-    <div id="tx-match-wrap" style="margin-top:28px"></div>
   </div>`;
 }
 
 async function txApplyFilters() {
-  TX.from    = document.getElementById('tx-from')?.value    || TX.from;
-  TX.to      = document.getElementById('tx-to')?.value      || TX.to;
-  TX.type    = document.getElementById('tx-type')?.value    || TX.type;
-  TX.contact = document.getElementById('tx-contact')?.value || '';
-  TX.account = document.getElementById('tx-account')?.value || '';
-  TX.rows    = null;
+  txCaptureFilters();   // date range is owned by the chips / custom range, not here
+  TX.rows = null;
   await txFetch();
 }
 
@@ -2966,7 +3067,6 @@ async function txFetch() {
     }
     TX.rows = all;
     txRenderTable();
-    await txRenderMatches();
   } catch(e) {
     if (wrap) wrap.innerHTML = `<div style="color:var(--pink);padding:20px">Error: ${e.message}</div>`;
   }
@@ -3008,84 +3108,186 @@ function txRenderTable() {
       <tbody>
         ${rows.map((r, i) => `
           <tr style="border-top:1px solid var(--border);background:${i%2===0?'var(--bg-1)':'var(--bg-2)'}${r.expense_log_id?' border-left:3px solid var(--sage)':''}">
-            <td style="padding:7px 10px;white-space:nowrap;color:var(--ink-3)">${r.date||''}</td>
+            <td style="padding:7px 10px;white-space:nowrap;color:var(--ink-3)">${fmtDMY(r.date)}</td>
             <td style="padding:7px 10px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.contact||'—'}</td>
             <td style="padding:7px 10px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-3)">${r.account_name||r.account_code||'—'}</td>
             <td style="padding:7px 10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-4)">${r.description||''}</td>
             <td style="padding:7px 10px;color:var(--ink-4)">${r.reference||''}</td>
             <td style="padding:7px 10px;text-align:right;color:var(--pink);font-weight:${r.debit?'600':'400'}">${r.debit?fmt(r.debit):'—'}</td>
             <td style="padding:7px 10px;text-align:right;color:var(--sage);font-weight:${r.credit?'600':'400'}">${r.credit?fmt(r.credit):'—'}</td>
-            <td style="padding:7px 10px;color:var(--ink-3);font-size:11px">${r.project||''}</td>
-            <td style="padding:7px 10px;color:var(--ink-4);font-size:11px">${r.notes||''}</td>
+            <td style="padding:5px 6px"><input class="tx-cell" data-id="${attrEsc(r.id)}" data-field="project" value="${attrEsc(r.project||'')}" placeholder="—" style="width:110px;padding:4px 6px;border:1px solid transparent;border-radius:5px;background:transparent;color:var(--ink-3);font-size:11px"></td>
+            <td style="padding:5px 6px"><input class="tx-cell" data-id="${attrEsc(r.id)}" data-field="notes" value="${attrEsc(r.notes||'')}" placeholder="—" style="width:150px;padding:4px 6px;border:1px solid transparent;border-radius:5px;background:transparent;color:var(--ink-4);font-size:11px"></td>
           </tr>`).join('')}
       </tbody>
     </table>`;
+
+  // Wire inline-editable Project / Notes cells
+  wrap.querySelectorAll('input.tx-cell').forEach(inp => {
+    const focusStyle = () => { inp.style.border = '1px solid var(--border)'; inp.style.background = 'var(--bg-1)'; };
+    const blurStyle  = () => { inp.style.border = '1px solid transparent'; inp.style.background = 'transparent'; };
+    inp.addEventListener('focus', focusStyle);
+    inp.addEventListener('blur', blurStyle);
+    inp.addEventListener('change', () => txSaveCell(inp));
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); });
+    if (inp.dataset.field === 'project') {
+      smartSuggest(inp, ssProjectNames, () => txSaveCell(inp));
+    }
+  });
 }
 
-// ── Expense auto-match ────────────────────────────────────────────────────────
-// For each expense_log entry in the current window, look for unlinked bank_transactions
-// that are: same date ±1 day AND gross ≈ expense.amount × 1.1 (within $0.55 tolerance).
-// Potential matches are shown for manual review with a Link button.
-
-async function txRenderMatches() {
-  const wrap = document.getElementById('tx-match-wrap');
-  if (!wrap || !TX.rows) return;
-
-  // Fetch expense_log entries for the same date window
-  let exps = [];
+// Save an inline Project/Notes edit straight to bank_transactions
+async function txSaveCell(inp) {
+  const id = inp.dataset.id, field = inp.dataset.field, value = inp.value.trim();
+  const row = (TX.rows || []).find(r => String(r.id) === String(id));
+  if (row && (row[field] || '') === value) return;   // no change
   try {
-    exps = await sbGet(`/rest/v1/expense_log?date=gte.${TX.from}&date=lte.${TX.to}&select=id,date,supplier,description,amount&order=date.desc`);
-  } catch(e) { wrap.innerHTML = ''; return; }
+    await sbPatch('bank_transactions', `?id=eq.${encodeURIComponent(id)}`, { [field]: value });
+    if (row) row[field] = value;
+    inp.style.outline = '2px solid var(--sage)';
+    setTimeout(() => { inp.style.outline = 'none'; }, 700);
+  } catch (e) {
+    inp.style.outline = '2px solid var(--pink)';
+    alert('Could not save: ' + e.message);
+  }
+}
 
-  // Find unlinked bank_transactions (no expense_log_id yet)
-  const unlinked = TX.rows.filter(t => !t.expense_log_id && t.type === 'SPEND');
+// ── For Action tab ────────────────────────────────────────────────────────────
+// A single place that collects everything needing review. Each section is a
+// self-contained block returning { html, count } so new review types drop in here.
+const FA = { window_days: 120 };
 
+function faSection(title, count, bodyHtml, accent) {
+  const c = accent || 'var(--orange)';
+  return `
+    <div style="margin-bottom:26px">
+      <h3 style="font-size:14px;font-weight:600;margin:0 0 12px;display:flex;align-items:center;gap:8px">
+        ${title}
+        <span style="background:${count?c:'var(--border)'};color:${count?'#fff':'var(--ink-4)'};border-radius:10px;padding:1px 8px;font-size:11px;font-weight:600">${count}</span>
+      </h3>
+      ${count ? bodyHtml : `<div style="font-size:12px;color:var(--ink-4)">✓ Nothing to review.</div>`}
+    </div>`;
+}
+
+async function renderForAction() {
+  const el = document.getElementById('page-action');
+  if (!el) return;
+  el.innerHTML = `<div style="padding:20px"><div style="color:var(--ink-4);padding:20px;text-align:center">Loading review items…</div></div>`;
+
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const iso = d => d.toISOString().slice(0, 10);
+  const from = iso(new Date(today.getTime() - FA.window_days * 86400000));
+  const to   = iso(today);
+
+  // Fetch in parallel
+  let exps = [], spend = [], contacts = [];
+  try {
+    [exps, spend, contacts] = await Promise.all([
+      sbGet(`/rest/v1/expense_log?date=gte.${from}&date=lte.${to}&select=id,date,supplier,description,amount&order=date.desc`),
+      sbGet(`/rest/v1/bank_transactions?type=eq.SPEND&date=gte.${from}&date=lte.${to}&select=id,date,contact,description,gross,account_name,project,expense_log_id&order=date.desc`),
+      sbGet(`/rest/v1/contacts?select=id,name,categories,rating,is_supplier,is_customer&order=name.asc`)
+    ]);
+  } catch (e) {
+    el.innerHTML = `<div style="padding:20px;color:var(--pink)">Could not load review items: ${e.message}</div>`;
+    return;
+  }
+
+  // 1 — Expense matches (logged expense ≈ an unlinked bank SPEND, ±1 day, gross ≈ amount×1.1)
+  const unlinked = spend.filter(t => !t.expense_log_id);
   const matches = [];
   for (const exp of exps) {
     const targetGross = Math.round(exp.amount * 1.1 * 100) / 100;
     const expMs = new Date(exp.date).getTime();
-    const candidates = unlinked.filter(t => {
-      const dayDiff  = Math.abs(new Date(t.date).getTime() - expMs) / 86400000;
-      const grossDiff = Math.abs((t.gross||0) - targetGross);
-      return dayDiff <= 1 && grossDiff <= 0.55;
-    });
-    if (candidates.length) matches.push({ exp, candidates });
+    const cands = unlinked.filter(t => Math.abs(new Date(t.date).getTime() - expMs) / 86400000 <= 1 && Math.abs((t.gross || 0) - targetGross) <= 0.55);
+    if (cands.length) matches.push({ exp, candidates: cands });
   }
+  const matchHtml = `<div style="display:flex;flex-direction:column;gap:10px">
+    ${matches.map(({ exp, candidates }) => `
+      <div style="background:var(--bg-2);border-radius:8px;padding:12px 14px;border-left:3px solid var(--orange)">
+        <div style="font-size:12px;color:var(--ink-3);margin-bottom:8px">
+          <strong>Expense logged:</strong> ${fmtDMY(exp.date)} · ${exp.supplier || '(no supplier)'} · ${exp.description || ''} · ${fmt(exp.amount)} ex GST
+          <span style="color:var(--ink-4)">(≈ ${fmt(exp.amount * 1.1)} incl GST)</span>
+        </div>
+        ${candidates.map(t => `
+          <div style="display:flex;align-items:center;gap:12px;padding:7px 10px;background:var(--bg-1);border-radius:6px;margin-bottom:6px;font-size:12px">
+            <span style="color:var(--ink-3);white-space:nowrap">${fmtDMY(t.date)}</span>
+            <span style="color:var(--ink-2)">${t.contact || '—'}</span>
+            <span style="color:var(--ink-4);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.description || ''}</span>
+            <span style="color:var(--pink);font-weight:600;white-space:nowrap">${fmt(t.gross)}</span>
+            <button onclick="faLink('${attrEsc(t.id)}',${exp.id})" style="padding:4px 10px;background:var(--sage);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:11px;font-weight:600;white-space:nowrap">Link ✓</button>
+          </div>`).join('')}
+      </div>`).join('')}
+  </div>`;
 
-  if (!matches.length) {
-    wrap.innerHTML = `<div style="font-size:12px;color:var(--ink-4);margin-top:4px">✓ No unmatched expenses found in this date window.</div>`;
-    return;
-  }
+  // 2 — Overdue invoices (open invoices aged > 30 days)
+  const overdue = (D.open_invoices || []).map(inv => {
+    const age = Math.floor((today - new Date(inv.date + 'T00:00:00')) / 86400000);
+    return { ...inv, age };
+  }).filter(inv => inv.age > 30).sort((a, b) => b.age - a.age);
+  const overdueHtml = `<table style="width:100%;border-collapse:collapse;font-size:12px">
+    <thead><tr style="background:var(--bg-2);text-align:left">
+      <th style="padding:7px 10px;font-weight:600">Invoice</th><th style="padding:7px 10px;font-weight:600">Client</th>
+      <th style="padding:7px 10px;font-weight:600">Date</th><th style="padding:7px 10px;font-weight:600;text-align:right">Amount</th>
+      <th style="padding:7px 10px;font-weight:600;text-align:right">Age</th></tr></thead>
+    <tbody>${overdue.map(inv => `
+      <tr style="border-top:1px solid var(--border)">
+        <td style="padding:7px 10px">${inv.invoice || ''}</td>
+        <td style="padding:7px 10px">${inv.contact || ''}</td>
+        <td style="padding:7px 10px;color:var(--ink-3)">${fmtDMY(inv.date)}</td>
+        <td style="padding:7px 10px;text-align:right">${fmt(inv.amount)}</td>
+        <td style="padding:7px 10px;text-align:right;color:${inv.age > 60 ? 'var(--pink)' : 'var(--orange)'};font-weight:600">${inv.age}d</td>
+      </tr>`).join('')}</tbody></table>`;
 
-  wrap.innerHTML = `
-    <h3 style="font-size:14px;font-weight:600;margin:0 0 12px">Expense Match Review <span style="font-weight:400;color:var(--ink-4);font-size:12px">(${matches.length} potential match${matches.length===1?'':'es'})</span></h3>
-    <div style="display:flex;flex-direction:column;gap:10px">
-      ${matches.map(({exp, candidates}) => `
-        <div style="background:var(--bg-2);border-radius:8px;padding:12px 14px;border-left:3px solid var(--orange)">
-          <div style="font-size:12px;color:var(--ink-3);margin-bottom:8px">
-            <strong>Expense logged:</strong> ${exp.date} · ${exp.supplier||'(no supplier)'} · ${exp.description} · ${fmt(exp.amount)} ex GST
-            <span style="color:var(--ink-4)">(≈ ${fmt(exp.amount*1.1)} incl GST)</span>
-          </div>
-          ${candidates.map(t => `
-            <div style="display:flex;align-items:center;gap:12px;padding:7px 10px;background:var(--bg-1);border-radius:6px;margin-bottom:6px;font-size:12px">
-              <span style="color:var(--ink-3);white-space:nowrap">${t.date}</span>
-              <span style="color:var(--ink-2)">${t.contact||'—'}</span>
-              <span style="color:var(--ink-4);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.description||''}</span>
-              <span style="color:var(--pink);font-weight:600;white-space:nowrap">${fmt(t.gross)}</span>
-              <button onclick="txLinkExpense('${t.id}',${exp.id})" style="padding:4px 10px;background:var(--sage);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:11px;font-weight:600;white-space:nowrap">Link ✓</button>
-            </div>`).join('')}
-        </div>`).join('')}
+  // 3 — Uncategorised transactions (recent SPEND with no account category AND no project)
+  const uncat = spend.filter(t => !((t.account_name || '').trim()) && !((t.project || '').trim()));
+  const uncatHtml = `<table style="width:100%;border-collapse:collapse;font-size:12px">
+    <thead><tr style="background:var(--bg-2);text-align:left">
+      <th style="padding:7px 10px;font-weight:600">Date</th><th style="padding:7px 10px;font-weight:600">Contact</th>
+      <th style="padding:7px 10px;font-weight:600">Description</th><th style="padding:7px 10px;font-weight:600;text-align:right">Amount</th></tr></thead>
+    <tbody>${uncat.slice(0, 50).map(t => `
+      <tr style="border-top:1px solid var(--border)">
+        <td style="padding:7px 10px;color:var(--ink-3);white-space:nowrap">${fmtDMY(t.date)}</td>
+        <td style="padding:7px 10px">${t.contact || '—'}</td>
+        <td style="padding:7px 10px;color:var(--ink-4);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.description || ''}</td>
+        <td style="padding:7px 10px;text-align:right;color:var(--pink)">${fmt(t.gross)}</td>
+      </tr>`).join('')}</tbody></table>
+    ${uncat.length > 50 ? `<div style="font-size:11px;color:var(--ink-4);margin-top:8px">Showing first 50 of ${uncat.length}.</div>` : ''}`;
+
+  // 4 — Untagged contacts (no category AND no rating)
+  const untagged = contacts.filter(c => (!c.categories || !c.categories.length) && (c.rating == null));
+  const untaggedHtml = `<div style="display:flex;flex-wrap:wrap;gap:6px">
+    ${untagged.slice(0, 60).map(c => `<span style="font-size:12px;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;padding:4px 10px;color:var(--ink-3)">${c.name}${c.is_supplier ? ' <span style="color:var(--ink-4);font-size:10px">supplier</span>' : ''}</span>`).join('')}
+  </div>${untagged.length > 60 ? `<div style="font-size:11px;color:var(--ink-4);margin-top:8px">Showing first 60 of ${untagged.length}.</div>` : ''}`;
+
+  const total = matches.length + overdue.length + uncat.length + untagged.length;
+  el.innerHTML = `
+    <div style="padding:20px">
+      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:20px">
+        <h2 style="margin:0;font-size:18px;font-weight:600">For Action</h2>
+        <span style="font-size:12px;color:var(--ink-4)">${total} item${total === 1 ? '' : 's'} to review · last ${FA.window_days} days</span>
+      </div>
+      ${faSection('Expense matches', matches.length, matchHtml, 'var(--orange)')}
+      ${faSection('Overdue invoices', overdue.length, overdueHtml, 'var(--pink)')}
+      ${faSection('Uncategorised transactions', uncat.length, uncatHtml, 'var(--amber)')}
+      ${faSection('Untagged contacts', untagged.length, untaggedHtml, 'var(--blue)')}
     </div>`;
+
+  faUpdateBadge(total);
 }
 
-async function txLinkExpense(bankTxId, expenseLogId) {
+// Update the nav-tab count badge
+function faUpdateBadge(n) {
+  const b = document.getElementById('fa-count');
+  if (!b) return;
+  if (n > 0) { b.textContent = n; b.style.display = 'inline-block'; }
+  else { b.style.display = 'none'; }
+}
+
+// Link a bank transaction to a logged expense, then refresh For Action
+async function faLink(bankTxId, expenseLogId) {
   try {
     await sbPatch('bank_transactions', `?id=eq.${encodeURIComponent(bankTxId)}`, { expense_log_id: expenseLogId });
-    // Refresh the matches display without re-fetching everything
-    TX.rows = TX.rows.map(r => r.id === bankTxId ? { ...r, expense_log_id: expenseLogId } : r);
-    txRenderTable();
-    await txRenderMatches();
-  } catch(e) {
+    await renderForAction();
+  } catch (e) {
     alert('Could not link: ' + e.message);
   }
 }
