@@ -1,0 +1,10 @@
+# Local-only files — never part of the deployable repo
+*.xlsx
+*.png
+data.json
+data_template.json
+gh_payload*.json
+gh_bugs_payload.json
+gh_sync_payload.json
+build_xero_audit.py
+push_data.sh
