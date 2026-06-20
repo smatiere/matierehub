@@ -165,6 +165,9 @@ tr:hover td{background:var(--bg-3)}
 .ts-day-num{font-size:10px;font-weight:700;color:var(--ink-3);z-index:1;position:relative;line-height:1}
 .ts-day-label{font-size:8px;color:var(--ink-4);z-index:1;position:relative;margin-top:1px;letter-spacing:.04em}
 .ts-miss-dot{width:8px;height:8px;border-radius:50%;background:var(--pink);position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);opacity:.85}
+.ts-cell-incomplete{border-color:rgba(255,190,11,.55) !important}
+.ts-incomplete-dot{width:6px;height:6px;border-radius:50%;background:var(--amber);position:absolute;top:4px;right:4px;z-index:3;box-shadow:0 0 5px rgba(255,190,11,.7)}
+.ts-ph-label{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:13px;font-weight:700;letter-spacing:.06em;color:var(--blue);z-index:2}
 .ts-bar-fill{position:absolute;bottom:0;left:0;right:0;display:flex;flex-direction:column-reverse}
 .ts-bar-seg{width:100%;flex-shrink:0}
 .ts-popup-overlay{display:none;position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.4)}
@@ -1007,10 +1010,18 @@ const NSW_HOLIDAYS = {
   '2026-10-05':'LAB','2026-12-25':'CHR','2026-12-28':'BOX',
 };
 
-// 5 brand colours for active projects (cycles if more than 5)
-const PROJ_PALETTE = ['#FFBE0B','#3A86FF','#05C46B','#8338EC','#FB5607'];
+// 10 neon colours for active projects (cycles if more than 10)
+const PROJ_PALETTE = ['#FF0080','#FF3300','#FF6B00','#FFE600','#00FF41','#00FFCC','#00C8FF','#3D00FF','#CC00FF','#FF00FF'];
 const PROJ_NB_COLOR = '#383838';   // non-billable grey
 let PROJECT_COLOR_MAP = {};
+
+// Pick black or white text for readability on a given background hex
+function textOn(hex) {
+  const h = String(hex || '').replace('#', '');
+  if (h.length < 6) return '#000';
+  const r = parseInt(h.slice(0,2),16), g = parseInt(h.slice(2,4),16), b = parseInt(h.slice(4,6),16);
+  return (0.299*r + 0.587*g + 0.114*b) / 255 > 0.6 ? '#000' : '#fff';
+}
 
 let tsPlayer     = 'Seb';
 let tsCalMonth   = new Date();
@@ -1110,11 +1121,14 @@ function renderTimesheet() {
   document.getElementById('page-timesheet').innerHTML = `
     <!-- KPIs -->
     <div class="kpi-grid">
-      ${kpi('Missing Days', missingDays, 'Past 2 weeks · need input', missingDays>0?'warn':'good')}
+      <div class="kpi ${missingDays>0?'warn':'good'}" style="cursor:pointer" onclick="tsShowMissing('${ds(twoWeeksAgo)}','${ds(today)}')" title="Click to see and fill the missing days">
+        <div class="kpi-label">Missing Days</div>
+        <div class="kpi-value">${missingDays}</div>
+        <div class="kpi-sub">Past 2 weeks · click to fill →</div>
+      </div>
       ${kpiBar('How Busy', busyPct.toFixed(0)+'%', loggedHrs.toFixed(0)+'h logged of '+availHrs+'h available', busyPct, 'highlight')}
       ${kpiBar('Non-Billable', nbHrs.toFixed(0)+'h', 'Admin, office, sick…', nbPct, '')}
-      ${kpi('Holidays', holidayD.toFixed(1)+'d', 'Rolling 12 months', '')}
-      ${kpi('Sick Days', sickD.toFixed(1)+'d', 'Rolling 12 months', '')}
+      ${kpi('Leave', holidayD.toFixed(1)+' / '+sickD.toFixed(1)+'d', 'Holidays / Sick · 12 mo', '')}
     </div>
 
     <!-- Player filter -->
@@ -1223,10 +1237,10 @@ function renderTsCalendar() {
     if (isGrey && entries.length === 0) {
       const cls   = 'ts-cell ts-cell-grey' + (offDayClickable ? ' clickable' : '');
       const click = offDayClickable ? ` onclick="tsDayClick('${dStr}',event)"` : '';
-      const tip   = offDayClickable ? `No hours logged — click to add (${isHol ? 'holiday' : 'weekend'})` : dStr;
+      const tip   = offDayClickable ? `No hours logged — click to add (${isHol ? 'holiday' : 'weekend'})` : (hlabel ? `${dStr} · public holiday` : dStr);
       html += `<div class="${cls}"${click} title="${tip}">
         <span class="ts-day-num" style="color:var(--ink-4)">${d}</span>
-        ${hlabel ? `<span class="ts-day-label">${hlabel}</span>` : ''}
+        ${hlabel ? `<span class="ts-ph-label">${hlabel}</span>` : ''}
       </div>`;
       continue;
     }
@@ -1250,11 +1264,15 @@ function renderTsCalendar() {
         const col  = PROJECT_COLOR_MAP[e.project] || '#555';
         segsHtml += `<div class="ts-bar-seg" style="height:${segH.toFixed(1)}%;background:${col};opacity:.85"></div>`;
       });
+      const isPartial = isPast && !isOffDay && totalH < 8;
       const borderStyle = isOver
         ? `2px solid ${PROJECT_COLOR_MAP[sorted[0].project]||'var(--amber)'}`
-        : '1px solid var(--border)';
-      html += `<div class="ts-cell clickable" style="border:${borderStyle}" onclick="tsDayClick('${dStr}',event)" title="${totalH}h logged">
+        : (isPartial ? '1px solid rgba(255,190,11,.55)' : '1px solid var(--border)');
+      const cellCls = 'ts-cell clickable' + (isPartial ? ' ts-cell-incomplete' : '');
+      const tip = isPartial ? `${totalH}h logged — under 8h, click to complete` : `${totalH}h logged`;
+      html += `<div class="${cellCls}" style="border:${borderStyle}" onclick="tsDayClick('${dStr}',event)" title="${tip}">
         <span class="ts-day-num" style="position:relative;z-index:2">${d}</span>
+        ${isPartial ? '<div class="ts-incomplete-dot"></div>' : ''}
         <div class="ts-bar-fill" style="position:absolute;bottom:0;left:0;right:0;display:flex;flex-direction:column-reverse;height:100%">${segsHtml}</div>
       </div>`;
       continue;
@@ -1327,6 +1345,47 @@ function tsDayClick(dStr, ev) {
 
 function tsDismissPopup() {
   document.getElementById('ts-popup-overlay').style.display = 'none';
+}
+
+// Show a clickable list of past workdays under 8h in [fromStr, toStr); clicking a
+// day opens that day's add-entry popup. Used by the Missing Days KPI and the
+// "Not logged" treemap block so the user jumps straight to filling the gaps.
+function tsShowMissing(fromStr, toStr) {
+  const playerTs = (D.timesheets||[]).filter(t => (t.employee||'Seb')===tsPlayer);
+  const today = todayMidnight();
+  const from = new Date(fromStr + 'T00:00:00');
+  const to   = new Date(toStr + 'T00:00:00');
+  const miss = [];
+  for (let d=new Date(from); d<to && d<today; d.setDate(d.getDate()+1)) {
+    if (!isWorkday(d)) continue;
+    const dStr = ds(d);
+    const h = playerTs.filter(t=>t.date===dStr).reduce((a,t)=>a+(t.hours||0),0);
+    if (h < 8) miss.push({ dStr, h });
+  }
+  miss.reverse();   // most recent first
+
+  const rows = miss.length ? miss.map(m => {
+    const label = new Date(m.dStr+'T00:00:00').toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short'});
+    const tag = m.h===0
+      ? '<span style="color:var(--pink);font-weight:700">0h</span>'
+      : `<span style="color:var(--amber);font-weight:700">${m.h}h / 8h</span>`;
+    return `<div onclick="tsDayClick('${m.dStr}')" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer;background:var(--bg-3);margin-bottom:5px;font-size:12px" onmouseover="this.style.background='var(--bg-1)'" onmouseout="this.style.background='var(--bg-3)'">
+      <span style="flex:1;color:var(--ink-2)">${label}</span>${tag}
+      <span style="color:var(--ink-4);font-size:11px">fill →</span>
+    </div>`;
+  }).join('') : `<div style="color:var(--sage);font-size:12px;padding:8px 4px">✓ All workdays in this window are fully logged.</div>`;
+
+  const popup = document.getElementById('ts-popup');
+  popup.innerHTML = `
+    <div style="padding:12px 14px;border-bottom:1px solid var(--border)">
+      <div style="font-size:13px;font-weight:700;color:var(--ink)">Missing entries</div>
+      <div style="font-size:11px;color:var(--ink-4);margin-top:2px">${miss.length} day${miss.length===1?'':'s'} under 8h · click one to fill it</div>
+    </div>
+    <div style="padding:12px 14px;max-height:340px;overflow:auto">${rows}</div>`;
+  popup.style.top = '50%';
+  popup.style.left = '50%';
+  popup.style.transform = 'translate(-50%, -50%)';
+  document.getElementById('ts-popup-overlay').style.display = 'block';
 }
 
 // ── Claude bar — text + attachments → Netlify function → Supabase ────────────
@@ -1693,10 +1752,13 @@ function renderTsTreemap() {
   tmEl.style.cssText = 'position:relative;height:' + H + 'px';
   tmEl.innerHTML = rects.map(r => {
     const gap = 2;
-    const textColor = r.isGap ? '#FF006E' : 'rgba(0,0,0,0.85)';
+    const textColor = r.isGap ? '#FF006E' : textOn(r.color);
     const showLabel = r.rw > 40 && r.rh > 30;
+    const clickAttr = r.isGap
+      ? `onclick="tsShowMissing('${ds(from)}','${ds(to)}')" title="Click to see and fill the missing days"`
+      : `onclick="tsTmTip(this,'${r.name.replace(/'/g,"\\'")}',${r.hrs})"`;
     return `<div
-      onclick="tsTmTip(this,'${r.name.replace(/'/g,"\\'")}',${r.hrs})"
+      ${clickAttr}
       style="position:absolute;left:${r.rx+gap}px;top:${r.ry+gap}px;
              width:${Math.max(0,r.rw-gap*2)}px;height:${Math.max(0,r.rh-gap*2)}px;
              background:${r.color};border-radius:5px;cursor:pointer;overflow:hidden;
