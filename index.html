@@ -235,29 +235,19 @@ body{padding-bottom:62px}
 </div>
 
 <div class="tabs">
-  <div class="tab active" onclick="showTab('overview',this)">Overview</div>
-  <div class="tab" onclick="showTab('cash',this)">Cash & Invoices</div>
-  <div class="tab" onclick="showTab('timesheet',this)">Timesheets</div>
-  <div class="tab" onclick="showTab('profitability',this)">Profitability</div>
+  <div class="tab active" onclick="showTab('timesheet',this)">Timesheets</div>
   <div class="tab" onclick="showTab('pnl',this)">P&amp;L</div>
-  <div class="tab" onclick="showTab('materials',this)">Materials</div>
   <div class="tab" onclick="showTab('projects',this)">Projects</div>
   <div class="tab" onclick="showTab('quotes',this)">Quotes & Pricing</div>
-  <div class="tab" onclick="showTab('log',this)">Activity Log</div>
   <div class="tab" onclick="showTab('transactions',this)">Transactions</div>
   <div class="tab" onclick="showTab('expenses',this)">Expenses</div>
   <div class="tab" onclick="showTab('action',this)">For Action <span id="fa-count" style="display:none;background:var(--orange);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;font-weight:600;margin-left:4px"></span></div>
 </div>
 
-<div class="page active" id="page-overview"></div>
-<div class="page" id="page-cash"></div>
-<div class="page" id="page-timesheet"></div>
-<div class="page" id="page-profitability"></div>
+<div class="page active" id="page-timesheet"></div>
 <div class="page" id="page-pnl"></div>
-<div class="page" id="page-materials"></div>
 <div class="page" id="page-projects"></div>
 <div class="page" id="page-quotes"></div>
-<div class="page" id="page-log"></div>
 <div class="page" id="page-transactions"></div>
 <div class="page" id="page-expenses"></div>
 <div class="page" id="page-action"></div>
@@ -422,12 +412,8 @@ function renderAll() {
     ? new Date(D.meta.last_updated).toLocaleDateString('en-AU', {day:'numeric',month:'short',year:'numeric'})
     : '—';
   document.getElementById('header-meta').innerHTML = `Last sync: ${lastSync}`;
-  renderOverview(k, m);
-  renderCash(k);
-  renderProfitability(k, m);
-  renderMaterials(k, m);
+  renderTimesheet();   // Timesheets is the default landing tab
   renderProjects(k);
-  renderLog();
   renderForAction();   // pre-populates the For Action tab + count badge on load
 }
 
@@ -1987,7 +1973,10 @@ function renderPnL() {
         </div>
         <div style="font-size:10px;color:var(--ink-4);letter-spacing:.03em">Source: Xero bank transactions · 3 years (Jul 2023 – May 2026)</div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
-          <span class="ts-range-label">Costs</span>${catBtns}
+          <span class="ts-range-label">Costs</span>
+          <button class="pnl-cat-btn" onclick="pnlSetAllCats(true)" title="Show all cost categories">All</button>
+          <button class="pnl-cat-btn" onclick="pnlSetAllCats(false)" title="Hide all — then click one to focus on it">None</button>
+          ${catBtns}
         </div>
         <div class="ts-range-bar" style="margin-bottom:0">
           <span class="ts-range-label">Period</span>${periodBtns}${customBtn}${customInputs}
@@ -2038,17 +2027,10 @@ function renderPnLChart(data) {
     });
   });
 
-  // Profit line — only deduct active cost cats
-  const profitData = data.map(d => {
-    let costs = 0;
-    if (pnlActiveCats.has('Materials'))         costs += d.materials;
-    if (pnlActiveCats.has('Wages & Owner Pay')) costs += d.wages_owner;
-    if (pnlActiveCats.has('Motor Vehicles'))    costs += d.motor_vehicles;
-    if (pnlActiveCats.has('Subcontractors'))    costs += d.subcontractors;
-    if (pnlActiveCats.has('Tax & BAS'))         costs += d.tax_bas;
-    if (pnlActiveCats.has('Operating'))         costs += d.operating;
-    return d.revenue - costs;
-  });
+  // Profit line — ALWAYS deducts full costs, independent of which cost
+  // categories are toggled on/off. The category toggles only filter which
+  // cost bars are drawn; profit always reflects true revenue − all costs.
+  const profitData = data.map(d => d.revenue - d.totalCosts);
   // Plugin: draw profit line as smooth bezier with precise color split at zero crossing
   const profitLinePlugin = {
     id: 'profitLine',
@@ -2265,8 +2247,13 @@ function renderPnLTable(data, fromD, toD) {
   const cur = aggPnL(data);
   const months = data.map(d => d.month);
 
+  // Full month-name labels; collapse to a single month when the range is one month.
+  const moFmt   = d => d.toLocaleDateString('en-AU',{month:'long',year:'numeric'});
+  const rangeLbl = (a, b) => { const x = moFmt(a), y = moFmt(b); return x === y ? x : `${x} – ${y}`; };
+
   let prev = null;
   let prevMonths = null;
+  let prevHdr = 'Prior period';
   if (pnlCompare) {
     const dur  = toD.getTime() - fromD.getTime();
     const pTo  = new Date(fromD.getTime() - 86400000);
@@ -2274,14 +2261,14 @@ function renderPnLTable(data, fromD, toD) {
     const prevData = buildPnLData(pFrom, pTo);
     prev = aggPnL(prevData);
     prevMonths = prevData.map(d => d.month);
+    prevHdr = rangeLbl(pFrom, pTo);   // actual prior month(s), e.g. "May 2026"
   }
 
   const fmtDiff = (a, b) => {
     const d = a - b;
     return `<span style="color:${d>=0?'var(--sage)':'var(--pink)'}">${d>=0?'+':''}${fmt(d)}</span>`;
   };
-  const fromLbl = fromD.toLocaleDateString('en-AU',{month:'short',year:'numeric'});
-  const toLbl   = toD.toLocaleDateString('en-AU',{month:'short',year:'numeric'});
+  const curHdr = rangeLbl(fromD, toD);   // single month → just "June 2026"
 
   const row = (label, curV, prevV, isNeg=false, indented=false) => {
     const s2 = indented ? 'padding-left:24px;color:var(--ink-4)' : '';
@@ -2340,11 +2327,6 @@ function renderPnLTable(data, fromD, toD) {
         ${prev?`<td></td>`:''}${prev?`<td></td>`:''}
       </tr>${txnRows}${auditHint}`;
     }).join('');
-    // Tax & BAS note — only relevant when the (real, transaction-derived) figure is
-    // genuinely zero for the selected period, e.g. no BAS payment fell due/was made.
-    const taxNote = (catKey === 'Tax & BAS' && expanded && curVEff === 0)
-      ? `<tr style="background:var(--bg-2)"><td colspan="${prev?4:2}" style="padding-left:44px;font-size:11px;color:var(--ink-4);padding-top:2px;padding-bottom:8px">⚠ $0 for this period — no BAS clearing transactions found in the bank history (may mean no payment fell due, or it hasn't been recorded in Xero yet).</td></tr>`
-      : '';
     const liabilityHint = (isLiabilityCat && expanded)
       ? `<tr style="background:var(--bg-2)"><td colspan="${prev?4:2}" style="padding-left:44px;font-size:10px;color:var(--ink-4);opacity:.6;padding-top:2px;padding-bottom:6px">Total recalculated from real bank-transaction detail — more accurate than Xero's P&amp;L report for these accounts, which always shows $0 for balance-sheet liability items like loans, super and wages payable.</td></tr>`
       : '';
@@ -2353,7 +2335,26 @@ function renderPnLTable(data, fromD, toD) {
       <td class="amount" style="color:var(--orange)">(${fmt(curVEff)})</td>
       ${prev?`<td class="amount" style="color:var(--orange);opacity:.7">(${fmt(prevVEff||0)})</td>`:''}
       ${prev?`<td class="amount">${fmtDiff(curVEff,prevVEff||0)}</td>`:''}
-    </tr>${detailRows}${taxNote}`;
+    </tr>${detailRows}`;
+  };
+
+  // Expandable Revenue row — drills into the per-month revenue that makes up the total.
+  const revenueRow = () => {
+    const expanded = pnlExpandedCats.has('Revenue');
+    const chevron = `<span style="display:inline-block;transition:transform .2s;transform:rotate(${expanded?'90deg':'0deg'});margin-right:6px;font-size:10px;opacity:.6">▶</span>`;
+    const detailRows = !expanded ? '' : data.filter(d=>d.revenue>0).map(d =>
+      `<tr style="background:var(--bg-2)">
+        <td style="padding-left:44px;color:var(--ink-4);font-size:11px">${d.label}</td>
+        <td class="amount" style="font-size:11px">${fmt(d.revenue)}</td>
+        ${prev?`<td></td>`:''}${prev?`<td></td>`:''}
+      </tr>`
+    ).join('');
+    return `<tr style="cursor:pointer" onclick="pnlToggleExpand('Revenue')">
+      <td>${chevron}Revenue</td>
+      <td class="amount">${fmt(cur.revenue)}</td>
+      ${prev?`<td class="amount" style="opacity:.7">${fmt(prev?.revenue||0)}</td>`:''}
+      ${prev?`<td class="amount">${fmtDiff(cur.revenue,prev?.revenue||0)}</td>`:''}
+    </tr>${detailRows}`;
   };
 
   const gpCur  = cur.revenue - cur.materials;
@@ -2362,12 +2363,12 @@ function renderPnLTable(data, fromD, toD) {
   el.innerHTML = `<table>
     <thead><tr>
       <th></th>
-      <th style="text-align:right">${fromLbl} – ${toLbl}</th>
-      ${prev?`<th style="text-align:right;color:var(--ink-4)">Prior period</th>`:''}
+      <th style="text-align:right">${curHdr}</th>
+      ${prev?`<th style="text-align:right;color:var(--ink-4)">${prevHdr}</th>`:''}
       ${prev?`<th style="text-align:right">Δ</th>`:''}
     </tr></thead>
     <tbody>
-      ${row('Revenue', cur.revenue, prev?.revenue)}
+      ${revenueRow()}
       ${catRow('Materials & Cost of Sales', 'Materials', cur.materials, prev?.materials)}
       <tr style="font-weight:600;border-top:1px solid var(--border-2)">
         <td>Gross Profit</td>
@@ -2448,11 +2449,16 @@ function pnlCustomRange() {
 }
 
 function pnlToggleCat(cat) {
-  if (pnlActiveCats.has(cat)) {
-    if (pnlActiveCats.size > 1) pnlActiveCats.delete(cat);
-  } else {
-    pnlActiveCats.add(cat);
-  }
+  // Free toggle — may go all the way to zero. Profit/KPIs/table are now
+  // independent of this set (it only filters which cost bars draw on the
+  // chart), so isolating a single category is just: None → click one.
+  if (pnlActiveCats.has(cat)) pnlActiveCats.delete(cat);
+  else pnlActiveCats.add(cat);
+  renderPnL();
+}
+
+function pnlSetAllCats(on) {
+  pnlActiveCats = on ? new Set(PNL_COST_CATEGORIES) : new Set();
   renderPnL();
 }
 
