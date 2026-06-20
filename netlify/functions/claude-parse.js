@@ -60,6 +60,36 @@ async function sbDelete(table, query) {
   return res.json();
 }
 
+// ── Salvage helper ───────────────────────────────────────────────────────────────
+// Scans a string and returns every top-level, individually-parseable {...} object.
+// Tolerant of a truncated trailing object and of surrounding array brackets/commas —
+// so a receipt whose JSON array got cut off mid-way still yields all complete lines.
+function extractJsonObjects(str) {
+  const objs = [];
+  let depth = 0, start = -1, inStr = false, esc = false;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === '\\') esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') { inStr = true; continue; }
+    if (ch === '{') { if (depth === 0) start = i; depth++; }
+    else if (ch === '}') {
+      if (depth > 0) {
+        depth--;
+        if (depth === 0 && start >= 0) {
+          try { objs.push(JSON.parse(str.slice(start, i + 1))); } catch (e) { /* skip malformed */ }
+          start = -1;
+        }
+      }
+    }
+  }
+  return objs;
+}
+
 // ── Main handler ───────────────────────────────────────────────────────────────
 exports.handler = async (event) => {
   const headers = {
@@ -335,12 +365,29 @@ If you cannot confidently parse the input at all: {"action":"unclear","message":
             });
           }
         }
-        const imageInstruction = text && text !== 'Parse this receipt and log the expense.'
-          ? text.trim()
-          : `This is a receipt photo. Extract EVERY individual line item as a separate expense entry.
-Return a JSON ARRAY — one ACTION 2 object per product line. No totals, no subtotals, individual items only.
-Format: [{"action":"new","type":"expense","date":"${todayStr}","supplier":"StoreName","description":"Item name","category":"Category","qty":1,"unit_price":9.09,"amount":9.09}, ...]
-Rules: all amounts ex-GST (divide inc-GST price by 1.1 and round to 2dp). Same supplier for all items. Today's date if none visible. Pick category from the system prompt category list.`;
+        // A user-typed note must NEVER replace the line-item extraction directive —
+        // it only adds project/context guidance. (Previously, any accompanying text
+        // overwrote the whole instruction, so the model returned one summarised entry
+        // instead of every line.)
+        const userHint = (text && text.trim() && text.trim() !== 'Parse this receipt and log the expense.')
+          ? text.trim() : '';
+        const imageInstruction =
+`This is a receipt/invoice photo (or PDF). Extract EVERY individual product line as its own expense entry — do NOT skip, merge, summarise, or group lines. If the receipt has 25 line items, return 25 objects. Capture small and cheap items too.
+
+OVERRIDE: ignore the "Output ONE JSON object only" rule for this image. Return a JSON ARRAY only — one object per product line, each in this shape:
+[{"action":"new","type":"expense","date":"${todayStr}","supplier":"StoreName","description":"Item name","category":"Category","project":"","qty":1,"unit_price":9.09,"amount":9.09}]
+
+Rules:
+- One object per physical line item printed on the receipt. Never combine two products into one entry.
+- description = the product name/description as printed (no qty, no price).
+- qty × unit_price = amount, all EX-GST. If prices are inc-GST, divide by 1.1 and round to 2dp.
+- Do NOT create entries for subtotals, totals, GST lines, rounding, change, or payment/tender lines — only actual purchased items.
+- category: pick the best fit from the EXPENSE CATEGORIES list in the system prompt. If genuinely unsure, use "Materials" for building supplies else "Sundry Expenses" — never drop a line because the category is unclear.
+- supplier: the same store name on every line.
+- date: the receipt date if visible, otherwise ${todayStr}.
+` + (userHint
+  ? `\nUSER NOTE (applies to the whole receipt): "${userHint}"\n- If the user named a project, set "project" to that project on EVERY line.\n- If the user did not name a project, or you are unsure which line belongs to which project, leave "project":"" — it can be corrected later in the Hub. Never skip or drop a line just because the project is unclear.`
+  : `\n- Leave "project":"" on every line — it will be assigned later in the Hub.`);
         userContent.push({ type: 'text', text: imageInstruction });
       } else {
         userContent = text.trim();
@@ -358,7 +405,9 @@ Rules: all amounts ex-GST (divide inc-GST price by 1.1 and round to 2dp). Same s
         },
         body: JSON.stringify({
           model,
-          max_tokens: hasImages ? 800 : 300,
+          // Receipts can have many lines; 800 truncated long ones mid-array, which
+          // left only the first salvageable item. 8000 comfortably fits ~40+ lines.
+          max_tokens: hasImages ? 8000 : 300,
           system: systemPrompt,
           messages: [{ role: 'user', content: userContent }]
         })
@@ -372,33 +421,40 @@ Rules: all amounts ex-GST (divide inc-GST price by 1.1 and round to 2dp). Same s
       }
 
       let rawText = claudeData.content[0].text.trim();
-      console.log('INPUT:', text.trim());
-      console.log('MODEL OUTPUT:', rawText);
+      console.log('INPUT:', (text || '').trim(), '| images:', hasImages ? images.length : 0);
+      console.log('MODEL OUTPUT (first 500):', rawText.slice(0, 500));
+      console.log('STOP REASON:', claudeData.stop_reason);
 
       rawText = rawText.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim();
-      try {
-        const candidate = JSON.parse(rawText);
-        if (hasImages && Array.isArray(candidate)) {
-          // Image returned multiple line items — wrap for batch processing
-          parsed = { action: 'expense_batch', items: candidate };
-        } else {
-          parsed = Array.isArray(candidate) ? candidate[0] : candidate;
+
+      if (hasImages) {
+        // Receipts always become a batch of line items. Be tolerant of a
+        // truncated array: salvage every fully-formed {...} object so we never
+        // silently collapse to a single line (the old failure mode).
+        let items = [];
+        try {
+          const c = JSON.parse(rawText);
+          items = Array.isArray(c) ? c : [c];
+        } catch(e) {
+          items = extractJsonObjects(rawText);
         }
-      } catch(e) {
-        // Try to extract first JSON object from mixed text
-        const match = rawText.match(/\[[\s\S]*\]/) || rawText.match(/\{[\s\S]*?\}/);
-        if (match) {
-          try {
-            const c2 = JSON.parse(match[0]);
-            if (hasImages && Array.isArray(c2)) {
-              parsed = { action: 'expense_batch', items: c2 };
-            } else {
-              parsed = Array.isArray(c2) ? c2[0] : c2;
-            }
+        if (!items.length) throw new Error(`No line items parsed from receipt: ${rawText.slice(0, 200)}`);
+        if (claudeData.stop_reason === 'max_tokens') {
+          console.warn(`Receipt output hit max_tokens — salvaged ${items.length} complete line(s); a final partial line may have been dropped.`);
+        }
+        parsed = { action: 'expense_batch', items };
+      } else {
+        try {
+          const candidate = JSON.parse(rawText);
+          parsed = Array.isArray(candidate) ? candidate[0] : candidate;
+        } catch(e) {
+          const match = rawText.match(/\{[\s\S]*?\}/);
+          if (match) {
+            try { parsed = JSON.parse(match[0]); }
+            catch(e2) { throw new Error(`Bad JSON from model: ${rawText.slice(0, 200)}`); }
+          } else {
+            throw new Error(`Bad JSON from model: ${rawText.slice(0, 200)}`);
           }
-          catch(e2) { throw new Error(`Bad JSON from model: ${rawText.slice(0, 200)}`); }
-        } else {
-          throw new Error(`Bad JSON from model: ${rawText.slice(0, 200)}`);
         }
       }
     }
@@ -812,18 +868,29 @@ Rules: all amounts ex-GST (divide inc-GST price by 1.1 and round to 2dp). Same s
 
       let expIdCounter = nextExpNum;
       const insertedEntries = [];
+      const batchValidProjects = [...projectList, ...NON_BILLABLE];
 
       for (const item of items) {
         const qty       = parseFloat(item.qty) || 1;
         const unitPrice = parseFloat(item.unit_price) || (parseFloat(item.amount) / qty) || 0;
         const amount    = Math.round(qty * unitPrice * 100) / 100;
+
+        // Canonicalise the per-line project to an exact active-project name.
+        // If it doesn't confidently match, leave it BLANK rather than dropping
+        // the line or writing a bad name — Seb can fix it in the Expenses tab.
+        let lineProject = (item.project || '').trim();
+        if (lineProject) {
+          const { match, score } = fuzzyMatchProject(lineProject, batchValidProjects);
+          lineProject = (match && score >= 0.6) ? match : '';
+        }
+
         const entry = {
           id:          `EXP-${String(expIdCounter++).padStart(3, '0')}`,
           date:        item.date || todayStr,
           supplier:    item.supplier || '',
           description: item.description || '',
           category:    item.category   || 'Sundry Expenses',
-          project:     item.project    || '',
+          project:     lineProject,
           qty,
           unit_price:  Math.round(unitPrice * 100) / 100,
           amount

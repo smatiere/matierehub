@@ -417,200 +417,6 @@ function renderAll() {
   renderForAction();   // pre-populates the For Action tab + count badge on load
 }
 
-// ── Overview ──────────────────────────────────────────────────────────────────
-function renderOverview(k, m) {
-  const totalMonthlyRev = m.revenue.reduce((a,b)=>a+b,0);
-  const avgMonthly = totalMonthlyRev / m.revenue.filter(v=>v>0).length;
-  const openCount = D.open_invoices ? D.open_invoices.length : 0;
-  document.getElementById('page-overview').innerHTML = `
-    <div class="divider">FY2026 · Year to Date (Jul 2025 – Apr 2026)</div>
-    <div class="kpi-grid">
-      ${kpi('Revenue YTD', fmt(k.fy26_revenue), '10 months collected', 'highlight')}
-      ${kpi('Gross Profit', fmt(k.fy26_gross_profit), 'Margin: ' + pct(k.fy26_gp_margin), 'good')}
-      ${kpi('Materials Cost', fmt(k.fy26_materials), 'Direct job costs', '')}
-      ${kpi('Outstanding', fmt(k.total_outstanding), openCount + ' open invoices', k.total_outstanding > 10000 ? 'warn' : '')}
-      ${kpi('Avg Monthly Rev', fmt(avgMonthly), 'Active months only', '')}
-      ${kpi('Owner Drawings', fmt(k.fy26_owner_drawings), 'FY26 paid to Seb', '')}
-    </div>
-    <div class="section">
-      <div class="section-head"><h2>Monthly Revenue — FY2026</h2><span class="chart-clickable-hint">click a bar for month detail</span></div>
-      <div class="section-body"><div class="chart-wrap"><canvas id="chart-overview-rev"></canvas></div></div>
-    </div>
-    <div class="two-col">
-      <div class="section">
-        <div class="section-head"><h2>Top Customers</h2></div>
-        <div class="section-body" style="padding:8px 0">
-          ${D.top_customers.map(c => {
-            const w = Math.round(c.revenue / D.top_customers[0].revenue * 100);
-            return `<div style="padding:7px 16px">
-              <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
-                <span style="color:var(--ink-2)">${c.name}</span>
-                <span style="font-weight:600;color:var(--amber)">${fmt(c.revenue)}</span>
-              </div>
-              <div class="mini-bar"><div class="mini-bar-fill" style="width:${w}%"></div></div>
-            </div>`;
-          }).join('')}
-        </div>
-      </div>
-      <div class="section">
-        <div class="section-head"><h2>Cost Breakdown — FY26</h2></div>
-        <div class="section-body"><div class="chart-wrap"><canvas id="chart-overview-costs"></canvas></div></div>
-      </div>
-    </div>`;
-
-  destroyChart('overview-rev');
-  charts['overview-rev'] = new Chart(document.getElementById('chart-overview-rev'), {
-    type: 'bar',
-    data: { labels: m.labels, datasets: [{ label: 'Revenue', data: m.revenue, backgroundColor: 'rgba(255,190,11,0.75)', borderRadius: 4, borderSkipped: false, hoverBackgroundColor: '#FFBE0B' }] },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        y: { ticks: { ...CHART_TICK, callback: v => '$' + (v/1000).toFixed(0) + 'k' }, grid:{color:CHART_GRID} },
-        x: { ticks: CHART_TICK, grid:{display:false} }
-      },
-      onClick: (ev, els) => { if (els.length) showMonthDetail(els[0].index); },
-      onHover: (ev, els) => { ev.native.target.style.cursor = els.length ? 'pointer' : 'default'; }
-    }
-  });
-
-  destroyChart('overview-costs');
-  charts['overview-costs'] = new Chart(document.getElementById('chart-overview-costs'), {
-    type: 'doughnut',
-    data: {
-      labels: ['Materials', 'Owner Drawings', 'Wages/PAYG', 'Operating'],
-      datasets: [{ data: [k.fy26_materials, k.fy26_owner_drawings, k.fy26_wages, k.fy26_opex], backgroundColor: ['#FFBE0B','#FB5607','#8338EC','#3A86FF'], borderWidth: 0 }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { position:'bottom', labels:{ color:'#888', font:{size:11}, padding:12 } }, tooltip: { callbacks: { label: ctx => ' ' + fmt(ctx.raw) } } }
-    }
-  });
-}
-
-// ── Cash & Invoices ───────────────────────────────────────────────────────────
-function renderCash(k) {
-  const invoices = D.open_invoices || [];
-  const today = new Date(); today.setHours(0,0,0,0);
-  const rows = invoices.map(inv => {
-    const invoiceDate = new Date(inv.date + 'T00:00:00');
-    const age = Math.floor((today - invoiceDate) / 86400000);
-    const badge = age > 60 ? 'badge-red' : age > 30 ? 'badge-amber' : 'badge-blue';
-    const ageLabel = age > 60 ? 'Overdue 60+d' : age > 30 ? 'Overdue 30+d' : age + 'd old';
-    return `<tr><td>${inv.invoice}</td><td>${inv.contact}</td><td>${inv.date}</td>
-      <td class="amount">${fmt(inv.amount)}</td>
-      <td><span class="badge ${badge}">${ageLabel}</span></td></tr>`;
-  }).join('');
-  const total = invoices.reduce((a,b) => a + b.amount, 0);
-  document.getElementById('page-cash').innerHTML = `
-    <div class="divider">Outstanding Receivables</div>
-    <div class="kpi-grid">
-      ${kpi('Outstanding Total', fmt(total), invoices.length + ' open invoices', 'warn')}
-      ${kpi('Overdue (Xero)', fmt(k.overdue_xero), 'Live from Xero', 'warn')}
-      ${kpi('Seb Rate', fmt(k.sebRate_per_hour) + '/hr', 'Ex GST', '')}
-      ${kpi('Pipeline', fmt(k.pipeline_total), 'Quoted, not yet won', 'highlight')}
-    </div>
-    <div class="section">
-      <div class="section-head"><h2>Open Invoices</h2><span style="font-size:11px;color:var(--amber)">${fmt(total)} total</span></div>
-      ${invoices.length
-        ? `<table><thead><tr><th>Invoice</th><th>Client</th><th>Date</th><th style="text-align:right">Amount</th><th>Age</th></tr></thead><tbody>${rows}</tbody></table>`
-        : `<div class="empty"><div class="empty-icon">✓</div>No open invoices</div>`}
-    </div>`;
-}
-
-// ── Profitability ─────────────────────────────────────────────────────────────
-function renderProfitability(k, m) {
-  const netProfit = k.fy26_revenue - k.fy26_materials - k.fy26_opex - k.fy26_wages;
-  const netMargin = netProfit / k.fy26_revenue * 100;
-  document.getElementById('page-profitability').innerHTML = `
-    <div class="divider">Profitability — FY2026 YTD</div>
-    <div class="kpi-grid">
-      ${kpi('Revenue', fmt(k.fy26_revenue), 'Cash received', 'highlight')}
-      ${kpi('Materials', fmt(k.fy26_materials), 'Direct costs', '')}
-      ${kpi('Gross Profit', fmt(k.fy26_gross_profit), pct(k.fy26_gp_margin) + ' GP margin', 'good')}
-      ${kpi('Operating Exp', fmt(k.fy26_opex), 'Phone, vehicle, office…', '')}
-      ${kpi('Wages & PAYG', fmt(k.fy26_wages), 'Staff costs', '')}
-      ${kpi('Net Profit Est.', fmt(netProfit), pct(netMargin) + ' net margin', netProfit > 0 ? 'good' : 'warn')}
-    </div>
-    <div class="section">
-      <div class="section-head"><h2>Revenue vs Materials — Monthly</h2></div>
-      <div class="section-body"><div class="chart-wrap"><canvas id="chart-profit-monthly"></canvas></div></div>
-    </div>
-    <div class="section">
-      <div class="section-head"><h2>P&L Summary</h2></div>
-      <table><tbody>
-        <tr><td>Revenue (cash received)</td><td class="amount" style="color:var(--amber)">${fmt(k.fy26_revenue)}</td></tr>
-        <tr><td style="padding-left:24px;color:var(--ink-4)">Less: Materials &amp; Direct Costs</td><td class="amount" style="color:var(--orange)">(${fmt(k.fy26_materials)})</td></tr>
-        <tr style="font-weight:600"><td>Gross Profit</td><td class="amount">${fmt(k.fy26_gross_profit)} <span style="font-weight:400;font-size:11px;color:var(--ink-4)">${pct(k.fy26_gp_margin)}</span></td></tr>
-        <tr><td style="padding-left:24px;color:var(--ink-4)">Less: Operating Expenses</td><td class="amount" style="color:var(--orange)">(${fmt(k.fy26_opex)})</td></tr>
-        <tr><td style="padding-left:24px;color:var(--ink-4)">Less: Wages &amp; PAYG</td><td class="amount" style="color:var(--orange)">(${fmt(k.fy26_wages)})</td></tr>
-        <tr style="font-weight:700;border-top:1px solid var(--border-2)"><td>Estimated Net Profit</td><td class="amount" style="color:${netProfit>0?'var(--sage)':'var(--pink)'}">${fmt(netProfit)}</td></tr>
-        <tr style="color:var(--ink-4)"><td style="padding-left:24px">Owner Drawings (separate)</td><td class="amount">${fmt(k.fy26_owner_drawings)}</td></tr>
-      </tbody></table>
-    </div>`;
-
-  destroyChart('profit-monthly');
-  charts['profit-monthly'] = new Chart(document.getElementById('chart-profit-monthly'), {
-    type: 'bar',
-    data: {
-      labels: m.labels,
-      datasets: [
-        { label: 'Revenue', data: m.revenue, backgroundColor: 'rgba(255,190,11,0.7)', borderRadius: 4, borderSkipped: false },
-        { label: 'Materials', data: m.materials, backgroundColor: 'rgba(251,86,7,0.7)', borderRadius: 4, borderSkipped: false }
-      ]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { position:'bottom', labels:{ color:'#888', font:{size:11}, padding:12 } } },
-      scales: {
-        y: { ticks: { ...CHART_TICK, callback: v => '$' + (v/1000).toFixed(0) + 'k' }, grid:{color:CHART_GRID} },
-        x: { ticks: CHART_TICK, grid:{display:false} }
-      }
-    }
-  });
-}
-
-// ── Materials ─────────────────────────────────────────────────────────────────
-function renderMaterials(k, m) {
-  const totalMat = m.materials.reduce((a,b)=>a+b,0);
-  const matPctOfRev = totalMat / k.fy26_revenue * 100;
-  document.getElementById('page-materials').innerHTML = `
-    <div class="divider">Materials Spend — FY2026 YTD</div>
-    <div class="kpi-grid">
-      ${kpi('Total Materials', fmt(totalMat), 'FY26 YTD', 'warn')}
-      ${kpi('% of Revenue', pct(matPctOfRev), 'Materials as share of revenue', '')}
-      ${kpi('Avg / Month', fmt(totalMat / m.materials.filter(v=>v>0).length), 'Active months only', '')}
-      ${kpi('Gross After Mat', fmt(k.fy26_gross_profit), pct(k.fy26_gp_margin) + ' GP margin', 'good')}
-    </div>
-    <div class="section">
-      <div class="section-head"><h2>Materials Spend by Month</h2></div>
-      <div class="section-body"><div class="chart-wrap"><canvas id="chart-materials"></canvas></div></div>
-    </div>
-    <div class="section">
-      <div class="section-head"><h2>Monthly Breakdown</h2></div>
-      <table><thead><tr><th>Month</th><th style="text-align:right">Revenue</th><th style="text-align:right">Materials</th><th style="text-align:right">Gross Profit</th><th style="text-align:right">GP%</th></tr></thead>
-      <tbody>${m.labels.map((label,i) => {
-        const rev = m.revenue[i], mat = m.materials[i], gp = rev - mat;
-        const gpm = rev > 0 ? gp/rev*100 : 0;
-        return `<tr><td>${label} ${m.periods[i].slice(0,4)}</td><td class="amount">${fmt(rev)}</td>
-          <td class="amount" style="color:var(--orange)">${fmt(mat)}</td>
-          <td class="amount" style="color:var(--sage)">${fmt(gp)}</td>
-          <td class="amount" style="font-size:12px;color:var(--ink-4)">${rev > 0 ? pct(gpm) : '—'}</td></tr>`;
-      }).join('')}</tbody></table>
-    </div>`;
-
-  destroyChart('materials');
-  charts['materials'] = new Chart(document.getElementById('chart-materials'), {
-    type: 'line',
-    data: { labels: m.labels, datasets: [{ label: 'Materials $', data: m.materials, borderColor: '#FB5607', backgroundColor: 'rgba(251,86,7,.1)', fill: true, tension: 0.3, pointRadius: 4, pointBackgroundColor: '#FB5607' }] },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend:{display:false} },
-      scales: { y: { ticks: { ...CHART_TICK, callback:v=>'$'+(v/1000).toFixed(0)+'k' }, grid:{color:CHART_GRID} }, x: { ticks:CHART_TICK, grid:{display:false} } }
-    }
-  });
-}
-
 // ── Projects ──────────────────────────────────────────────────────────────────
 function renderProjects(k) {
   const definedProjects = D.projects || [];
@@ -876,38 +682,6 @@ function renderProjects(k) {
         Dilution = Hrs ÷ Span (% of an 8h/day pace)
       </div>
     </div>`;
-}
-
-// ── Activity Log ──────────────────────────────────────────────────────────────
-function renderLog() {
-  const timesheets = D.timesheets || [];
-  const expenses = D.expense_log || [];
-  const rate = D.kpis.sebRate_per_hour || 100;
-  const allEntries = [
-    ...timesheets.map(t => ({type:'hours', date:t.date, text:`${t.hours}h on ${t.project}${t.notes?': '+t.notes:''}`, amount:t.hours*rate})),
-    ...expenses.map(e => ({type:'expense', date:e.date, text:`${e.description}${e.category?' ('+e.category+')':''}`, amount:e.amount}))
-  ].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
-  const entries = allEntries.length
-    ? allEntries.map(e => `<div class="log-entry">
-        <div class="log-dot ${e.type}"></div>
-        <div class="log-text"><div>${e.text}</div><div class="log-date">${e.date||'—'}</div></div>
-        <div class="log-amount">${e.type==='hours' ? e.amount/rate+'h' : fmt(e.amount)}</div>
-      </div>`).join('')
-    : `<div class="empty"><div class="empty-icon">💬</div><div>No activity logged yet.</div>
-        <div style="margin-top:8px;font-size:12px;color:var(--ink-4)">
-          <b style="color:var(--ink-3)">Hours:</b> "6h mark today" · "full day rob balgo" · "half day admin friday" · "3.5h neil installing shelves"<br>
-          <b style="color:var(--ink-3)">Expenses:</b> "$85 bunnings screws" · "$62 fuel" · "400 sub plasterer neil"<br>
-          <b style="color:var(--ink-3)">Edit:</b> "fix hours to 5" · "add note to mark today — installed top rail"<br>
-          <b style="color:var(--ink-3)">New project:</b> "8h today on new project Smith - Manly Deck"
-        </div></div>`;
-  document.getElementById('page-log').innerHTML = `
-    <div class="divider">Captured Activity</div>
-    <div class="kpi-grid">
-      ${kpi('Hours Logged', timesheets.reduce((a,t)=>a+t.hours,0)+'h', 'Via Claude chat', '')}
-      ${kpi('Expenses Logged', expenses.length, 'Via Claude chat', '')}
-      ${kpi('Labour Value', fmt(timesheets.reduce((a,t)=>a+(t.hours*rate),0)), 'At $'+rate+'/hr', 'highlight')}
-    </div>
-    <div class="section"><div class="section-head"><h2>Activity Feed</h2></div><div class="section-body">${entries}</div></div>`;
 }
 
 // ── Modals ────────────────────────────────────────────────────────────────────
@@ -1436,7 +1210,11 @@ async function fileToBase64(file) {
       const url = URL.createObjectURL(file);
       img.onload = () => {
         URL.revokeObjectURL(url);
-        const maxDim = 900;
+        // 1568px = Claude's vision long-edge cap; anything bigger is downscaled
+        // server-side anyway. Receipts are long & full of fine print, so we send
+        // the max useful resolution (was 900px/0.80, which made small rows
+        // unreadable and dropped line items).
+        const maxDim = 1568;
         let w = img.width, h = img.height;
         if (w > maxDim || h > maxDim) {
           if (w > h) { h = Math.round(h * maxDim / w); w = maxDim; }
@@ -1445,7 +1223,7 @@ async function fileToBase64(file) {
         const canvas = document.createElement('canvas');
         canvas.width = w; canvas.height = h;
         canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-        resolve({ data: canvas.toDataURL('image/jpeg', 0.80).split(',')[1], type: 'image/jpeg' });
+        resolve({ data: canvas.toDataURL('image/jpeg', 0.9).split(',')[1], type: 'image/jpeg' });
       };
       img.onerror = reject;
       img.src = url;
