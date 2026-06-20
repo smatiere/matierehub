@@ -304,6 +304,20 @@ async function sbPatch(table, query, body) {
   return r.json();
 }
 
+// hubWrite — the single write path for direct-from-HUB input. The browser's anon
+// key is read-only; this POSTs to the hub-write function, which writes with the
+// service key against a server-side allow-list. Use this for every HUB edit.
+async function hubWrite(table, id, fields) {
+  const r = await fetch('/.netlify/functions/hub-write', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ table, id, fields })
+  });
+  const out = await r.json().catch(() => ({}));
+  if (!r.ok || !out.ok) throw new Error(out.error || ('hub-write error ' + r.status));
+  return out.row;
+}
+
 // ── Data load — live from Supabase ────────────────────────────────────────────
 async function loadData() {
   try {
@@ -3141,7 +3155,7 @@ async function txSaveCell(inp) {
   const row = (TX.rows || []).find(r => String(r.id) === String(id));
   if (row && (row[field] || '') === value) return;   // no change
   try {
-    await sbPatch('bank_transactions', `?id=eq.${encodeURIComponent(id)}`, { [field]: value });
+    await hubWrite('bank_transactions', id, { [field]: value });
     if (row) row[field] = value;
     inp.style.outline = '2px solid var(--sage)';
     setTimeout(() => { inp.style.outline = 'none'; }, 700);
@@ -3285,7 +3299,7 @@ function faUpdateBadge(n) {
 // Link a bank transaction to a logged expense, then refresh For Action
 async function faLink(bankTxId, expenseLogId) {
   try {
-    await sbPatch('bank_transactions', `?id=eq.${encodeURIComponent(bankTxId)}`, { expense_log_id: expenseLogId });
+    await hubWrite('bank_transactions', bankTxId, { expense_log_id: expenseLogId });
     await renderForAction();
   } catch (e) {
     alert('Could not link: ' + e.message);
