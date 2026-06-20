@@ -22,7 +22,8 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
 // ── Allow-list: { table: [columns the HUB may write] } ───────────────────────
 const WRITABLE = {
-  bank_transactions: ['project', 'notes', 'expense_log_id']
+  bank_transactions: ['project', 'notes', 'expense_log_id'],
+  expense_log:       ['project', 'category', 'description', 'notes']
 };
 
 async function sbPatch(table, query, body) {

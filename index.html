@@ -8,12 +8,14 @@
 <style>
 :root {
   --bg:      #000000;
+  --bg-1:    #141414;
   --bg-2:    #0f0f0f;
   --bg-3:    #1a1a1a;
   --bg-4:    #252525;
   --border:  #2a2a2a;
   --border-2:#383838;
   --ink:     #ffffff;
+  --ink-1:   #ffffff;
   --ink-2:   #cccccc;
   --ink-3:   #888888;
   --ink-4:   #505050;
@@ -151,9 +153,12 @@ tr:hover td{background:var(--bg-3)}
 .ts-nav-btn:hover{color:var(--ink);border-color:var(--ink-4)}
 .ts-range-bar{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:16px}
 .ts-range-label{font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-4);margin-right:4px}
-.ts-range-btn{background:var(--bg-2);border:1px solid var(--border);color:var(--ink-4);padding:5px 14px;border-radius:20px;cursor:pointer;font-size:11px;font-weight:600;letter-spacing:.04em;transition:all .15s}
-.ts-range-btn:hover{color:var(--ink-2);border-color:var(--ink-4)}
-.ts-range-btn.active{background:var(--amber);color:#000;border-color:var(--amber)}
+/* Canonical hub-wide pill/preset button — edit here to restyle EVERY range/preset
+   button across the whole HUB (Timesheet period, Transactions & Expenses dates…).
+   See CLAUDE.md → "Shared UI styles". .ts-range-btn kept as an alias. */
+.hub-pill-btn,.ts-range-btn{background:var(--bg-2);border:1px solid var(--border);color:var(--ink-4);padding:5px 14px;border-radius:20px;cursor:pointer;font-size:11px;font-weight:600;letter-spacing:.04em;transition:all .15s}
+.hub-pill-btn:hover,.ts-range-btn:hover{color:var(--ink-2);border-color:var(--ink-4)}
+.hub-pill-btn.active,.ts-range-btn.active{background:var(--amber);color:#000;border-color:var(--amber)}
 .ts-range-bar input[type="date"]{background:var(--bg-2);border:1px solid var(--border-2);color:var(--ink);padding:4px 8px;border-radius:var(--r);font-size:11px;color-scheme:dark}
 .ts-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;padding:10px}
 .ts-day-hdr{text-align:center;font-size:9px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-4);padding:6px 0}
@@ -240,6 +245,7 @@ body{padding-bottom:62px}
   <div class="tab" onclick="showTab('quotes',this)">Quotes & Pricing</div>
   <div class="tab" onclick="showTab('log',this)">Activity Log</div>
   <div class="tab" onclick="showTab('transactions',this)">Transactions</div>
+  <div class="tab" onclick="showTab('expenses',this)">Expenses</div>
   <div class="tab" onclick="showTab('action',this)">For Action <span id="fa-count" style="display:none;background:var(--orange);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;font-weight:600;margin-left:4px"></span></div>
 </div>
 
@@ -253,6 +259,7 @@ body{padding-bottom:62px}
 <div class="page" id="page-quotes"></div>
 <div class="page" id="page-log"></div>
 <div class="page" id="page-transactions"></div>
+<div class="page" id="page-expenses"></div>
 <div class="page" id="page-action"></div>
 
 <div id="modal-overlay" class="modal-overlay" onclick="if(event.target===this)closeModal()">
@@ -379,6 +386,7 @@ function showTab(name, el) {
   if (name === 'timesheet') renderTimesheet();
   if (name === 'pnl') renderPnL();
   if (name === 'transactions') renderTransactions();
+  if (name === 'expenses') renderExpenses();
   if (name === 'action') renderForAction();
   if (name === 'projects' && D) renderProjects(D.kpis);
 }
@@ -1010,8 +1018,14 @@ const NSW_HOLIDAYS = {
   '2026-10-05':'LAB','2026-12-25':'CHR','2026-12-28':'BOX',
 };
 
-// 10 neon colours for active projects (cycles if more than 10)
-const PROJ_PALETTE = ['#FF0080','#FF3300','#FF6B00','#FFE600','#00FF41','#00FFCC','#00C8FF','#3D00FF','#CC00FF','#FF00FF'];
+// ── HUB_PALETTE — canonical hub-wide categorical colour palette (10 neon) ─────
+// Single source of truth for any feature that needs multiple distinct colours
+// (project colours, charts, category tags…). Edit here to re-colour the whole HUB.
+// See CLAUDE.md → "Shared UI styles".
+const HUB_PALETTE = ['#FF0080','#FF3300','#FF6B00','#FFE600','#00FF41','#00FFCC','#00C8FF','#3D00FF','#CC00FF','#FF00FF'];
+
+// Active-project colours draw from the hub palette (cycles if more than 10)
+const PROJ_PALETTE = HUB_PALETTE;
 const PROJ_NB_COLOR = '#383838';   // non-billable grey
 let PROJECT_COLOR_MAP = {};
 
@@ -3060,10 +3074,8 @@ function txShell() {
     ['30d', 'Last 30 days'], ['month', 'This month'], ['3mo', 'Last 3 mo'],
     ['fy', 'This FY'], ['all', 'All']
   ];
-  const chip = (p, label) => {
-    const on = TX.preset === p;
-    return `<button onclick="txChip('${p}')" style="padding:6px 12px;font-size:13px;border-radius:6px;cursor:pointer;border:1px solid ${on?'var(--sage)':'var(--border)'};background:${on?'var(--sage)':'var(--bg-1)'};color:${on?'#fff':'var(--ink-2)'};font-weight:${on?'600':'400'}">${label}</button>`;
-  };
+  const chip = (p, label) =>
+    `<button class="hub-pill-btn${TX.preset===p?' active':''}" onclick="txChip('${p}')">${label}</button>`;
   const customOn = TX.preset === 'custom';
   return `
   <div style="padding:20px">
@@ -3179,8 +3191,8 @@ function txRenderTable() {
             <td style="padding:7px 10px;color:var(--ink-4)">${r.reference||''}</td>
             <td style="padding:7px 10px;text-align:right;color:var(--pink);font-weight:${r.debit?'600':'400'}">${r.debit?fmt(r.debit):'—'}</td>
             <td style="padding:7px 10px;text-align:right;color:var(--sage);font-weight:${r.credit?'600':'400'}">${r.credit?fmt(r.credit):'—'}</td>
-            <td style="padding:5px 6px"><input class="tx-cell" data-id="${attrEsc(r.id)}" data-field="project" value="${attrEsc(r.project||'')}" placeholder="—" style="width:110px;padding:4px 6px;border:1px solid transparent;border-radius:5px;background:transparent;color:var(--ink-3);font-size:11px"></td>
-            <td style="padding:5px 6px"><input class="tx-cell" data-id="${attrEsc(r.id)}" data-field="notes" value="${attrEsc(r.notes||'')}" placeholder="—" style="width:150px;padding:4px 6px;border:1px solid transparent;border-radius:5px;background:transparent;color:var(--ink-4);font-size:11px"></td>
+            <td style="padding:5px 6px"><input class="tx-cell" data-id="${attrEsc(r.id)}" data-field="project" value="${attrEsc(r.project||'')}" placeholder="" style="width:110px;padding:4px 6px;border:1px solid transparent;border-radius:5px;background:transparent;color:var(--ink-3);font-size:11px"></td>
+            <td style="padding:5px 6px"><input class="tx-cell" data-id="${attrEsc(r.id)}" data-field="notes" value="${attrEsc(r.notes||'')}" placeholder="" style="width:150px;padding:4px 6px;border:1px solid transparent;border-radius:5px;background:transparent;color:var(--ink-4);font-size:11px"></td>
           </tr>`).join('')}
       </tbody>
     </table>`;
@@ -3206,6 +3218,156 @@ async function txSaveCell(inp) {
   if (row && (row[field] || '') === value) return;   // no change
   try {
     await hubWrite('bank_transactions', id, { [field]: value });
+    if (row) row[field] = value;
+    inp.style.outline = '2px solid var(--sage)';
+    setTimeout(() => { inp.style.outline = 'none'; }, 700);
+  } catch (e) {
+    inp.style.outline = '2px solid var(--pink)';
+    alert('Could not save: ' + e.message);
+  }
+}
+
+// ── Expenses tab ──────────────────────────────────────────────────────────────
+// Review what's been parsed into expense_log via Claude chat, and edit
+// Project / Category / Description / Notes inline. Header mirrors Transactions
+// (date chips + project filter). Writes go through hubWrite (service key).
+const EX = { preset:'3mo', from:null, to:null, project:'', category:'', };
+let EX_CATEGORIES = null;
+
+function exSetPreset(p) {
+  EX.preset = p;
+  if (p === 'custom') return;
+  const today = new Date(); const iso = d => d.toISOString().slice(0,10);
+  EX.to = iso(today);
+  if (p === '30d')        EX.from = iso(new Date(today.getTime() - 30*86400000));
+  else if (p === 'month') EX.from = iso(new Date(today.getFullYear(), today.getMonth(), 1));
+  else if (p === '3mo')   EX.from = iso(new Date(today.getFullYear(), today.getMonth()-3, today.getDate()));
+  else if (p === 'fy')  { const y = today.getMonth()>=6 ? today.getFullYear() : today.getFullYear()-1; EX.from = `${y}-07-01`; }
+  else if (p === 'all')   EX.from = '2022-01-01';
+}
+
+async function exLoadCategories() {
+  let listed = [];
+  try {
+    const rows = await sbGet('/rest/v1/category_list?select=name&order=name.asc');
+    listed = rows.map(r => r.name).filter(Boolean);
+  } catch (e) { listed = []; }
+  const fromExp = (D.expense_log || []).map(e => e.category).filter(Boolean);
+  EX_CATEGORIES = [...new Set([...listed, ...fromExp])].sort();
+  return EX_CATEGORIES;
+}
+
+async function renderExpenses() {
+  const el = document.getElementById('page-expenses');
+  if (!el || !D) return;
+  if (!EX.from) exSetPreset('3mo');
+  await exLoadCategories();
+  el.innerHTML = exShell();
+  smartSuggest(document.getElementById('ex-project'), ssProjectNames, () => exApplyFilters());
+  exRenderTable();
+}
+
+function exShell() {
+  const chip = (p, l) => `<button class="hub-pill-btn${EX.preset===p?' active':''}" onclick="exChip('${p}')">${l}</button>`;
+  const presets = [['30d','Last 30 days'],['month','This month'],['3mo','Last 3 mo'],['fy','This FY'],['all','All']];
+  const catOpts = ['<option value="">All categories</option>']
+    .concat((EX_CATEGORIES||[]).map(c => `<option value="${attrEsc(c)}"${EX.category===c?' selected':''}>${c}</option>`)).join('');
+  const customOn = EX.preset === 'custom';
+  const inp = 'padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:13px';
+  return `
+  <div style="padding:20px">
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:18px;padding:14px;background:var(--bg-2);border-radius:10px">
+      ${presets.map(([p,l]) => chip(p,l)).join('')}
+      ${chip('custom','📅 Custom')}
+      <div id="ex-custom" style="display:${customOn?'flex':'none'};gap:6px;align-items:center;margin-left:4px">
+        <input type="date" id="ex-from" value="${EX.from}" style="${inp}">
+        <span style="color:var(--ink-4)">→</span>
+        <input type="date" id="ex-to" value="${EX.to}" style="${inp}">
+        <button onclick="exApplyCustom()" style="padding:6px 12px;background:var(--sage);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600">Apply</button>
+      </div>
+      <span style="width:1px;height:24px;background:var(--border);margin:0 4px"></span>
+      <input type="text" id="ex-project" value="${attrEsc(EX.project)}" placeholder="Project…" onkeydown="if(event.key==='Enter')exApplyFilters()" style="${inp};width:150px">
+      <select id="ex-category" onchange="exApplyFilters()" style="${inp};max-width:200px">${catOpts}</select>
+      <button onclick="exApplyFilters()" style="padding:6px 14px;background:var(--bg-1);color:var(--ink-2);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:13px">Refresh</button>
+    </div>
+    <div id="ex-table-wrap" style="overflow-x:auto"><div style="color:var(--ink-4);padding:20px;text-align:center">Loading…</div></div>
+  </div>`;
+}
+
+function exCapture() {
+  const pr = document.getElementById('ex-project');
+  const c  = document.getElementById('ex-category');
+  if (pr) EX.project = pr.value;
+  if (c)  EX.category = c.value;
+}
+async function exChip(p)        { exCapture(); exSetPreset(p); await renderExpenses(); }
+async function exApplyCustom()  { exCapture(); EX.from = document.getElementById('ex-from')?.value || EX.from; EX.to = document.getElementById('ex-to')?.value || EX.to; EX.preset='custom'; await renderExpenses(); }
+function exApplyFilters()       { exCapture(); exRenderTable(); }
+
+function exRenderTable() {
+  const wrap = document.getElementById('ex-table-wrap');
+  if (!wrap) return;
+  let rows = (D.expense_log || []).filter(e => e.date >= EX.from && e.date <= EX.to);
+  if (EX.project)  rows = rows.filter(e => (e.project||'').toLowerCase().includes(EX.project.toLowerCase()));
+  if (EX.category) rows = rows.filter(e => (e.category||'') === EX.category);
+  rows.sort((a,b) => String(b.date).localeCompare(String(a.date)));
+
+  if (!rows.length) {
+    wrap.innerHTML = '<div style="color:var(--ink-4);padding:20px;text-align:center">No expenses found for this filter.</div>';
+    return;
+  }
+  const total = rows.reduce((s,e) => s + (Number(e.amount)||0), 0);
+  const cell = 'width:100%;min-width:90px;padding:4px 6px;border:1px solid transparent;border-radius:5px;background:transparent;color:var(--ink-2);font-size:12px';
+
+  wrap.innerHTML = `
+    <div style="display:flex;gap:16px;margin-bottom:12px">
+      <span style="font-size:13px;color:var(--ink-4)">${rows.length} expenses</span>
+      <span style="font-size:13px;color:var(--orange)">${fmt(total)} total (ex GST)</span>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="background:var(--bg-2);text-align:left">
+        <th style="padding:8px 10px;font-weight:600;white-space:nowrap">Date</th>
+        <th style="padding:8px 10px;font-weight:600">Supplier</th>
+        <th style="padding:8px 10px;font-weight:600">Description</th>
+        <th style="padding:8px 10px;font-weight:600">Category</th>
+        <th style="padding:8px 10px;font-weight:600">Project</th>
+        <th style="padding:8px 10px;font-weight:600;text-align:right">Qty</th>
+        <th style="padding:8px 10px;font-weight:600;text-align:right">Unit</th>
+        <th style="padding:8px 10px;font-weight:600;text-align:right">Amount</th>
+        <th style="padding:8px 10px;font-weight:600">Notes</th>
+      </tr></thead>
+      <tbody>
+        ${rows.map((e,i) => `
+          <tr style="border-top:1px solid var(--border);background:${i%2===0?'var(--bg-1)':'var(--bg-2)'}">
+            <td style="padding:7px 10px;white-space:nowrap;color:var(--ink-3)">${fmtDMY(e.date)}</td>
+            <td style="padding:7px 10px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.supplier||'—'}</td>
+            <td style="padding:5px 6px"><input class="ex-cell" data-id="${attrEsc(e.id)}" data-field="description" value="${attrEsc(e.description||'')}" style="${cell}"></td>
+            <td style="padding:5px 6px"><input class="ex-cell" data-id="${attrEsc(e.id)}" data-field="category" value="${attrEsc(e.category||'')}" style="${cell};min-width:110px"></td>
+            <td style="padding:5px 6px"><input class="ex-cell" data-id="${attrEsc(e.id)}" data-field="project" value="${attrEsc(e.project||'')}" style="${cell};min-width:110px;color:var(--ink-3)"></td>
+            <td style="padding:7px 10px;text-align:right;color:var(--ink-3)">${e.qty!=null?e.qty:''}</td>
+            <td style="padding:7px 10px;text-align:right;color:var(--ink-3)">${e.unit_price!=null?fmt(e.unit_price):''}</td>
+            <td style="padding:7px 10px;text-align:right;color:var(--orange);font-weight:600">${fmt(e.amount)}</td>
+            <td style="padding:5px 6px"><input class="ex-cell" data-id="${attrEsc(e.id)}" data-field="notes" value="${attrEsc(e.notes||'')}" style="${cell};min-width:130px;color:var(--ink-4)"></td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+
+  wrap.querySelectorAll('input.ex-cell').forEach(inp => {
+    inp.addEventListener('focus', () => { inp.style.border='1px solid var(--border)'; inp.style.background='var(--bg-1)'; });
+    inp.addEventListener('blur',  () => { inp.style.border='1px solid transparent'; inp.style.background='transparent'; });
+    inp.addEventListener('change', () => exSaveCell(inp));
+    inp.addEventListener('keydown', e => { if (e.key==='Enter') inp.blur(); });
+    if (inp.dataset.field === 'project')  smartSuggest(inp, ssProjectNames, () => exSaveCell(inp));
+    if (inp.dataset.field === 'category') smartSuggest(inp, () => EX_CATEGORIES || [], () => exSaveCell(inp));
+  });
+}
+
+async function exSaveCell(inp) {
+  const id = inp.dataset.id, field = inp.dataset.field, value = inp.value.trim();
+  const row = (D.expense_log || []).find(e => String(e.id) === String(id));
+  if (row && (row[field] || '') === value) return;
+  try {
+    await hubWrite('expense_log', id, { [field]: value });
     if (row) row[field] = value;
     inp.style.outline = '2px solid var(--sage)';
     setTimeout(() => { inp.style.outline = 'none'; }, 700);

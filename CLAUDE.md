@@ -23,11 +23,34 @@ A single-page business operating system for **Matiere Pty Ltd**, a carpentry and
 | `data.json` | **Legacy** — the original database file. Superseded by Supabase (see below); no longer the live data source. Kept locally for reference/migration history only |
 | `supabase_setup.sql` | One-time setup script that created the Supabase tables and migrated the original `data.json` rows in |
 | `netlify/functions/claude-parse.js` | Parses natural language input via Claude Haiku API, writes updates directly to **Supabase** (`SUPABASE_URL`/`SUPABASE_SERVICE_KEY`) — no longer touches `data.json` or GitHub |
+| `netlify/functions/hub-write.js` | **Generic HUB write API** — the single endpoint for all direct-from-HUB structured edits (inline table edits, buttons, forms). Browser anon key stays read-only; this writes with the service key against a server-side allow-list (`WRITABLE`). Add a table/column there to make it editable — no Supabase admin needed. POST `{table,id,fields}`. |
 | `netlify/functions/xero-sync.js` | Syncs financial data from Xero into the Supabase `xero_cache` table (was: `data.json`) |
 | `XERO_NOTES.md` | Xero connection playbook — OAuth flow, token-rotation race fix, P&L date-range rules, all failed approaches. Read before touching anything Xero-related |
 | `netlify.toml` | Netlify build config |
 | `BUGS.md` | Known issues tracker — check before suggesting fixes |
 | `DECISIONS.md` | Architectural decisions log — check before suggesting alternatives |
+
+---
+
+## Shared UI styles & design tokens (keep the HUB consistent)
+
+These are **single sources of truth** — change them in one place and the new look rolls out across the whole HUB. Do not re-introduce one-off inline styles for these.
+
+- **Pill / preset buttons → `.hub-pill-btn`** (in the `<style>` block, defined together with its `.ts-range-btn` alias). Used by the Timesheet period selector, the Transactions date chips, and the Expenses date chips. To restyle every range/preset button hub-wide, edit this one rule (`.hub-pill-btn,.ts-range-btn { … }` and its `:hover` / `.active`). Active state = amber bg, black text.
+- **Categorical colour palette → `HUB_PALETTE`** (JS const, the 10-colour neon set). The canonical palette for anything needing multiple distinct colours (project colours, charts, category tags). `PROJ_PALETTE = HUB_PALETTE`. To recolour the HUB, edit `HUB_PALETTE`. Use the `textOn(hex)` helper to pick black/white label text for contrast on a palette colour.
+- **CSS variables** live in `:root`. Note `--bg-1` (#141414, elevated surface for inputs/dropdowns/active rows) and `--ink-1` (#ffffff, primary input text) — both are defined; earlier code referenced them before they existed, which rendered Smart Suggest dropdowns transparent. If you reference a `--var`, confirm it exists in `:root` first.
+
+---
+
+## Tabs (front-end `showTab` pages)
+
+Overview · Cash & Invoices · Timesheets · Profitability · P&L · Materials · Projects · Quotes & Pricing · Activity Log · Transactions · **Expenses** · **For Action**
+
+- **Transactions** — bank_transactions browser; date chips, type/contact (Smart Suggest)/account filters; inline-editable Project (Smart Suggest) + Notes (→ hub-write).
+- **Expenses** — review/edit what's been parsed into `expense_log`; date chips + project + category filters; inline-editable Description, Category (Smart Suggest from `category_list` ∪ used categories), Project (Smart Suggest), Notes (→ hub-write).
+- **For Action** — aggregates everything needing review (expense matches, overdue invoices, uncategorised transactions, untagged contacts) with a count badge.
+
+**Smart Suggest** = the hub-wide type-ahead pattern (`smartSuggest(input, getItems, onPick)`): a fixed-position, body-appended dropdown that suggests existing values as you type. Used on Contact / Project / Category fields.
 
 ---
 
@@ -39,7 +62,10 @@ As of June 2026 the live database is **Supabase** (project URL `https://nwpzjqbl
 
 ```
 timesheets         { id, date, project, hours, rate, value, employee, notes, created_at }
-expense_log        { id, date, supplier, description, category, project, qty, unit_price, amount, created_at }
+expense_log        { id, date, supplier, description, category, project, qty, unit_price, amount, notes, created_at }
+                   ← notes column added 2026-06-20 for the Expenses tab (HUB-only annotation).
+                     SQL: ALTER TABLE expense_log ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT '';
+                     Editable from the Expenses tab via hub-write (project, category, description, notes).
 projects           { id, name, status, quoted, notes, created_at }
 xero_cache         { key, data (JSONB), updated_at }
                    ← key is one of: kpis, monthly, open_invoices, top_customers,
