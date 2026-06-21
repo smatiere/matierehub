@@ -107,7 +107,7 @@ exports.handler = async (event) => {
 
   try {
     const body = JSON.parse(event.body || '{}');
-    const { text, pendingAction, images } = body;
+    const { text, pendingAction, images, previewOnly } = body;
     const hasImages = images && images.length > 0;
     if (!text && !pendingAction && !hasImages) return { statusCode: 400, headers, body: JSON.stringify({ error: 'No input provided' }) };
 
@@ -481,6 +481,51 @@ Rules:
         if (score > bestScore) { bestScore = score; bestMatch = p; }
       }
       return { match: bestMatch, score: bestScore };
+    }
+
+    // ── PREVIEW MODE: parse + normalise but DO NOT save ──────────────────────
+    // The dedicated Scan-Receipt page calls this with previewOnly:true to get an
+    // editable line array back. Nothing is written here — the page lets Seb edit
+    // the lines, then POSTs the confirmed ones back as
+    // pendingAction:{action:'expense_batch',items:[…]} which reuses the normal
+    // save path below. Category is left BLANK when the model is unsure so the UI
+    // can flag it (the commit path defaults blank → 'Sundry Expenses').
+    if (previewOnly) {
+      if (parsed.action === 'expense_batch') {
+        const batchValidProjects = [...projectList, ...NON_BILLABLE];
+        const previewItems = (parsed.items || [])
+          .filter(i => i && (i.type === 'expense' || i.action === 'new'))
+          .map(item => {
+            const qty       = parseFloat(item.qty) || 1;
+            const unitPrice = parseFloat(item.unit_price) || (parseFloat(item.amount) / qty) || 0;
+            const amount    = Math.round(qty * unitPrice * 100) / 100;
+            let lineProject = (item.project || '').trim();
+            if (lineProject) {
+              const { match, score } = fuzzyMatchProject(lineProject, batchValidProjects);
+              lineProject = (match && score >= 0.6) ? match : '';
+            }
+            return {
+              action: 'new', type: 'expense',
+              date:        item.date || todayStr,
+              supplier:    item.supplier || '',
+              description: item.description || '',
+              category:    item.category || '',
+              project:     lineProject,
+              qty,
+              unit_price:  Math.round(unitPrice * 100) / 100,
+              amount
+            };
+          });
+        const supplier = previewItems.find(i => i.supplier)?.supplier || '';
+        return { statusCode: 200, headers, body: JSON.stringify({
+          status: 'preview', action: 'expense_batch',
+          items: previewItems, count: previewItems.length, supplier
+        })};
+      }
+      // Non-batch input (e.g. a single typed expense) — return parsed, unsaved.
+      return { statusCode: 200, headers, body: JSON.stringify({
+        status: 'preview', action: parsed.action, parsed
+      })};
     }
 
     const needsProjectCheck = parsed.action === 'new' && parsed.project &&

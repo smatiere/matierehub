@@ -240,6 +240,7 @@ body{padding-bottom:62px}
   <div class="tab" onclick="showTab('projects',this)">Projects</div>
   <div class="tab" onclick="showTab('quotes',this)">Quotes & Pricing</div>
   <div class="tab" onclick="showTab('transactions',this)">Transactions</div>
+  <div class="tab" onclick="showTab('receipts',this)">Scan Receipt</div>
   <div class="tab" onclick="showTab('expenses',this)">Expenses</div>
   <div class="tab" onclick="showTab('action',this)">For Action <span id="fa-count" style="display:none;background:var(--orange);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;font-weight:600;margin-left:4px"></span></div>
 </div>
@@ -249,6 +250,7 @@ body{padding-bottom:62px}
 <div class="page" id="page-projects"></div>
 <div class="page" id="page-quotes"></div>
 <div class="page" id="page-transactions"></div>
+<div class="page" id="page-receipts"></div>
 <div class="page" id="page-expenses"></div>
 <div class="page" id="page-action"></div>
 
@@ -377,6 +379,7 @@ function showTab(name, el) {
   if (name === 'pnl') renderPnL();
   if (name === 'transactions') renderTransactions();
   if (name === 'expenses') renderExpenses();
+  if (name === 'receipts') renderReceipts();
   if (name === 'action') renderForAction();
   if (name === 'projects' && D) renderProjects(D.kpis);
 }
@@ -3159,6 +3162,342 @@ async function exSaveCell(inp) {
     inp.style.outline = '2px solid var(--pink)';
     alert('Could not save: ' + e.message);
   }
+}
+
+// ── Scan Receipt tab ──────────────────────────────────────────────────────────
+// Preview-before-save expense capture. A receipt (image/PDF) is parsed by
+// claude-parse (previewOnly:true → no DB write), returns an editable line array.
+// Seb corrects project/category/qty/price, excludes junk lines, then Save commits
+// the batch via the existing expense_batch path (pendingAction). Second sub-view
+// is a Materials Catalog deduped from expense_log, for reuse when quoting.
+const RC = { view:'scan', items:null, supplier:'', files:[], parsing:false, catSearch:'', catSupplier:'' };
+
+async function renderReceipts() {
+  const el = document.getElementById('page-receipts');
+  if (!el || !D) return;
+  await exLoadCategories();           // populates EX_CATEGORIES (shared category list)
+  el.innerHTML = rcShell();
+  if (RC.view === 'scan') rcRenderScan();
+  else rcRenderCatalog();
+}
+
+function rcShell() {
+  const tab = (v,l) => `<button class="hub-pill-btn${RC.view===v?' active':''}" onclick="rcSetView('${v}')">${l}</button>`;
+  return `
+  <div style="padding:20px">
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:18px">
+      ${tab('scan','📷 Scan receipt')}
+      ${tab('catalog','📚 Materials catalog')}
+    </div>
+    <div id="rc-body"></div>
+  </div>`;
+}
+
+function rcSetView(v) { RC.view = v; renderReceipts(); }
+
+// ── Scan sub-view ───────────────────────────────────────────────────────────
+function rcRenderScan() {
+  const body = document.getElementById('rc-body');
+  if (!body) return;
+  const inp = 'padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:13px';
+  body.innerHTML = `
+    <div id="rc-drop" style="border:2px dashed var(--border-2);border-radius:12px;padding:26px;text-align:center;background:var(--bg-2);cursor:pointer;transition:all .15s"
+         onclick="document.getElementById('rc-file-input').click()">
+      <div style="font-size:30px;margin-bottom:8px">🧾</div>
+      <div style="font-weight:600;color:var(--ink-2);margin-bottom:4px">Drop a receipt here or click to choose</div>
+      <div style="font-size:12px;color:var(--ink-4)">Photo (JPG/PNG) or PDF — every line is extracted for review before saving</div>
+      <input id="rc-file-input" type="file" accept="image/*,.pdf" multiple style="display:none" onchange="rcFilesSelected(this.files)">
+    </div>
+    <div id="rc-chips" style="display:none;flex-wrap:wrap;gap:8px;margin-top:12px"></div>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:14px">
+      <input type="text" id="rc-note" placeholder="Optional note — e.g. project name for the whole receipt…" style="${inp};flex:1;min-width:240px" value="${attrEsc(RC.note||'')}">
+      <button id="rc-parse-btn" onclick="rcParse()" style="padding:9px 18px;background:var(--amber);color:#000;border:none;border-radius:7px;cursor:pointer;font-size:13px;font-weight:700">Parse receipt</button>
+    </div>
+    <div id="rc-preview" style="margin-top:22px"></div>`;
+
+  // Drag & drop wiring
+  const drop = document.getElementById('rc-drop');
+  if (drop) {
+    drop.addEventListener('dragover', e => { e.preventDefault(); drop.style.borderColor='var(--amber)'; drop.style.background='var(--bg-1)'; });
+    drop.addEventListener('dragleave', () => { drop.style.borderColor='var(--border-2)'; drop.style.background='var(--bg-2)'; });
+    drop.addEventListener('drop', e => { e.preventDefault(); drop.style.borderColor='var(--border-2)'; drop.style.background='var(--bg-2)'; if (e.dataTransfer.files?.length) rcFilesSelected(e.dataTransfer.files); });
+  }
+  rcRenderChips();
+  if (RC.items) rcRenderTable();
+}
+
+async function rcFilesSelected(files) {
+  for (const file of files) {
+    if (!file.type.startsWith('image/') && file.type !== 'application/pdf') continue;
+    try {
+      const { data, type } = await fileToBase64(file);   // reuses the Claude-bar helper (1568px/0.9 downscale)
+      RC.files.push({ name: file.name, type, data });
+    } catch(e) { claudeToast('Could not read file: ' + file.name, 'error'); }
+  }
+  const fi = document.getElementById('rc-file-input'); if (fi) fi.value = '';
+  rcRenderChips();
+}
+
+function rcRemoveFile(i) { RC.files.splice(i,1); rcRenderChips(); }
+
+function rcRenderChips() {
+  const c = document.getElementById('rc-chips');
+  if (!c) return;
+  if (!RC.files.length) { c.style.display='none'; c.innerHTML=''; return; }
+  c.style.display='flex';
+  c.innerHTML = RC.files.map((f,i) => {
+    const prev = f.type.startsWith('image/')
+      ? `<img src="data:${f.type};base64,${f.data}" style="width:22px;height:22px;object-fit:cover;border-radius:4px">`
+      : `<span style="font-size:15px">📄</span>`;
+    const name = f.name.length > 22 ? f.name.slice(0,19)+'…' : f.name;
+    return `<span class="claude-chip">${prev}<span class="claude-chip-name">${name.replace(/</g,'&lt;')}</span><span class="claude-chip-rm" onclick="rcRemoveFile(${i})">✕</span></span>`;
+  }).join('');
+}
+
+async function rcParse() {
+  RC.note = (document.getElementById('rc-note')||{}).value || '';
+  if (!RC.files.length) { claudeToast('Attach a receipt photo or PDF first', 'unclear'); return; }
+  const btn = document.getElementById('rc-parse-btn');
+  const prev = document.getElementById('rc-preview');
+  if (btn) { btn.disabled = true; btn.textContent = 'Parsing…'; }
+  if (prev) prev.innerHTML = '<div style="color:var(--ink-4);padding:20px;text-align:center"><span class="spinner-sm"></span> Reading every line on the receipt…</div>';
+  try {
+    const res = await fetch('/.netlify/functions/claude-parse', {
+      method: 'POST', headers: { 'Content-Type':'application/json' },
+      body: JSON.stringify({
+        previewOnly: true,
+        text: RC.note.trim() || undefined,
+        images: RC.files.map(f => ({ name:f.name, mediaType:f.type, data:f.data }))
+      })
+    });
+    const data = await res.json();
+    if (data.status !== 'preview' || !Array.isArray(data.items)) {
+      throw new Error(data.message || 'Could not parse the receipt');
+    }
+    RC.items = data.items.map(it => ({ ...it, _inc: true }));
+    RC.supplier = data.supplier || RC.items.find(i=>i.supplier)?.supplier || '';
+    rcRenderTable();
+  } catch(err) {
+    if (prev) prev.innerHTML = `<div style="color:var(--pink);padding:20px;text-align:center">⚠ ${(err.message||'Parse failed').replace(/</g,'&lt;')}</div>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Parse receipt'; }
+  }
+}
+
+function rcRecalc(idx) {
+  const it = RC.items[idx]; if (!it) return;
+  const qty = parseFloat(it.qty)||0, up = parseFloat(it.unit_price)||0;
+  it.amount = Math.round(qty*up*100)/100;
+  const amtCell = document.querySelector(`.rc-amt[data-idx="${idx}"]`);
+  if (amtCell) amtCell.textContent = fmt(it.amount);
+  rcUpdateTotal();
+}
+
+function rcUpdateTotal() {
+  const t = (RC.items||[]).filter(r=>r._inc).reduce((s,r)=>s+(Number(r.amount)||0),0);
+  const n = (RC.items||[]).filter(r=>r._inc).length;
+  const el = document.getElementById('rc-total');
+  if (el) el.innerHTML = `<span style="color:var(--ink-4)">${n} line${n!==1?'s':''} to save</span> · <span style="color:var(--amber);font-weight:700">${fmt(Math.round(t*100)/100)} total (ex GST)</span>`;
+}
+
+function rcRenderTable() {
+  const wrap = document.getElementById('rc-preview');
+  if (!wrap) return;
+  if (!RC.items || !RC.items.length) {
+    wrap.innerHTML = '<div style="color:var(--ink-4);padding:20px;text-align:center">No line items found. Try a clearer photo, or add lines manually.</div>';
+    return;
+  }
+  const cell = 'width:100%;padding:5px 7px;border:1px solid transparent;border-radius:5px;background:transparent;color:var(--ink-2);font-size:12px';
+  const numCell = cell + ';text-align:right';
+  const supplier = RC.supplier || RC.items.find(i=>i.supplier)?.supplier || '—';
+  wrap.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:10px">
+      <div style="font-size:13px;color:var(--ink-3)">Supplier: <strong style="color:var(--ink-2)">${attrEsc(supplier)}</strong> · <span id="rc-total"></span></div>
+      <div style="display:flex;gap:8px">
+        <button onclick="rcAddRow()" style="padding:7px 12px;background:var(--bg-1);color:var(--ink-2);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:12px">+ Add line</button>
+        <button id="rc-save-btn" onclick="rcSave()" style="padding:7px 16px;background:var(--sage);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700">Save lines</button>
+      </div>
+    </div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="background:var(--bg-2);text-align:left">
+        <th style="padding:8px 8px;width:34px;text-align:center" title="Include">✓</th>
+        <th style="padding:8px 10px;font-weight:600">Description</th>
+        <th style="padding:8px 10px;font-weight:600">Category</th>
+        <th style="padding:8px 10px;font-weight:600">Project</th>
+        <th style="padding:8px 10px;font-weight:600;text-align:right">Qty</th>
+        <th style="padding:8px 10px;font-weight:600;text-align:right">Unit $</th>
+        <th style="padding:8px 10px;font-weight:600;text-align:right">Amount</th>
+        <th style="padding:8px 8px;width:30px"></th>
+      </tr></thead>
+      <tbody>
+        ${RC.items.map((it,i) => {
+          const lowCat  = !it.category;
+          const lowProj = !it.project;
+          return `
+          <tr data-row="${i}" style="border-top:1px solid var(--border);background:${it._inc?(i%2===0?'var(--bg-1)':'var(--bg-2)'):'transparent'};opacity:${it._inc?1:0.45}">
+            <td style="text-align:center"><input type="checkbox" class="rc-inc" data-idx="${i}" ${it._inc?'checked':''}></td>
+            <td style="padding:4px 6px"><input class="rc-cell" data-idx="${i}" data-field="description" value="${attrEsc(it.description||'')}" style="${cell};min-width:170px"></td>
+            <td style="padding:4px 6px"><input class="rc-cell" data-idx="${i}" data-field="category" value="${attrEsc(it.category||'')}" placeholder="${lowCat?'pick…':''}" style="${cell};min-width:120px${lowCat?';border-color:var(--amber)':''}"></td>
+            <td style="padding:4px 6px"><input class="rc-cell" data-idx="${i}" data-field="project" value="${attrEsc(it.project||'')}" placeholder="${lowProj?'pick…':''}" style="${cell};min-width:120px;color:var(--ink-3)${lowProj?';border-color:var(--amber)':''}"></td>
+            <td style="padding:4px 6px"><input class="rc-cell" data-idx="${i}" data-field="qty" value="${attrEsc(it.qty!=null?it.qty:'')}" style="${numCell};min-width:50px"></td>
+            <td style="padding:4px 6px"><input class="rc-cell" data-idx="${i}" data-field="unit_price" value="${attrEsc(it.unit_price!=null?it.unit_price:'')}" style="${numCell};min-width:60px"></td>
+            <td class="rc-amt" data-idx="${i}" style="padding:7px 10px;text-align:right;color:var(--amber);font-weight:600">${fmt(it.amount||0)}</td>
+            <td style="text-align:center"><span onclick="rcDeleteRow(${i})" title="Remove line" style="cursor:pointer;color:var(--ink-4);font-size:14px">✕</span></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table></div>
+    <div style="font-size:11px;color:var(--ink-4);margin-top:10px">Amber outline = blank field to review. Untick a row to skip it (subtotals, GST, junk). Nothing is saved until you press <strong>Save lines</strong>.</div>`;
+
+  // Wire inputs
+  wrap.querySelectorAll('input.rc-cell').forEach(inp => {
+    const idx = +inp.dataset.idx, field = inp.dataset.field;
+    inp.addEventListener('focus', () => { inp.style.border='1px solid var(--border)'; inp.style.background='var(--bg-1)'; });
+    inp.addEventListener('blur',  () => { inp.style.border='1px solid transparent'; inp.style.background='transparent'; });
+    inp.addEventListener('keydown', e => { if (e.key==='Enter') inp.blur(); });
+    inp.addEventListener('change', () => {
+      RC.items[idx][field] = (field==='qty'||field==='unit_price') ? (parseFloat(inp.value)||0) : inp.value.trim();
+      if (field==='qty'||field==='unit_price') rcRecalc(idx);
+    });
+    if (field === 'project')  smartSuggest(inp, ssProjectNames, v => { RC.items[idx].project = v; });
+    if (field === 'category') smartSuggest(inp, () => EX_CATEGORIES || [], v => { RC.items[idx].category = v; });
+  });
+  wrap.querySelectorAll('input.rc-inc').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const idx = +cb.dataset.idx;
+      RC.items[idx]._inc = cb.checked;
+      const tr = wrap.querySelector(`tr[data-row="${idx}"]`);
+      if (tr) { tr.style.opacity = cb.checked ? 1 : 0.45; tr.style.background = cb.checked ? (idx%2===0?'var(--bg-1)':'var(--bg-2)') : 'transparent'; }
+      rcUpdateTotal();
+    });
+  });
+  rcUpdateTotal();
+}
+
+function rcAddRow() {
+  RC.items = RC.items || [];
+  RC.items.push({ action:'new', type:'expense', date:(RC.items[0]?.date)||new Date().toISOString().slice(0,10),
+    supplier:RC.supplier||'', description:'', category:'', project:'', qty:1, unit_price:0, amount:0, _inc:true });
+  rcRenderTable();
+}
+
+function rcDeleteRow(i) { RC.items.splice(i,1); rcRenderTable(); }
+
+async function rcSave() {
+  const rows = (RC.items||[]).filter(r => r._inc);
+  if (!rows.length) { claudeToast('No lines ticked to save', 'unclear'); return; }
+  const items = rows.map(r => ({
+    action:'new', type:'expense', date:r.date, supplier:r.supplier||RC.supplier||'',
+    description:r.description||'', category:r.category||'', project:r.project||'',
+    qty:parseFloat(r.qty)||1, unit_price:parseFloat(r.unit_price)||0, amount:r.amount
+  }));
+  const btn = document.getElementById('rc-save-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  try {
+    const res = await fetch('/.netlify/functions/claude-parse', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ pendingAction: { action:'expense_batch', items } })
+    });
+    const data = await res.json();
+    if (data.status !== 'success') throw new Error(data.message || 'Save failed');
+    // Optimistic in-memory update so Expenses/Projects reflect it immediately
+    if (data.entries && D) { D.expense_log = D.expense_log || []; data.entries.forEach(e => D.expense_log.push(e)); }
+    claudeToast(`✓ ${data.label || (items.length+' lines saved')}`, 'success');
+    RC.items = null; RC.files = []; RC.supplier = ''; RC.note = '';
+    rcRenderScan();
+  } catch(err) {
+    claudeToast('⚠ ' + (err.message||'Save failed'), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Save lines'; }
+  }
+}
+
+// ── Materials catalog sub-view ──────────────────────────────────────────────
+// Dedupes expense_log by supplier+description (case-insensitive, trimmed).
+// Shows latest unit price + last-seen date + category + times purchased — the
+// reusable price reference for building quotes.
+function rcBuildCatalog() {
+  const map = {};
+  (D.expense_log || []).forEach(e => {
+    const desc = (e.description||'').trim();
+    if (!desc) return;
+    const supplier = (e.supplier||'').trim();
+    const key = (supplier+'||'+desc).toLowerCase();
+    const date = (e.date||'').slice(0,10);
+    if (!map[key]) {
+      map[key] = { supplier, description:desc, category:e.category||'', unit_price:Number(e.unit_price)||0, date, count:1 };
+    } else {
+      const m = map[key];
+      m.count++;
+      if (date > m.date) { m.date = date; m.unit_price = Number(e.unit_price)||m.unit_price; m.category = e.category||m.category; }
+    }
+  });
+  return Object.values(map).sort((a,b) => a.description.localeCompare(b.description));
+}
+
+function rcRenderCatalog() {
+  const body = document.getElementById('rc-body');
+  if (!body) return;
+  const inp = 'padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:13px';
+  body.innerHTML = `
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:16px;padding:14px;background:var(--bg-2);border-radius:10px">
+      <input type="text" id="rc-cat-search" placeholder="Search description…" value="${attrEsc(RC.catSearch)}" oninput="rcCatFilter()" style="${inp};flex:1;min-width:200px">
+      <input type="text" id="rc-cat-supplier" placeholder="Supplier…" value="${attrEsc(RC.catSupplier)}" oninput="rcCatFilter()" style="${inp};width:180px">
+    </div>
+    <div id="rc-cat-table" style="overflow-x:auto"></div>`;
+  rcRenderCatalogTable();
+}
+
+function rcCatFilter() {
+  RC.catSearch   = (document.getElementById('rc-cat-search')||{}).value || '';
+  RC.catSupplier = (document.getElementById('rc-cat-supplier')||{}).value || '';
+  rcRenderCatalogTable();
+}
+
+function rcRenderCatalogTable() {
+  const wrap = document.getElementById('rc-cat-table');
+  if (!wrap) return;
+  let rows = rcBuildCatalog();
+  const s = RC.catSearch.trim().toLowerCase(), sup = RC.catSupplier.trim().toLowerCase();
+  if (s)   rows = rows.filter(r => r.description.toLowerCase().includes(s));
+  if (sup) rows = rows.filter(r => (r.supplier||'').toLowerCase().includes(sup));
+  if (!rows.length) {
+    wrap.innerHTML = '<div style="color:var(--ink-4);padding:20px;text-align:center">No catalog items yet — they build up automatically as you save receipts.</div>';
+    return;
+  }
+  wrap.innerHTML = `
+    <div style="font-size:13px;color:var(--ink-4);margin-bottom:10px">${rows.length} unique item${rows.length!==1?'s':''}</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="background:var(--bg-2);text-align:left">
+        <th style="padding:8px 10px;font-weight:600">Description</th>
+        <th style="padding:8px 10px;font-weight:600">Supplier</th>
+        <th style="padding:8px 10px;font-weight:600">Category</th>
+        <th style="padding:8px 10px;font-weight:600;text-align:right">Latest unit $</th>
+        <th style="padding:8px 10px;font-weight:600;text-align:right">Times</th>
+        <th style="padding:8px 10px;font-weight:600">Last seen</th>
+        <th style="padding:8px 8px;width:90px"></th>
+      </tr></thead>
+      <tbody>
+        ${rows.map((r,i) => `
+          <tr style="border-top:1px solid var(--border);background:${i%2===0?'var(--bg-1)':'var(--bg-2)'}">
+            <td style="padding:7px 10px;color:var(--ink-2)">${attrEsc(r.description)}</td>
+            <td style="padding:7px 10px;color:var(--ink-3)">${attrEsc(r.supplier||'—')}</td>
+            <td style="padding:7px 10px;color:var(--ink-4)">${attrEsc(r.category||'—')}</td>
+            <td style="padding:7px 10px;text-align:right;color:var(--amber);font-weight:600">${fmt(r.unit_price)}</td>
+            <td style="padding:7px 10px;text-align:right;color:var(--ink-4)">${r.count}</td>
+            <td style="padding:7px 10px;color:var(--ink-4);white-space:nowrap">${fmtDMY(r.date)}</td>
+            <td style="padding:5px 8px;text-align:right"><button onclick='rcCopyLine(${JSON.stringify({d:r.description,p:r.unit_price,s:r.supplier}).replace(/'/g,"&#39;")})' style="padding:5px 9px;background:var(--bg-1);color:var(--ink-3);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:11px">Copy</button></td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+function rcCopyLine(o) {
+  const line = `${o.d} — ${fmt(o.p)} ea${o.s?(' ('+o.s+')'):''}`;
+  if (navigator.clipboard) navigator.clipboard.writeText(line).then(
+    () => claudeToast('✓ Copied for quote: ' + line.slice(0,40), 'success'),
+    () => claudeToast('Copy failed — ' + line, 'unclear')
+  );
+  else claudeToast(line, 'unclear');
 }
 
 // ── For Action tab ────────────────────────────────────────────────────────────
