@@ -56,6 +56,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-siz
 .tab{padding:12px 18px;font-size:11px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-4);cursor:pointer;white-space:nowrap;border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .2s}
 .tab:hover{color:var(--ink-2)}
 .tab.active{color:var(--amber);border-bottom-color:var(--amber);font-weight:700}
+/* iOS Safari zooms the page when a focused input is <16px. Bump the Scan Receipt
+   inputs to 16px on phones so editing a receipt doesn't trigger that zoom. Scoped
+   to the new page only so it never disturbs the desktop table layouts. */
+@media (max-width:640px){
+  #page-receipts input,#page-receipts select{font-size:16px}
+}
 
 /* ── Pages ── */
 .page{display:none;padding:20px;max-width:1040px;margin:0 auto}
@@ -3304,7 +3310,10 @@ function rcRenderTable() {
   const wrap = document.getElementById('rc-preview');
   if (!wrap) return;
   if (!RC.items || !RC.items.length) {
-    wrap.innerHTML = '<div style="color:var(--ink-4);padding:20px;text-align:center">No line items found. Try a clearer photo, or add lines manually.</div>';
+    wrap.innerHTML = `<div style="padding:20px;text-align:center">
+      <div style="color:var(--ink-4);margin-bottom:12px">No line items found. Try a clearer photo, or add lines by hand.</div>
+      <button onclick="rcAddRow()" style="padding:10px 18px;background:var(--bg-2);color:var(--ink-2);border:1px dashed var(--border-2);border-radius:8px;cursor:pointer;font-size:13px;font-weight:600">+ Add a line</button>
+    </div>`;
     return;
   }
   const cell = 'width:100%;padding:5px 7px;border:1px solid transparent;border-radius:5px;background:transparent;color:var(--ink-2);font-size:12px';
@@ -3339,15 +3348,18 @@ function rcRenderTable() {
             <td style="padding:4px 6px"><input class="rc-cell" data-idx="${i}" data-field="description" value="${attrEsc(it.description||'')}" style="${cell};min-width:170px"></td>
             <td style="padding:4px 6px"><input class="rc-cell" data-idx="${i}" data-field="category" value="${attrEsc(it.category||'')}" placeholder="${lowCat?'pick…':''}" style="${cell};min-width:120px${lowCat?';border-color:var(--amber)':''}"></td>
             <td style="padding:4px 6px"><input class="rc-cell" data-idx="${i}" data-field="project" value="${attrEsc(it.project||'')}" placeholder="${lowProj?'pick…':''}" style="${cell};min-width:120px;color:var(--ink-3)${lowProj?';border-color:var(--amber)':''}"></td>
-            <td style="padding:4px 6px"><input class="rc-cell" data-idx="${i}" data-field="qty" value="${attrEsc(it.qty!=null?it.qty:'')}" style="${numCell};min-width:50px"></td>
-            <td style="padding:4px 6px"><input class="rc-cell" data-idx="${i}" data-field="unit_price" value="${attrEsc(it.unit_price!=null?it.unit_price:'')}" style="${numCell};min-width:60px"></td>
+            <td style="padding:4px 6px"><input class="rc-cell" inputmode="decimal" data-idx="${i}" data-field="qty" value="${attrEsc(it.qty!=null?it.qty:'')}" style="${numCell};min-width:50px"></td>
+            <td style="padding:4px 6px"><input class="rc-cell" inputmode="decimal" data-idx="${i}" data-field="unit_price" value="${attrEsc(it.unit_price!=null?it.unit_price:'')}" style="${numCell};min-width:60px"></td>
             <td class="rc-amt" data-idx="${i}" style="padding:7px 10px;text-align:right;color:var(--amber);font-weight:600">${fmt(it.amount||0)}</td>
             <td style="text-align:center"><span onclick="rcDeleteRow(${i})" title="Remove line" style="cursor:pointer;color:var(--ink-4);font-size:14px">✕</span></td>
           </tr>`;
         }).join('')}
       </tbody>
     </table></div>
-    <div style="font-size:11px;color:var(--ink-4);margin-top:10px">Amber outline = blank field to review. Untick a row to skip it (subtotals, GST, junk). Nothing is saved until you press <strong>Save lines</strong>.</div>`;
+    <div style="margin-top:12px">
+      <button onclick="rcAddRow()" style="width:100%;padding:11px;background:var(--bg-2);color:var(--ink-2);border:1px dashed var(--border-2);border-radius:8px;cursor:pointer;font-size:13px;font-weight:600">+ Add a line the scan missed</button>
+    </div>
+    <div style="font-size:11px;color:var(--ink-4);margin-top:10px">Amber outline = blank field to review. Untick a row to skip it (subtotals, GST, junk). Missed a line? Tap <strong>+ Add a line</strong> to enter it by hand. Nothing is saved until you press <strong>Save lines</strong>.</div>`;
 
   // Wire inputs
   wrap.querySelectorAll('input.rc-cell').forEach(inp => {
