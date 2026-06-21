@@ -3323,6 +3323,7 @@ function rcRenderTable() {
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:10px">
       <div style="font-size:13px;color:var(--ink-3)">Supplier: <strong style="color:var(--ink-2)">${attrEsc(supplier)}</strong> · <span id="rc-total"></span></div>
       <div style="display:flex;gap:8px">
+        <button onclick="rcCancel()" style="padding:7px 12px;background:transparent;color:var(--ink-4);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:12px">Cancel</button>
         <button onclick="rcAddRow()" style="padding:7px 12px;background:var(--bg-1);color:var(--ink-2);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:12px">+ Add line</button>
         <button id="rc-save-btn" onclick="rcSave()" style="padding:7px 16px;background:var(--sage);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700">Save lines</button>
       </div>
@@ -3394,6 +3395,14 @@ function rcAddRow() {
 }
 
 function rcDeleteRow(i) { RC.items.splice(i,1); rcRenderTable(); }
+
+// Discard a parsed receipt without saving. Keeps the attached file(s) so Seb can
+// re-parse or swap them; confirms first if there are edits to lose.
+function rcCancel() {
+  if (RC.items && RC.items.length && !confirm('Discard this parsed receipt? Nothing has been saved and your edits will be lost.')) return;
+  RC.items = null; RC.supplier = '';
+  rcRenderScan();
+}
 
 async function rcSave() {
   const rows = (RC.items||[]).filter(r => r._inc);
