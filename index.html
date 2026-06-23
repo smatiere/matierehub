@@ -785,6 +785,35 @@ function showProjectDetail(name) {
   const defined = (D.projects||[]).find(p=>p.name===name);
   const quoted = defined && defined.quoted != null ? defined.quoted : null;
   const remaining = quoted != null ? quoted - laborValue - totalExpenses : null;
+  // Feature 3 — revenue links + manual cash revenue
+  const safe = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+  const manRev = defined ? (Number(defined.manual_revenue)||0) : 0;
+  const manRevNote = defined ? (defined.manual_revenue_note||'') : '';
+  const linked = (D.invoice_items||[]).filter(ii => (ii.project||'').trim() === name)
+                   .sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const linkedTotal = linked.reduce((a,ii)=>a+(Number(ii.price_excl_gst)||0),0);
+  const showLinks = !isNonBillable(name);
+  const inpS = 'padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:13px';
+  const linkedRows = linked.length
+    ? linked.map(ii=>`<tr><td style="white-space:nowrap;color:var(--blue)">${ii.invoice_number||'—'}</td><td style="color:var(--ink-4)">${attrEsc((ii.description||'').slice(0,46))}</td><td>${attrEsc(ii.contact||'')}</td><td class="amount" style="color:var(--blue)">${fmt(ii.price_excl_gst||0)}</td><td style="text-align:center"><span onclick="projUnlinkItem('${safe}','${attrEsc(ii.id)}')" style="cursor:pointer;color:var(--pink);font-size:11px">✕ unlink</span></td></tr>`).join('')
+      + `<tr style="font-weight:600;background:var(--bg-3)"><td colspan="3" style="font-size:12px;color:var(--ink-4)">Linked total</td><td class="amount" style="color:var(--blue)">${fmt(linkedTotal)}</td><td></td></tr>`
+    : `<tr><td colspan="5" style="text-align:center;color:var(--ink-4);padding:14px 0">No line items hand-linked yet — auto-match by client name is used until you link some.</td></tr>`;
+  const linksSection = showLinks ? `
+    <div style="margin-bottom:20px">
+      <div class="divider" style="margin-top:0">Revenue & Invoice Links</div>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:14px;padding:12px;background:var(--bg-2);border-radius:10px">
+        <div><div style="font-size:11px;color:var(--ink-4);margin-bottom:3px">Est. value (quote)</div><input id="pd-quoted" type="number" step="0.01" value="${quoted!=null?quoted:''}" placeholder="0" style="${inpS};width:120px;text-align:right"></div>
+        <div><div style="font-size:11px;color:var(--ink-4);margin-bottom:3px">Manual revenue (cash)</div><input id="pd-manrev" type="number" step="0.01" value="${manRev||''}" placeholder="0" style="${inpS};width:120px;text-align:right"></div>
+        <div style="flex:1;min-width:160px"><div style="font-size:11px;color:var(--ink-4);margin-bottom:3px">Manual revenue note</div><input id="pd-manrev-note" value="${attrEsc(manRevNote)}" placeholder="e.g. cash job, no invoice" style="${inpS};width:100%"></div>
+        <button onclick="projSaveRevenue('${safe}')" style="padding:8px 16px;background:var(--sage);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700">Save</button>
+      </div>
+      <div style="font-size:12px;color:var(--ink-3);margin-bottom:6px">Hand-linked invoice line items <span style="color:var(--ink-4)">(${linked.length}) — these override client-name auto-match</span></div>
+      <table><thead><tr><th>Invoice</th><th>Description</th><th>Contact</th><th style="text-align:right">Excl GST</th><th></th></tr></thead><tbody>${linkedRows}</tbody></table>
+      <div style="margin-top:12px">
+        <input id="pd-link-search" placeholder="Search invoice #, contact or description to link a line…" oninput="projRenderLinkCandidates('${safe}')" style="${inpS};width:100%">
+        <div id="pd-link-results" style="margin-top:8px"></div>
+      </div>
+    </div>` : '';
   const tsRows = ts.length
     ? ts.map(t=>`<tr><td>${t.date||'—'}</td><td>${t.employee||'Seb'}</td><td style="color:var(--ink-4)">${t.notes||'—'}</td><td class="amount">${t.hours}h</td><td class="amount" style="color:var(--amber)">${fmt(t.hours*rate)}</td></tr>`).join('')
       + `<tr style="font-weight:600;background:var(--bg-3)"><td colspan="3" style="font-size:12px;color:var(--ink-4)">Total</td><td class="amount">${totalHours}h</td><td class="amount" style="color:var(--amber)">${fmt(laborValue)}</td></tr>`
@@ -800,6 +829,7 @@ function showProjectDetail(name) {
       ${kpi('Expenses',totalExpenses>0?fmt(totalExpenses):'$0','Materials & costs','')}
       ${kpi('Remaining',remaining!==null?fmt(remaining):'—','Budget left',remaining===null?'':remaining>=0?'good':'warn')}
     </div>
+    ${linksSection}
     <div style="margin-bottom:20px">
       <div class="divider" style="margin-top:0">Timesheets</div>
       <table><thead><tr><th>Date</th><th>By</th><th>Notes</th><th style="text-align:right">Hours</th><th style="text-align:right">Value</th></tr></thead><tbody>${tsRows}</tbody></table>
@@ -808,6 +838,73 @@ function showProjectDetail(name) {
       <div class="divider">Expenses</div>
       <table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right">Amount</th></tr></thead><tbody>${expRows}</tbody></table>
     </div>`);
+}
+
+// ── Feature 3 — project ↔ invoice-line linking + manual revenue ───────────────
+function projRenderLinkCandidates(name) {
+  const box = document.getElementById('pd-link-results');
+  const q = ((document.getElementById('pd-link-search')||{}).value || '').trim().toLowerCase();
+  if (!box) return;
+  if (q.length < 2) { box.innerHTML = '<div style="font-size:11px;color:var(--ink-4);padding:4px 2px">Type at least 2 characters…</div>'; return; }
+  const cands = (D.invoice_items||[]).filter(ii => {
+    if ((ii.project||'').trim() === name) return false;        // already linked here
+    const hay = `${ii.invoice_number||''} ${ii.contact||''} ${ii.description||''}`.toLowerCase();
+    return hay.includes(q);
+  }).slice(0, 15);
+  if (!cands.length) { box.innerHTML = '<div style="font-size:11px;color:var(--ink-4);padding:4px 2px">No matching invoice lines.</div>'; return; }
+  const safe = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+  box.innerHTML = `<table style="font-size:12px"><tbody>${cands.map(ii=>{
+    const taken = (ii.project||'').trim();
+    return `<tr>
+      <td style="white-space:nowrap;color:var(--blue)">${ii.invoice_number||'—'}</td>
+      <td style="color:var(--ink-4)">${attrEsc((ii.description||'').slice(0,40))}</td>
+      <td>${attrEsc(ii.contact||'')}</td>
+      <td class="amount">${fmt(ii.price_excl_gst||0)}</td>
+      <td style="text-align:center">${taken
+        ? `<span style="font-size:10px;color:var(--ink-4)" title="Currently linked to ${attrEsc(taken)}">→ ${attrEsc(taken)}</span>`
+        : ''}<span onclick="projLinkItem('${safe}','${attrEsc(ii.id)}')" style="cursor:pointer;color:var(--sage);font-size:11px;margin-left:6px">+ link</span></td>
+    </tr>`;
+  }).join('')}</tbody></table>`;
+}
+
+async function projLinkItem(name, id) {
+  try {
+    await hubWrite('invoice_items', id, { project: name });
+    const ii = (D.invoice_items||[]).find(x => String(x.id) === String(id));
+    if (ii) ii.project = name;
+    claudeToast('✓ Line linked to ' + name, 'success');
+    showProjectDetail(name);
+    renderProjects(D.kpis);
+  } catch (e) { claudeToast('⚠ ' + (e.message||'Link failed'), 'error'); }
+}
+
+async function projUnlinkItem(name, id) {
+  try {
+    await hubWrite('invoice_items', id, { project: '' });
+    const ii = (D.invoice_items||[]).find(x => String(x.id) === String(id));
+    if (ii) ii.project = '';
+    claudeToast('✓ Line unlinked', 'success');
+    showProjectDetail(name);
+    renderProjects(D.kpis);
+  } catch (e) { claudeToast('⚠ ' + (e.message||'Unlink failed'), 'error'); }
+}
+
+async function projSaveRevenue(name) {
+  const qEl = document.getElementById('pd-quoted');
+  const mEl = document.getElementById('pd-manrev');
+  const nEl = document.getElementById('pd-manrev-note');
+  const quoted  = qEl && qEl.value !== '' ? Number(qEl.value) : 0;
+  const manRev  = mEl && mEl.value !== '' ? Number(mEl.value) : 0;
+  const note    = nEl ? nEl.value.trim() : '';
+  try {
+    let proj = (D.projects||[]).find(p => p.name === name);
+    if (!proj) proj = await hubCreateProject(name);          // ensure a row exists
+    const row = await hubWrite('projects', proj.id, { quoted, manual_revenue: manRev, manual_revenue_note: note });
+    Object.assign(proj, row);
+    claudeToast('✓ Revenue saved', 'success');
+    showProjectDetail(name);
+    renderProjects(D.kpis);
+  } catch (e) { claudeToast('⚠ ' + (e.message||'Save failed'), 'error'); }
 }
 
 function showMonthDetail(idx) {
