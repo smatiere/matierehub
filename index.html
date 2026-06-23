@@ -775,7 +775,13 @@ function showMonthDetail(idx) {
 // ── TIMESHEETS TAB ────────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 
-const NON_BILLABLE = ['Admin','Office','Wasted time','Holidays','Sick days','Carer days'];
+// Non-billable categories — internal projects tracked for time/cost but never invoiced.
+// Single source of truth hub-wide. To add a new non-billable category later, add it
+// here (one line). Matching is case-insensitive (see isNonBillable). On the Projects
+// tab every name in this list is rolled up under one expandable "Non-Billable" row.
+const NON_BILLABLE = ['Daddy','Admin','Consumables','Wasted Time','Office','Holidays','Sick days','Carer days'];
+const NON_BILLABLE_LC = NON_BILLABLE.map(s => s.toLowerCase());
+function isNonBillable(name) { return !!name && NON_BILLABLE_LC.includes(String(name).trim().toLowerCase()); }
 
 // NSW public holidays (no Bank Holidays — not applicable)
 const NSW_HOLIDAYS = {
@@ -2729,19 +2735,24 @@ async function handleXeroCallback() {
 // Attaches a filtered suggestion dropdown to a text input. The dropdown is
 // position:fixed and appended to <body> so it is never clipped by a scrolling
 // table/overflow container. getItems() returns the candidate string list.
-function smartSuggest(input, getItems, onPick) {
+// onCreate (optional): when the typed value matches no existing item, a
+// "＋ Create '<value>'" row is appended. Picking it calls onCreate(value).
+function smartSuggest(input, getItems, onPick, onCreate) {
   if (!input || input.dataset.ssWired) return;
   input.dataset.ssWired = '1';
   input.setAttribute('autocomplete', 'off');
   let box = null;
   const close = () => { if (box) { box.remove(); box = null; } };
   const open = () => {
-    const v = (input.value || '').trim().toLowerCase();
+    const raw = (input.value || '').trim();
+    const v = raw.toLowerCase();
     close();
-    let items = (getItems() || []).filter(Boolean);
-    if (v) items = items.filter(x => x.toLowerCase().includes(v));
+    let all = (getItems() || []).filter(Boolean);
+    let items = v ? all.filter(x => x.toLowerCase().includes(v)) : all;
     items = [...new Set(items)].slice(0, 8);
-    if (!items.length) return;
+    const exact = all.some(x => x.toLowerCase() === v);
+    const showCreate = !!onCreate && raw.length > 0 && !exact;
+    if (!items.length && !showCreate) return;
     box = document.createElement('div');
     box.style.cssText = 'position:fixed;z-index:99999;background:var(--bg-1);border:1px solid var(--border);border-radius:6px;max-height:230px;overflow:auto;box-shadow:0 6px 22px rgba(0,0,0,.45)';
     const r = input.getBoundingClientRect();
@@ -2757,11 +2768,37 @@ function smartSuggest(input, getItems, onPick) {
       o.onmousedown = e => { e.preventDefault(); input.value = it; close(); if (onPick) onPick(it); };
       box.appendChild(o);
     });
+    if (showCreate) {
+      const c = document.createElement('div');
+      c.innerHTML = `＋ Create "<strong>${attrEsc(raw)}</strong>"`;
+      c.style.cssText = 'padding:8px 10px;font-size:13px;cursor:pointer;color:var(--amber);white-space:nowrap;border-top:1px solid var(--border)';
+      c.onmouseenter = () => c.style.background = 'var(--bg-2)';
+      c.onmouseleave = () => c.style.background = '';
+      c.onmousedown = e => { e.preventDefault(); close(); onCreate(raw); };
+      box.appendChild(c);
+    }
     document.body.appendChild(box);
   };
   input.addEventListener('input', open);
   input.addEventListener('focus', open);
   input.addEventListener('blur', () => setTimeout(close, 150));
+}
+
+// ── Create a project on the spot (Feature 1) ─────────────────────────────────
+// POSTs to hub-write's INSERT path (server generates the PR-### id), then adds
+// the new row to the in-memory D.projects so it's immediately selectable.
+async function hubCreateProject(name) {
+  const clean = (name || '').trim();
+  if (!clean) return null;
+  const res = await fetch('/.netlify/functions/hub-write', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ insert: true, table: 'projects', fields: { name: clean } })
+  });
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok || !out.ok) throw new Error(out.error || ('Could not create project (' + res.status + ')'));
+  D.projects = D.projects || [];
+  if (!D.projects.some(p => p.id === out.row.id)) D.projects.push(out.row);
+  return out.row;
 }
 
 // Cached contact-name list for Smart Suggest (loaded once per session)
@@ -2997,7 +3034,7 @@ function txRenderTable() {
     inp.addEventListener('change', () => txSaveCell(inp));
     inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); });
     if (inp.dataset.field === 'project') {
-      smartSuggest(inp, ssProjectNames, () => txSaveCell(inp));
+      smartSuggest(inp, ssProjectNames, () => txSaveCell(inp), raw => rcCreateProj(raw, p => { inp.value = p.name; txSaveCell(inp); }));
     }
   });
 }
@@ -3148,7 +3185,7 @@ function exRenderTable() {
     inp.addEventListener('blur',  () => { inp.style.border='1px solid transparent'; inp.style.background='transparent'; });
     inp.addEventListener('change', () => exSaveCell(inp));
     inp.addEventListener('keydown', e => { if (e.key==='Enter') inp.blur(); });
-    if (inp.dataset.field === 'project')  smartSuggest(inp, ssProjectNames, () => exSaveCell(inp));
+    if (inp.dataset.field === 'project')  smartSuggest(inp, ssProjectNames, () => exSaveCell(inp), raw => rcCreateProj(raw, p => { inp.value = p.name; exSaveCell(inp); }));
     if (inp.dataset.field === 'category') smartSuggest(inp, () => EX_CATEGORIES || [], () => exSaveCell(inp));
   });
 }
@@ -3350,6 +3387,12 @@ function rcRenderTable() {
         <button id="rc-save-btn" onclick="rcSave()" style="padding:7px 16px;background:var(--sage);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700">Save lines</button>
       </div>
     </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px;padding:10px 12px;background:var(--bg-2);border-radius:8px">
+      <span style="font-size:12px;color:var(--ink-3)">Allocate one project to every line:</span>
+      <input type="text" id="rc-allproj" placeholder="Project…" style="${cell.replace('transparent','var(--bg-1)')};border-color:var(--border);min-width:160px;flex:0 1 200px">
+      <button onclick="rcApplyProjectAll()" style="padding:6px 12px;background:var(--amber);color:#000;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700">Apply to all</button>
+      <span style="font-size:11px;color:var(--ink-4)">Sets the project on all lines below — then tweak any exceptions individually.</span>
+    </div>
     <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
       <thead><tr style="background:var(--bg-2);text-align:left">
         <th style="padding:8px 8px;width:34px;text-align:center" title="Include">✓</th>
@@ -3394,9 +3437,12 @@ function rcRenderTable() {
       RC.items[idx][field] = (field==='qty'||field==='unit_price') ? (parseFloat(inp.value)||0) : inp.value.trim();
       if (field==='qty'||field==='unit_price') rcRecalc(idx);
     });
-    if (field === 'project')  smartSuggest(inp, ssProjectNames, v => { RC.items[idx].project = v; });
+    if (field === 'project')  smartSuggest(inp, ssProjectNames, v => { RC.items[idx].project = v; }, raw => rcCreateProj(raw, p => { RC.items[idx].project = p.name; inp.value = p.name; }));
     if (field === 'category') smartSuggest(inp, () => EX_CATEGORIES || [], v => { RC.items[idx].category = v; });
   });
+  // "Allocate one project to every line" control
+  const allProj = document.getElementById('rc-allproj');
+  if (allProj) smartSuggest(allProj, ssProjectNames, () => {}, raw => rcCreateProj(raw, p => { allProj.value = p.name; }));
   wrap.querySelectorAll('input.rc-inc').forEach(cb => {
     cb.addEventListener('change', () => {
       const idx = +cb.dataset.idx;
@@ -3417,6 +3463,29 @@ function rcAddRow() {
 }
 
 function rcDeleteRow(i) { RC.items.splice(i,1); rcRenderTable(); }
+
+// Create a project from a receipt field, then run cb(row) on success.
+async function rcCreateProj(name, cb) {
+  try {
+    const p = await hubCreateProject(name);
+    if (p && cb) cb(p);
+    claudeToast('✓ Project created: ' + p.name, 'success');
+  } catch (e) { claudeToast('⚠ ' + (e.message || 'Could not create project'), 'error'); }
+}
+
+// Feature 5 — apply one project to every parsed line at once.
+function rcApplyProjectAll() {
+  const inp = document.getElementById('rc-allproj');
+  const val = (inp && inp.value || '').trim();
+  if (!val) { claudeToast('Type or pick a project first', 'unclear'); return; }
+  // Canonicalise to an existing project name (case-insensitive) when possible.
+  const match = ssProjectNames().find(n => n.toLowerCase() === val.toLowerCase())
+             || NON_BILLABLE.find(n => n.toLowerCase() === val.toLowerCase()) || val;
+  (RC.items || []).forEach(it => { it.project = match; });
+  rcRenderTable();
+  const n = (RC.items || []).length;
+  claudeToast(`✓ "${match}" set on ${n} line${n !== 1 ? 's' : ''}`, 'success');
+}
 
 // Discard a parsed receipt without saving. Keeps the attached file(s) so Seb can
 // re-parse or swap them; confirms first if there are edits to lose.
