@@ -1201,15 +1201,13 @@ function claudeAddClick() {
 }
 
 async function claudeFilesSelected(files) {
-  for (const file of files) {
-    if (!file.type.startsWith('image/') && file.type !== 'application/pdf') continue;
-    try {
-      const { data, type } = await fileToBase64(file);
-      _attachedFiles.push({ name: file.name, type, data });
-    } catch(e) { claudeToast('Could not read file: ' + file.name, 'error'); }
-  }
-  renderChips();
+  // The + button is for receipts. Hand attachments straight to the Scan Receipt
+  // page's preview-before-save flow (review every line before it's saved) rather
+  // than the old auto-save path. Works the same on desktop and Safari iOS.
+  const media = [...files].filter(f => f.type.startsWith('image/') || f.type === 'application/pdf');
   document.getElementById('claude-file-input').value = '';
+  if (!media.length) return;
+  await rcReceiveFiles(media);
 }
 
 async function fileToBase64(file) {
@@ -3176,7 +3174,7 @@ async function exSaveCell(inp) {
 // Seb corrects project/category/qty/price, excludes junk lines, then Save commits
 // the batch via the existing expense_batch path (pendingAction). Second sub-view
 // is a Materials Catalog deduped from expense_log, for reuse when quoting.
-const RC = { view:'scan', items:null, supplier:'', files:[], parsing:false, catSearch:'', catSupplier:'' };
+const RC = { view:'scan', items:null, supplier:'', files:[], parsing:false, catSearch:'', catSupplier:'', catProject:'' };
 
 async function renderReceipts() {
   const el = document.getElementById('page-receipts');
@@ -3230,6 +3228,30 @@ function rcRenderScan() {
   }
   rcRenderChips();
   if (RC.items) rcRenderTable();
+}
+
+// Entry point from the Claude-bar "+" button: take attached receipt file(s),
+// switch to the Scan Receipt tab, and auto-parse into the preview table.
+async function rcReceiveFiles(files) {
+  if (!D) { claudeToast('Still loading — try again in a moment', 'unclear'); return; }
+  for (const file of files) {
+    if (!file.type.startsWith('image/') && file.type !== 'application/pdf') continue;
+    try {
+      const { data, type } = await fileToBase64(file);
+      RC.files.push({ name: file.name, type, data });
+    } catch(e) { claudeToast('Could not read file: ' + file.name, 'error'); }
+  }
+  if (!RC.files.length) return;
+  // Activate the Scan Receipt tab without relying on a click event
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  const tabEl = [...document.querySelectorAll('.tab')].find(t => /'receipts'/.test(t.getAttribute('onclick') || ''));
+  if (tabEl) tabEl.classList.add('active');
+  const pg = document.getElementById('page-receipts');
+  if (pg) pg.classList.add('active');
+  RC.view = 'scan';
+  await renderReceipts();
+  rcParse();          // auto-kick the parse; lines land in the editable preview
 }
 
 async function rcFilesSelected(files) {
@@ -3444,15 +3466,19 @@ function rcBuildCatalog() {
     const supplier = (e.supplier||'').trim();
     const key = (supplier+'||'+desc).toLowerCase();
     const date = (e.date||'').slice(0,10);
+    const proj = (e.project||'').trim();
     if (!map[key]) {
-      map[key] = { supplier, description:desc, category:e.category||'', unit_price:Number(e.unit_price)||0, date, count:1 };
+      map[key] = { supplier, description:desc, category:e.category||'', unit_price:Number(e.unit_price)||0, date, count:1, project:proj, projects:new Set(proj?[proj]:[]) };
     } else {
       const m = map[key];
       m.count++;
-      if (date > m.date) { m.date = date; m.unit_price = Number(e.unit_price)||m.unit_price; m.category = e.category||m.category; }
+      if (proj) m.projects.add(proj);
+      if (date > m.date) { m.date = date; m.unit_price = Number(e.unit_price)||m.unit_price; m.category = e.category||m.category; if (proj) m.project = proj; }
     }
   });
-  return Object.values(map).sort((a,b) => a.description.localeCompare(b.description));
+  return Object.values(map)
+    .map(m => ({ ...m, projects:[...m.projects] }))   // latest project in `project`, all distinct in `projects[]`
+    .sort((a,b) => a.description.localeCompare(b.description));
 }
 
 function rcRenderCatalog() {
@@ -3461,16 +3487,19 @@ function rcRenderCatalog() {
   const inp = 'padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:13px';
   body.innerHTML = `
     <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:16px;padding:14px;background:var(--bg-2);border-radius:10px">
-      <input type="text" id="rc-cat-search" placeholder="Search description…" value="${attrEsc(RC.catSearch)}" oninput="rcCatFilter()" style="${inp};flex:1;min-width:200px">
-      <input type="text" id="rc-cat-supplier" placeholder="Supplier…" value="${attrEsc(RC.catSupplier)}" oninput="rcCatFilter()" style="${inp};width:180px">
+      <input type="text" id="rc-cat-search" placeholder="Search description…" value="${attrEsc(RC.catSearch)}" oninput="rcCatFilter()" style="${inp};flex:1;min-width:180px">
+      <input type="text" id="rc-cat-supplier" placeholder="Supplier…" value="${attrEsc(RC.catSupplier)}" oninput="rcCatFilter()" style="${inp};width:160px">
+      <input type="text" id="rc-cat-project" placeholder="Project…" value="${attrEsc(RC.catProject)}" oninput="rcCatFilter()" style="${inp};width:160px">
     </div>
     <div id="rc-cat-table" style="overflow-x:auto"></div>`;
+  smartSuggest(document.getElementById('rc-cat-project'), ssProjectNames, v => { RC.catProject = v; rcRenderCatalogTable(); });
   rcRenderCatalogTable();
 }
 
 function rcCatFilter() {
   RC.catSearch   = (document.getElementById('rc-cat-search')||{}).value || '';
   RC.catSupplier = (document.getElementById('rc-cat-supplier')||{}).value || '';
+  RC.catProject  = (document.getElementById('rc-cat-project')||{}).value || '';
   rcRenderCatalogTable();
 }
 
@@ -3478,9 +3507,10 @@ function rcRenderCatalogTable() {
   const wrap = document.getElementById('rc-cat-table');
   if (!wrap) return;
   let rows = rcBuildCatalog();
-  const s = RC.catSearch.trim().toLowerCase(), sup = RC.catSupplier.trim().toLowerCase();
+  const s = RC.catSearch.trim().toLowerCase(), sup = RC.catSupplier.trim().toLowerCase(), prj = RC.catProject.trim().toLowerCase();
   if (s)   rows = rows.filter(r => r.description.toLowerCase().includes(s));
   if (sup) rows = rows.filter(r => (r.supplier||'').toLowerCase().includes(sup));
+  if (prj) rows = rows.filter(r => (r.projects||[]).some(p => p.toLowerCase().includes(prj)));
   if (!rows.length) {
     wrap.innerHTML = '<div style="color:var(--ink-4);padding:20px;text-align:center">No catalog items yet — they build up automatically as you save receipts.</div>';
     return;
@@ -3492,28 +3522,34 @@ function rcRenderCatalogTable() {
         <th style="padding:8px 10px;font-weight:600">Description</th>
         <th style="padding:8px 10px;font-weight:600">Supplier</th>
         <th style="padding:8px 10px;font-weight:600">Category</th>
+        <th style="padding:8px 10px;font-weight:600">Project</th>
         <th style="padding:8px 10px;font-weight:600;text-align:right">Latest unit $</th>
         <th style="padding:8px 10px;font-weight:600;text-align:right">Times</th>
         <th style="padding:8px 10px;font-weight:600">Last seen</th>
         <th style="padding:8px 8px;width:90px"></th>
       </tr></thead>
       <tbody>
-        ${rows.map((r,i) => `
+        ${rows.map((r,i) => {
+          const extra = (r.projects||[]).length > 1 ? ` +${r.projects.length-1}` : '';
+          const projTitle = (r.projects||[]).join(', ');
+          return `
           <tr style="border-top:1px solid var(--border);background:${i%2===0?'var(--bg-1)':'var(--bg-2)'}">
             <td style="padding:7px 10px;color:var(--ink-2)">${attrEsc(r.description)}</td>
             <td style="padding:7px 10px;color:var(--ink-3)">${attrEsc(r.supplier||'—')}</td>
             <td style="padding:7px 10px;color:var(--ink-4)">${attrEsc(r.category||'—')}</td>
-            <td style="padding:7px 10px;text-align:right;color:var(--amber);font-weight:600">${fmt(r.unit_price)}</td>
+            <td style="padding:7px 10px;color:var(--ink-3)" title="${attrEsc(projTitle)}">${attrEsc(r.project||'—')}${extra?`<span style="color:var(--ink-4)">${extra}</span>`:''}</td>
+            <td style="padding:7px 10px;text-align:right;color:var(--amber);font-weight:600">${fmt(r.unit_price,2)}</td>
             <td style="padding:7px 10px;text-align:right;color:var(--ink-4)">${r.count}</td>
             <td style="padding:7px 10px;color:var(--ink-4);white-space:nowrap">${fmtDMY(r.date)}</td>
             <td style="padding:5px 8px;text-align:right"><button onclick='rcCopyLine(${JSON.stringify({d:r.description,p:r.unit_price,s:r.supplier}).replace(/'/g,"&#39;")})' style="padding:5px 9px;background:var(--bg-1);color:var(--ink-3);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:11px">Copy</button></td>
-          </tr>`).join('')}
+          </tr>`;
+        }).join('')}
       </tbody>
     </table>`;
 }
 
 function rcCopyLine(o) {
-  const line = `${o.d} — ${fmt(o.p)} ea${o.s?(' ('+o.s+')'):''}`;
+  const line = `${o.d} — ${fmt(o.p,2)} ea${o.s?(' ('+o.s+')'):''}`;
   if (navigator.clipboard) navigator.clipboard.writeText(line).then(
     () => claudeToast('✓ Copied for quote: ' + line.slice(0,40), 'success'),
     () => claudeToast('Copy failed — ' + line, 'unclear')
