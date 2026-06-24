@@ -945,7 +945,7 @@ function showMonthDetail(idx) {
 // Single source of truth hub-wide. To add a new non-billable category later, add it
 // here (one line). Matching is case-insensitive (see isNonBillable). On the Projects
 // tab every name in this list is rolled up under one expandable "Non-Billable" row.
-const NON_BILLABLE = ['Daddy','Admin','Consumables','Wasted Time','Office','Holidays','Sick days','Carer days'];
+const NON_BILLABLE = ['Daddy','Admin','Consumables','Wasted Time','Quote','Office','Holidays','Sick days','Carer days'];
 const NON_BILLABLE_LC = NON_BILLABLE.map(s => s.toLowerCase());
 function isNonBillable(name) { return !!name && NON_BILLABLE_LC.includes(String(name).trim().toLowerCase()); }
 

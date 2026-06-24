@@ -466,7 +466,7 @@ Rules:
     }
 
     // ── 4. Server-side project validation (three-tier fuzzy) ─────────────────
-    const NON_BILLABLE = ['Daddy', 'Admin', 'Consumables', 'Wasted Time', 'Office', 'Holidays', 'Sick days', 'Carer days'];
+    const NON_BILLABLE = ['Daddy', 'Admin', 'Consumables', 'Wasted Time', 'Quote', 'Office', 'Holidays', 'Sick days', 'Carer days'];
     const tokenise = str => str.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/);
 
     function fuzzyMatchProject(name, validProjects) {
