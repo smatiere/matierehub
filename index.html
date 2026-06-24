@@ -334,7 +334,7 @@ async function loadData() {
       sbGet('/rest/v1/expense_log?select=*&order=date.asc,id.asc'),
       sbGet('/rest/v1/projects?select=*&order=id.asc'),
       sbGet('/rest/v1/xero_cache?select=key,data'),
-      sbGet('/rest/v1/invoice_items?select=invoice_number,quote_number,contact,contact_id,price_excl_gst,paid,status,date,description,item')
+      sbGet('/rest/v1/invoice_items?select=id,invoice_number,quote_number,contact,contact_id,price_excl_gst,paid,status,date,description,item,project')
     ]);
 
     const xero = {};
