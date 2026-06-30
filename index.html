@@ -336,7 +336,11 @@ async function loadData() {
       sbGet('/rest/v1/projects?select=*&order=id.asc'),
       sbGet('/rest/v1/xero_cache?select=key,data'),
       sbGet('/rest/v1/invoice_items?select=id,invoice_number,quote_number,contact,contact_id,price_excl_gst,paid,status,date,description,item,project'),
-      sbGet('/rest/v1/quote_items?select=id,quote_number,contact,contact_id,line_amount,status,date,expiry_date,description,item,project')
+      // quote_items is a brand-new table (added 2026-06-30) — until Seb runs
+      // supabase_quote_items_setup.sql in the Supabase SQL editor it 404s.
+      // Swallow that one failure so a missing table doesn't take down the
+      // whole HUB; quote-linking just stays empty until the table exists.
+      sbGet('/rest/v1/quote_items?select=id,quote_number,contact,contact_id,line_amount,status,date,expiry_date,description,item,project').catch(() => [])
     ]);
 
     const xero = {};
