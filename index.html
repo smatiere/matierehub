@@ -134,6 +134,7 @@ tr:hover td{background:var(--bg-3)}
 .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto}
 .modal-overlay.open{display:flex}
 .modal{background:var(--bg-2);border:1px solid var(--border);border-radius:8px;width:100%;max-width:660px;margin:auto;box-shadow:0 20px 60px rgba(0,0,0,.8);animation:modalIn .18s ease}
+.modal.modal-wide{max-width:1100px}
 @keyframes modalIn{from{transform:translateY(12px);opacity:0}to{transform:translateY(0);opacity:1}}
 .modal-head{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;border-radius:8px 8px 0 0}
 .modal-head h3{font-size:14px;font-weight:600;color:var(--ink);letter-spacing:.02em}
@@ -329,12 +330,13 @@ async function hubWrite(table, id, fields) {
 // ── Data load — live from Supabase ────────────────────────────────────────────
 async function loadData() {
   try {
-    const [timesheets, expenses, projects, xeroRows, invoiceItems] = await Promise.all([
+    const [timesheets, expenses, projects, xeroRows, invoiceItems, quoteItems] = await Promise.all([
       sbGet('/rest/v1/timesheets?select=*&order=date.asc,id.asc'),
       sbGet('/rest/v1/expense_log?select=*&order=date.asc,id.asc'),
       sbGet('/rest/v1/projects?select=*&order=id.asc'),
       sbGet('/rest/v1/xero_cache?select=key,data'),
-      sbGet('/rest/v1/invoice_items?select=id,invoice_number,quote_number,contact,contact_id,price_excl_gst,paid,status,date,description,item,project')
+      sbGet('/rest/v1/invoice_items?select=id,invoice_number,quote_number,contact,contact_id,price_excl_gst,paid,status,date,description,item,project'),
+      sbGet('/rest/v1/quote_items?select=id,quote_number,contact,contact_id,line_amount,status,date,expiry_date,description,item,project')
     ]);
 
     const xero = {};
@@ -345,6 +347,7 @@ async function loadData() {
       expense_log:          expenses,
       projects,
       invoice_items:        invoiceItems,
+      quote_items:          quoteItems,
       kpis:                 xero.kpis                 || {},
       monthly:              xero.monthly              || { labels:[], periods:[], revenue:[], materials:[], wages_owner:[] },
       open_invoices:        xero.open_invoices        || [],
@@ -427,12 +430,55 @@ function renderAll() {
 }
 
 // ── Projects ──────────────────────────────────────────────────────────────────
+// 2026-06-30 batch: trimmed table columns (ID/Project/Contact/Est. Value/Invoiced/
+// Labour/Expenses/Profitability/Adj rate), sortable+filterable, default Active-only
+// filter, Est. Value now derived from hand-linked quote_items (falls back to the
+// manual `quoted` figure). Dropped columns (Players, Quote No., Quote Item,
+// Description, Start, End, Span, Dilution) are NOT discarded — they still surface
+// inside showProjectDetail(). The old inline Non-Billable expandable row is gone;
+// Non-Billable projects now live in their own window — see showNonBillableWindow().
+let projSortCol      = null;
+let projSortDir      = 'asc';
+let projFilterText   = '';
+let projFilterStatus = 'Active';   // default filter per spec
+let PROJ_SORTED       = [];        // cached billable rows for projRenderRows() (avoids re-aggregating per keystroke)
+
+const PROJECT_STATUSES   = ['Active','Finished','Paid','Inactive'];
+const PROJ_STATUS_BADGE  = { Active:'badge-green', Finished:'badge-blue', Paid:'badge-amber', Inactive:'badge-gray' };
+
+function projStatusBadge(status) {
+  const s = status || 'Active';
+  return `<span class="badge ${PROJ_STATUS_BADGE[s]||'badge-gray'}" style="font-size:9px">${s}</span>`;
+}
+
+// Clickable status pills — used at the top of the project detail modal.
+function projStatusPills(name, current) {
+  const safe = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+  return PROJECT_STATUSES.map(s => {
+    const isActive = s === (current || 'Active');
+    const cls = PROJ_STATUS_BADGE[s];
+    return `<span onclick="projSetStatus('${safe}','${s}')" class="badge ${cls}" style="cursor:pointer;font-size:10px;${isActive ? 'box-shadow:0 0 0 2px var(--ink) inset;' : 'opacity:.45'}">${s}</span>`;
+  }).join(' ');
+}
+
+async function projSetStatus(name, status) {
+  try {
+    let proj = (D.projects||[]).find(p => p.name === name);
+    if (!proj) proj = await hubCreateProject(name);
+    const row = await hubWrite('projects', proj.id, { status });
+    Object.assign(proj, row);
+    claudeToast('✓ Status set to ' + status, 'success');
+    showProjectDetail(name);
+    renderProjects(D.kpis);
+  } catch (e) { claudeToast('⚠ ' + (e.message||'Status update failed'), 'error'); }
+}
+
 function renderProjects(k) {
   const definedProjects = D.projects || [];
   const timesheets      = D.timesheets || [];
   const expenses        = D.expense_log || [];
   const invoiceItems    = D.invoice_items || [];
-  const xeroQuotes      = (D.quotes && D.quotes.length) ? D.quotes : [];
+  const quoteItems      = D.quote_items || [];
   const rate            = k.sebRate_per_hour || 100;
 
   // ── Lookup helpers ────────────────────────────────────────────────────────
@@ -442,13 +488,6 @@ function renderProjects(k) {
   const allNames = new Set(definedProjects.map(p => p.name));
   timesheets.forEach(t => t.project && allNames.add(t.project));
   expenses.forEach(e => e.project && allNames.add(e.project));
-
-  // Xero quotes indexed by QuoteNumber for fast item lookup
-  const xeroQuoteByNum = {};
-  xeroQuotes.forEach(q => {
-    const num = q.QuoteNumber || q.number || '';
-    if (num) xeroQuoteByNum[num] = q;
-  });
 
   // Working days Mon–Fri between two YYYY-MM-DD strings (inclusive)
   function workingDays(start, end) {
@@ -475,7 +514,6 @@ function renderProjects(k) {
       quoted: def.quoted != null ? def.quoted : null,
       // stored links (exact, from Supabase projects table)
       storedContactId:  def.contact_id   || null,
-      storedQuoteNum:   def.quote_number || null,
       // fallback fuzzy key (first segment of project name)
       clientName: name.split(' - ')[0].trim(),
       hours: 0, laborValue: 0,
@@ -483,6 +521,7 @@ function renderProjects(k) {
       dates: [],
       expensesTotal: 0,
       invoicedValue: 0,
+      linkedQuoteValue: 0,
       quoteNumbers: new Set(),
       invoiceContactName: null,
     };
@@ -541,15 +580,26 @@ function renderProjects(k) {
     });
   });
 
+  // 2026-06-30 — hand-linked quote line items roll up into Est. Value. A project
+  // with linked quote_items uses their summed line_amount as Est. Value; the
+  // manual `quoted` figure is the fallback for projects with no quote linked.
+  quoteItems.forEach(qi => {
+    const lp = (qi.project || '').trim();
+    if (!lp || !pData[lp]) return;
+    pData[lp].linkedQuoteValue += (qi.line_amount || 0);
+    pData[lp].linkedQuoteCount = (pData[lp].linkedQuoteCount || 0) + 1;
+    if (qi.quote_number) pData[lp].quoteNumbers.add(qi.quote_number);
+  });
+
   // Feature 3 — manual cash revenue per project (used when no Xero invoice exists).
+  // Always additive, independent of quotes/invoices.
   Object.values(pData).forEach(p => {
     p.manualRev = Number((definedMap[p.name] || {}).manual_revenue) || 0;
     p.invoicedValue += p.manualRev;
+    p.estValue = p.linkedQuoteValue > 0 ? p.linkedQuoteValue : p.quoted;
   });
 
   // ── Derive final metrics per project ─────────────────────────────────────
-  const dash = '<span style="color:var(--ink-4)">—</span>';
-
   const sorted = Object.values(pData).map(p => {
     const sortedDates = [...p.dates].sort();
     const startDate   = sortedDates[0] || null;
@@ -563,26 +613,6 @@ function renderProjects(k) {
     const hrPerDay     = span && p.hours > 0 ? p.hours / span : null;
     const dilutionPct  = hrPerDay != null ? (hrPerDay / 8) * 100 : null;
 
-    // Quote numbers: stored value takes priority, then derive from matched invoice_items
-    const derivedQuoteNums = [...p.quoteNumbers];
-    const quoteNums = p.storedQuoteNum
-      ? [p.storedQuoteNum, ...derivedQuoteNums.filter(q => q !== p.storedQuoteNum)]
-      : derivedQuoteNums;
-
-    // Quote item descriptions from Xero quotes (if cached)
-    let quoteItemsHtml = '';
-    quoteNums.forEach(qn => {
-      const q = xeroQuoteByNum[qn];
-      if (q) {
-        const lineItems = (q.LineItems || q.line_items || []);
-        lineItems.forEach(li => {
-          const code = li.ItemCode || li.item || '';
-          const desc = li.Description || li.description || '';
-          if (code || desc) quoteItemsHtml += (code ? code + ': ' : '') + desc + '<br>';
-        });
-      }
-    });
-
     // Contact display: prefer the name resolved from stored contact_id match,
     // then from fuzzy match, then fall back to client name extracted from project name
     const contactDisplay = p.invoiceContactName || p.clientName;
@@ -590,191 +620,195 @@ function renderProjects(k) {
     return {
       ...p,
       players: [...p.players],
-      quoteNums,
-      quoteItemsHtml,
+      quoteNums: [...p.quoteNumbers],
       contactDisplay,
       startDate, endDate, span,
       profit, profitPct, adjRate, hrPerDay, dilutionPct,
     };
-  }).sort((a, b) => {
-    const aD = definedMap[a.name] ? 0 : 1, bD = definedMap[b.name] ? 0 : 1;
-    if (aD !== bD) return aD - bD;
-    if (a.startDate && b.startDate) return b.startDate.localeCompare(a.startDate);
-    return a.name.localeCompare(b.name);
   });
 
-  // ── Row renderer ──────────────────────────────────────────────────────────
-  function pc(v, pos='var(--sage)', neg='var(--pink)') { return v === null ? 'var(--ink-4)' : v >= 0 ? pos : neg; }
-
-  // Feature 4 — split billable projects (own rows) from non-billable ones, which
-  // are rolled up under a single expandable "Non-Billable" line.
-  const billable = sorted.filter(p => !isNonBillable(p.name));
-  const nbList   = sorted.filter(p =>  isNonBillable(p.name)).sort((a,b) => b.hours - a.hours);
-
-  const rows = billable.map(p => {
-    const safeName = p.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-    const adjRateColor = p.adjRate !== null ? (p.adjRate >= rate ? 'var(--sage)' : 'var(--pink)') : 'var(--ink-4)';
-
-    const profitCell = p.profit !== null
-      ? `<span style="color:${pc(p.profit)};font-weight:600">${fmt(p.profit)}</span><br>
-         <span style="font-size:10px;color:${pc(p.profitPct)}">${p.profitPct >= 0 ? '+' : ''}${p.profitPct.toFixed(1)}%</span>`
-      : dash;
-
-    const dilutionCell = p.hrPerDay != null
-      ? `${p.hrPerDay.toFixed(1)}h/d<br><span style="font-size:10px;color:var(--ink-4)">${p.dilutionPct.toFixed(0)}%</span>`
-      : dash;
-
-    // Separate Quote Item (codes) and Description from matched quote line items
-    let quoteItemCode = dash, quoteItemDesc = dash;
-    if (p.quoteItemsHtml) {
-      // Already formatted above; for table cells we need two separate values
-      const allLI = p.quoteNums.flatMap(qn => {
-        const q = xeroQuoteByNum[qn];
-        return q ? (q.LineItems || q.line_items || []) : [];
-      });
-      const codes = allLI.map(li => li.ItemCode || li.item || '').filter(Boolean);
-      const descs = allLI.map(li => li.Description || li.description || '').filter(Boolean);
-      if (codes.length) quoteItemCode = `<span style="font-size:10px;color:var(--ink-3)">${codes.join('<br>')}</span>`;
-      if (descs.length) quoteItemDesc = `<span style="font-size:11px">${descs.map(d => d.length > 40 ? d.slice(0,40) + '…' : d).join('<br>')}</span>`;
-    }
-
-    return `<tr onclick="showProjectDetail('${safeName}')" style="cursor:pointer">
-      <td style="font-size:11px;color:var(--ink-4);white-space:nowrap">#${p.id}</td>
-      <td><strong style="white-space:nowrap">${p.name}</strong>
-          <div style="margin-top:2px"><span class="badge ${p.status==='Active'?'badge-green':'badge-gray'}" style="font-size:9px">${p.status}</span></div>
-      </td>
-      <td style="font-size:12px;white-space:nowrap">${p.contactDisplay}</td>
-      <td style="font-size:11px;color:var(--ink-3)">${p.players.length ? p.players.join(', ') : dash}</td>
-      <td style="font-size:11px;color:var(--blue);white-space:nowrap">${p.quoteNums.length ? p.quoteNums.join('<br>') : dash}</td>
-      <td style="font-size:11px">${quoteItemCode}</td>
-      <td style="font-size:11px;max-width:160px">${quoteItemDesc}</td>
-      <td class="amount">${p.quoted != null ? fmt(p.quoted) : dash}</td>
-      <td class="amount" style="color:var(--blue)">${p.invoicedValue > 0 ? fmt(p.invoicedValue) : dash}</td>
-      <td class="amount">${p.hours > 0 ? p.hours.toFixed(1) + 'h' : dash}</td>
-      <td class="amount" style="color:var(--amber)">${p.laborValue > 0 ? fmt(p.laborValue) : dash}</td>
-      <td class="amount" style="color:var(--orange)">${p.expensesTotal > 0 ? fmt(p.expensesTotal) : dash}</td>
-      <td class="amount">${profitCell}</td>
-      <td class="amount" style="color:${adjRateColor};white-space:nowrap">${p.adjRate !== null ? '$' + Math.round(p.adjRate) + '/h' : dash}</td>
-      <td style="font-size:11px;color:var(--ink-3);white-space:nowrap">${p.startDate || dash}</td>
-      <td style="font-size:11px;color:var(--ink-3);white-space:nowrap">${p.endDate || dash}</td>
-      <td class="amount">${p.span != null ? p.span + 'd' : dash}</td>
-      <td class="amount" style="white-space:nowrap">${dilutionCell}</td>
-    </tr>`;
-  }).join('');
-
-  // ── Non-Billable rolled-up row (Feature 4) ────────────────────────────────
-  let nbRows = '';
-  if (nbList.length) {
-    const nbHours  = nbList.reduce((a,p)=>a+p.hours,0);
-    const nbLabour = nbList.reduce((a,p)=>a+p.laborValue,0);
-    const nbExp    = nbList.reduce((a,p)=>a+p.expensesTotal,0);
-    const detail = nbList.map(p => {
-      const safe = p.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-      return `<tr class="nb-detail" style="display:none;background:var(--bg-2);cursor:pointer" onclick="showProjectDetail('${safe}')">
-        <td></td>
-        <td style="padding-left:24px;font-size:12px;color:var(--ink-3)">${p.name}</td>
-        <td colspan="7" style="font-size:11px;color:var(--ink-4)">${p.players.length ? p.players.join(', ') : ''}</td>
-        <td class="amount">${p.hours > 0 ? p.hours.toFixed(1) + 'h' : dash}</td>
-        <td class="amount" style="color:var(--amber)">${p.laborValue > 0 ? fmt(p.laborValue) : dash}</td>
-        <td class="amount" style="color:var(--orange)">${p.expensesTotal > 0 ? fmt(p.expensesTotal) : dash}</td>
-        <td colspan="6"></td>
-      </tr>`;
-    }).join('');
-    nbRows = `<tr onclick="projToggleNB()" style="cursor:pointer;background:var(--bg-3);border-top:2px solid var(--border)">
-        <td style="font-size:11px;color:var(--ink-4);text-align:center"><span id="nb-caret">▶</span></td>
-        <td><strong style="white-space:nowrap">Non-Billable</strong>
-            <div style="margin-top:2px"><span class="badge badge-gray" style="font-size:9px">${nbList.length} categories</span></div></td>
-        <td colspan="7" style="font-size:11px;color:var(--ink-4)">Internal time &amp; costs — not invoiced · click to expand</td>
-        <td class="amount">${nbHours > 0 ? nbHours.toFixed(1) + 'h' : dash}</td>
-        <td class="amount" style="color:var(--amber)">${nbLabour > 0 ? fmt(nbLabour) : dash}</td>
-        <td class="amount" style="color:var(--orange)">${nbExp > 0 ? fmt(nbExp) : dash}</td>
-        <td colspan="6"></td>
-      </tr>${detail}`;
-  }
-
-  // ── Summary KPIs ──────────────────────────────────────────────────────────
-  const totalQuoted     = definedProjects.reduce((a,p)=>a+(p.quoted||0),0);
+  // ── Summary KPIs (always over ALL billable projects, unaffected by table filters) ──
+  const billableAll     = sorted.filter(p => !isNonBillable(p.name));
+  const nbAll           = sorted.filter(p =>  isNonBillable(p.name));
+  const totalQuoted     = billableAll.reduce((a,p)=>a+(p.estValue||0),0);
   const totalHoursAll   = timesheets.reduce((a,t)=>a+(t.hours||0),0);
   const totalExpAll     = expenses.reduce((a,e)=>a+(e.amount||0),0);
-  const totalInvoicedAll= sorted.reduce((a,p)=>a+p.invoicedValue,0);
+  const totalInvoicedAll= billableAll.reduce((a,p)=>a+p.invoicedValue,0);
   const totalLabourAll  = totalHoursAll * rate;
   const totalProfitAll  = totalInvoicedAll > 0 ? totalInvoicedAll - totalExpAll - totalLabourAll : null;
+  const nbHoursAll      = nbAll.reduce((a,p)=>a+p.hours,0);
+
+  PROJ_SORTED = billableAll;
 
   document.getElementById('page-projects').innerHTML = `
     <div class="divider">Projects — Performance Analysis</div>
     <div class="kpi-grid">
-      ${kpi('Projects', billable.length, nbList.length ? nbList.length + ' non-billable rolled up' : 'All tracked', 'highlight')}
-      ${kpi('Total Quoted', fmt(totalQuoted), 'Defined projects', '')}
+      ${kpi('Projects', billableAll.length, 'Active + closed', 'highlight')}
+      ${kpi('Total Est. Value', fmt(totalQuoted), 'Quoted or manually entered', '')}
       ${kpi('Total Invoiced', fmt(totalInvoicedAll), 'Matched from Xero', 'good')}
       ${kpi('Total Hours', totalHoursAll.toFixed(1) + 'h', 'All projects', '')}
       ${kpi('Labour Value', fmt(totalLabourAll), 'At $' + rate + '/hr', '')}
       ${kpi('Gross Profit', totalProfitAll !== null ? fmt(totalProfitAll) : '—',
              totalProfitAll !== null ? (totalProfitAll >= 0 ? '+' : '') + (totalInvoicedAll > 0 ? (totalProfitAll/totalInvoicedAll*100).toFixed(1) : '0') + '% margin' : 'Need invoiced data',
              totalProfitAll === null ? '' : totalProfitAll >= 0 ? 'good' : 'warn')}
+      <div class="kpi" style="cursor:pointer" onclick="showNonBillableWindow()" title="Open the Non-Billable window">
+        <div class="kpi-label">Non-Billable</div>
+        <div class="kpi-value">${nbHoursAll.toFixed(0)}h</div>
+        <div class="kpi-sub">${nbAll.length} categories · click to open →</div>
+      </div>
     </div>
     <div class="section">
-      <div class="section-head">
+      <div class="section-head" style="flex-wrap:wrap;gap:10px">
         <h2>Project Table</h2>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <input id="proj-filter-text" value="${attrEsc(projFilterText)}" oninput="projSetFilter(this.value)" placeholder="Search ID, name or contact…" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:12px;width:200px">
+          <select id="proj-filter-status" onchange="projSetStatusFilter(this.value)" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:12px">
+            ${['All', ...PROJECT_STATUSES].map(s=>`<option value="${s}"${projFilterStatus===s?' selected':''}>${s==='All'?'All statuses':s}</option>`).join('')}
+          </select>
+        </div>
         <span class="chart-clickable-hint">click a row for full detail · values excl. GST</span>
       </div>
       <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-        <table style="min-width:1500px;font-size:12px">
+        <table style="min-width:900px;font-size:12px">
           <thead><tr>
-            <th>ID</th>
-            <th>Project</th>
-            <th>Contact</th>
-            <th>Players</th>
-            <th style="white-space:nowrap">Quote No.</th>
-            <th style="white-space:nowrap">Quote Item</th>
-            <th>Description</th>
-            <th style="text-align:right;white-space:nowrap">Est. Value</th>
-            <th style="text-align:right;white-space:nowrap">Invoiced</th>
-            <th style="text-align:right">Hrs</th>
-            <th style="text-align:right">Labour</th>
-            <th style="text-align:right">Expenses</th>
-            <th style="text-align:right">Profitability</th>
-            <th style="text-align:right;white-space:nowrap">Adj. Rate</th>
-            <th style="white-space:nowrap">Start</th>
-            <th style="white-space:nowrap">End</th>
-            <th style="text-align:right">Span</th>
-            <th style="text-align:right;white-space:nowrap">Dilution</th>
+            ${projHeader('id','ID')}
+            ${projHeader('name','Project')}
+            ${projHeader('contact','Contact')}
+            ${projHeader('estValue','Est. Value', true)}
+            ${projHeader('invoicedValue','Invoiced', true)}
+            ${projHeader('laborValue','Labour', true)}
+            ${projHeader('expensesTotal','Expenses', true)}
+            ${projHeader('profit','Profitability', true)}
+            ${projHeader('adjRate','Adj rate', true)}
           </tr></thead>
-          <tbody>${(rows + nbRows) || '<tr><td colspan="18"><div class="empty" style="padding:20px">No projects yet</div></td></tr>'}</tbody>
+          <tbody id="proj-tbody"></tbody>
         </table>
       </div>
       <div style="font-size:10px;color:var(--ink-4);padding:10px 14px;border-top:1px solid var(--border)">
-        Invoiced = hand-linked line items (if any) else Xero lines matched by client name, plus any manual revenue ·
-        Profitability = Invoiced − Expenses − Labour ·
-        Adj. Rate = (Invoiced − Expenses) ÷ Hrs ·
-        Span = working days (Mon–Fri) between first &amp; last timesheet entry ·
-        Dilution = Hrs ÷ Span (% of an 8h/day pace)
+        Est. Value = sum of hand-linked quote line items, else the manually entered figure ·
+        Invoiced = hand-linked invoice line items (if any) else Xero lines matched by client name, plus any manual revenue ·
+        Profitability = Invoiced − Expenses − Labour · Adj rate = (Invoiced − Expenses) ÷ Hrs ·
+        click a column heading to sort
       </div>
     </div>`;
+
+  projRenderRows();
 }
 
-// Feature 4 — expand/collapse the Non-Billable breakdown rows.
-function projToggleNB() {
-  const rows = document.querySelectorAll('tr.nb-detail');
-  if (!rows.length) return;
-  const show = rows[0].style.display === 'none';
-  rows.forEach(r => { r.style.display = show ? '' : 'none'; });
-  const caret = document.getElementById('nb-caret');
-  if (caret) caret.textContent = show ? '▼' : '▶';
+function projHeader(col, label, right) {
+  const active = projSortCol === col;
+  const arrow = active ? (projSortDir === 'asc' ? ' ▲' : ' ▼') : '';
+  return `<th style="${right?'text-align:right;':''}cursor:pointer;white-space:nowrap;user-select:none" onclick="projSort('${col}')">${label}${arrow}</th>`;
+}
+
+function projSort(col) {
+  if (projSortCol === col) projSortDir = projSortDir === 'asc' ? 'desc' : 'asc';
+  else { projSortCol = col; projSortDir = 'asc'; }
+  renderProjects(D.kpis);
+}
+
+function projSetFilter(v) {
+  projFilterText = v || '';
+  projRenderRows();
+}
+
+function projSetStatusFilter(v) {
+  projFilterStatus = v;
+  renderProjects(D.kpis);
+}
+
+const PROJ_SORT_KEYS = {
+  id:            p => parseInt(String(p.id).replace(/\D/g,''),10) || 0,
+  name:          p => p.name.toLowerCase(),
+  contact:       p => (p.contactDisplay||'').toLowerCase(),
+  estValue:      p => p.estValue != null ? p.estValue : -Infinity,
+  invoicedValue: p => p.invoicedValue,
+  laborValue:    p => p.laborValue,
+  expensesTotal: p => p.expensesTotal,
+  profit:        p => p.profit != null ? p.profit : -Infinity,
+  adjRate:       p => p.adjRate != null ? p.adjRate : -Infinity,
+};
+
+// Light tbody-only re-render — used by the search box on every keystroke so the
+// input never loses focus (mirrors the existing pd-link-search pattern).
+function projRenderRows() {
+  const tbody = document.getElementById('proj-tbody');
+  if (!tbody) return;
+  const dash = '<span style="color:var(--ink-4)">—</span>';
+  const q = projFilterText.trim().toLowerCase();
+  const rate = (D.kpis && D.kpis.sebRate_per_hour) || 100;
+
+  let list = PROJ_SORTED.filter(p => {
+    if (projFilterStatus !== 'All' && p.status !== projFilterStatus) return false;
+    if (q && !(`${p.id} ${p.name} ${p.contactDisplay}`.toLowerCase().includes(q))) return false;
+    return true;
+  });
+
+  if (projSortCol) {
+    const keyFn = PROJ_SORT_KEYS[projSortCol];
+    if (keyFn) {
+      list = [...list].sort((a,b) => {
+        const av = keyFn(a), bv = keyFn(b);
+        if (av < bv) return projSortDir === 'asc' ? -1 : 1;
+        if (av > bv) return projSortDir === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+  } else {
+    list = [...list].sort((a, b) => {
+      const aD = (D.projects||[]).some(x=>x.name===a.name) ? 0 : 1;
+      const bD = (D.projects||[]).some(x=>x.name===b.name) ? 0 : 1;
+      if (aD !== bD) return aD - bD;
+      if (a.startDate && b.startDate) return b.startDate.localeCompare(a.startDate);
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  function pc(v, pos='var(--sage)', neg='var(--pink)') { return v === null ? 'var(--ink-4)' : v >= 0 ? pos : neg; }
+
+  tbody.innerHTML = list.map(p => {
+    const safeName = p.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    const adjRateColor = p.adjRate !== null ? (p.adjRate >= rate ? 'var(--sage)' : 'var(--pink)') : 'var(--ink-4)';
+    const profitCell = p.profit !== null
+      ? `<span style="color:${pc(p.profit)};font-weight:600">${fmt(p.profit)}</span><br>
+         <span style="font-size:10px;color:${pc(p.profitPct)}">${p.profitPct >= 0 ? '+' : ''}${p.profitPct.toFixed(1)}%</span>`
+      : dash;
+    return `<tr onclick="showProjectDetail('${safeName}')" style="cursor:pointer">
+      <td style="font-size:11px;color:var(--ink-4);white-space:nowrap">#${p.id}</td>
+      <td><strong style="white-space:nowrap">${p.name}</strong>
+          <div style="margin-top:2px">${projStatusBadge(p.status)}</div>
+      </td>
+      <td style="font-size:12px;white-space:nowrap">${p.contactDisplay}</td>
+      <td class="amount">${p.estValue != null ? fmt(p.estValue) : dash}</td>
+      <td class="amount" style="color:var(--blue)">${p.invoicedValue > 0 ? fmt(p.invoicedValue) : dash}</td>
+      <td class="amount" style="color:var(--amber)">${p.laborValue > 0 ? fmt(p.laborValue) : dash}</td>
+      <td class="amount" style="color:var(--orange)">${p.expensesTotal > 0 ? fmt(p.expensesTotal) : dash}</td>
+      <td class="amount">${profitCell}</td>
+      <td class="amount" style="color:${adjRateColor};white-space:nowrap">${p.adjRate !== null ? '$' + Math.round(p.adjRate) + '/h' : dash}</td>
+    </tr>`;
+  }).join('') || `<tr><td colspan="9"><div class="empty" style="padding:20px">No projects match the current filter</div></td></tr>`;
 }
 
 // ── Modals ────────────────────────────────────────────────────────────────────
-function openModal(title, bodyHtml) {
+function openModal(title, bodyHtml, wide) {
   document.getElementById('modal-title').textContent = title;
   document.getElementById('modal-body').innerHTML = bodyHtml;
+  document.querySelector('.modal').classList.toggle('modal-wide', !!wide);
   document.getElementById('modal-overlay').classList.add('open');
   document.body.style.overflow = 'hidden';
 }
 function closeModal() {
   document.getElementById('modal-overlay').classList.remove('open');
+  document.querySelector('.modal').classList.remove('modal-wide');
   document.body.style.overflow = '';
 }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal(); tsDismissPopup(); } });
 
+// 2026-06-30 batch — rewritten: clickable status pills, quote-line linking
+// (mirrors invoice linking) feeding Est. Value, manual Est. Value as fallback,
+// manual cash Revenue kept fully independent, and the columns trimmed off the
+// main Projects table (Players, Quote No./Item/Description, Start/End/Span/
+// Dilution) are surfaced here instead of discarded.
 function showProjectDetail(name) {
   const rate = D.kpis.sebRate_per_hour || 100;
   const ts = (D.timesheets||[]).filter(t=>t.project===name).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
@@ -783,30 +817,72 @@ function showProjectDetail(name) {
   const laborValue = totalHours * rate;
   const totalExpenses = exp.reduce((a,e)=>a+(e.amount||0),0);
   const defined = (D.projects||[]).find(p=>p.name===name);
+  const status = defined ? (defined.status || 'Active') : 'Active';
   const quoted = defined && defined.quoted != null ? defined.quoted : null;
-  const remaining = quoted != null ? quoted - laborValue - totalExpenses : null;
-  // Feature 3 — revenue links + manual cash revenue
   const safe = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
   const manRev = defined ? (Number(defined.manual_revenue)||0) : 0;
   const manRevNote = defined ? (defined.manual_revenue_note||'') : '';
+  const inpS = 'padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:13px';
+
+  // Dropped table columns, surfaced here: team, span/dilution, start/end.
+  function workingDays(start, end) {
+    if (!start || !end) return null;
+    const s = new Date(start + 'T00:00:00'), e = new Date(end + 'T00:00:00');
+    let count = 0; const d = new Date(s);
+    while (d <= e) { const dow = d.getDay(); if (dow > 0 && dow < 6) count++; d.setDate(d.getDate() + 1); }
+    return count || 1;
+  }
+  const players = [...new Set(ts.map(t=>t.employee).filter(Boolean))];
+  const dateList = ts.map(t=>t.date).filter(Boolean).sort();
+  const startDate = dateList[0] || null;
+  const endDate   = dateList[dateList.length-1] || null;
+  const span      = workingDays(startDate, endDate);
+  const hrPerDay  = span && totalHours > 0 ? totalHours / span : null;
+  const dilutionPct = hrPerDay != null ? (hrPerDay / 8) * 100 : null;
+
+  // Quote-line links (2026-06-30) — sum becomes Est. Value when present.
+  const linkedQ = (D.quote_items||[]).filter(qi => (qi.project||'').trim() === name)
+                    .sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const linkedQTotal = linkedQ.reduce((a,qi)=>a+(Number(qi.line_amount)||0),0);
+
+  // Invoice-line links (Feature 3, unchanged) — sum (+ manual revenue) = Invoiced.
   const linked = (D.invoice_items||[]).filter(ii => (ii.project||'').trim() === name)
                    .sort((a,b)=>(b.date||'').localeCompare(a.date||''));
   const linkedTotal = linked.reduce((a,ii)=>a+(Number(ii.price_excl_gst)||0),0);
+
+  const estValue  = linkedQTotal > 0 ? linkedQTotal : quoted;
+  const remaining = estValue != null ? estValue - laborValue - totalExpenses : null;
   const showLinks = !isNonBillable(name);
-  const inpS = 'padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:13px';
+
+  const linkedQRows = linkedQ.length
+    ? linkedQ.map(qi=>`<tr><td style="white-space:nowrap;color:var(--blue)">${qi.quote_number||'—'}</td><td style="font-size:11px;color:var(--ink-3)">${attrEsc(qi.item||'')}</td><td style="color:var(--ink-4)">${attrEsc((qi.description||'').slice(0,40))}</td><td>${attrEsc(qi.contact||'')}</td><td class="amount" style="color:var(--blue)">${fmt(qi.line_amount||0)}</td><td style="text-align:center"><span onclick="projUnlinkQuoteItem('${safe}','${attrEsc(qi.id)}')" style="cursor:pointer;color:var(--pink);font-size:11px">✕ unlink</span></td></tr>`).join('')
+      + `<tr style="font-weight:600;background:var(--bg-3)"><td colspan="4" style="font-size:12px;color:var(--ink-4)">Linked total</td><td class="amount" style="color:var(--blue)">${fmt(linkedQTotal)}</td><td></td></tr>`
+    : `<tr><td colspan="6" style="text-align:center;color:var(--ink-4);padding:14px 0">No quote lines linked yet — Est. Value falls back to the manual figure above.</td></tr>`;
+
   const linkedRows = linked.length
     ? linked.map(ii=>`<tr><td style="white-space:nowrap;color:var(--blue)">${ii.invoice_number||'—'}</td><td style="color:var(--ink-4)">${attrEsc((ii.description||'').slice(0,46))}</td><td>${attrEsc(ii.contact||'')}</td><td class="amount" style="color:var(--blue)">${fmt(ii.price_excl_gst||0)}</td><td style="text-align:center"><span onclick="projUnlinkItem('${safe}','${attrEsc(ii.id)}')" style="cursor:pointer;color:var(--pink);font-size:11px">✕ unlink</span></td></tr>`).join('')
       + `<tr style="font-weight:600;background:var(--bg-3)"><td colspan="3" style="font-size:12px;color:var(--ink-4)">Linked total</td><td class="amount" style="color:var(--blue)">${fmt(linkedTotal)}</td><td></td></tr>`
     : `<tr><td colspan="5" style="text-align:center;color:var(--ink-4);padding:14px 0">No line items hand-linked yet — auto-match by client name is used until you link some.</td></tr>`;
+
   const linksSection = showLinks ? `
     <div style="margin-bottom:20px">
-      <div class="divider" style="margin-top:0">Revenue & Invoice Links</div>
+      <div class="divider" style="margin-top:0">Est. Value & Revenue</div>
       <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:14px;padding:12px;background:var(--bg-2);border-radius:10px">
-        <div><div style="font-size:11px;color:var(--ink-4);margin-bottom:3px">Est. value (quote)</div><input id="pd-quoted" type="number" step="0.01" value="${quoted!=null?quoted:''}" placeholder="0" style="${inpS};width:120px;text-align:right"></div>
-        <div><div style="font-size:11px;color:var(--ink-4);margin-bottom:3px">Manual revenue (cash)</div><input id="pd-manrev" type="number" step="0.01" value="${manRev||''}" placeholder="0" style="${inpS};width:120px;text-align:right"></div>
+        <div><div style="font-size:11px;color:var(--ink-4);margin-bottom:3px">Manual Est. Value${linkedQTotal>0?' <span style="color:var(--amber)">(overridden by linked quotes)</span>':''}</div><input id="pd-quoted" type="number" step="0.01" value="${quoted!=null?quoted:''}" placeholder="0" style="${inpS};width:140px;text-align:right"></div>
+        <div><div style="font-size:11px;color:var(--ink-4);margin-bottom:3px">Manual revenue (cash)</div><input id="pd-manrev" type="number" step="0.01" value="${manRev||''}" placeholder="0" style="${inpS};width:140px;text-align:right"></div>
         <div style="flex:1;min-width:160px"><div style="font-size:11px;color:var(--ink-4);margin-bottom:3px">Manual revenue note</div><input id="pd-manrev-note" value="${attrEsc(manRevNote)}" placeholder="e.g. cash job, no invoice" style="${inpS};width:100%"></div>
         <button onclick="projSaveRevenue('${safe}')" style="padding:8px 16px;background:var(--sage);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700">Save</button>
       </div>
+
+      <div class="divider">Linked Quotes</div>
+      <div style="font-size:12px;color:var(--ink-3);margin-bottom:6px">Hand-linked quote line items <span style="color:var(--ink-4)">(${linkedQ.length}) — sum becomes Est. Value when present</span></div>
+      <table><thead><tr><th>Quote</th><th>Item</th><th>Description</th><th>Contact</th><th style="text-align:right">Excl GST</th><th></th></tr></thead><tbody>${linkedQRows}</tbody></table>
+      <div style="margin-top:12px">
+        <input id="pd-qlink-search" placeholder="Search quote #, contact or description to link a line…" oninput="projRenderQuoteLinkCandidates('${safe}')" style="${inpS};width:100%">
+        <div id="pd-qlink-results" style="margin-top:8px"></div>
+      </div>
+
+      <div class="divider">Linked Invoices</div>
       <div style="font-size:12px;color:var(--ink-3);margin-bottom:6px">Hand-linked invoice line items <span style="color:var(--ink-4)">(${linked.length}) — these override client-name auto-match</span></div>
       <table><thead><tr><th>Invoice</th><th>Description</th><th>Contact</th><th style="text-align:right">Excl GST</th><th></th></tr></thead><tbody>${linkedRows}</tbody></table>
       <div style="margin-top:12px">
@@ -814,6 +890,7 @@ function showProjectDetail(name) {
         <div id="pd-link-results" style="margin-top:8px"></div>
       </div>
     </div>` : '';
+
   const tsRows = ts.length
     ? ts.map(t=>`<tr><td>${t.date||'—'}</td><td>${t.employee||'Seb'}</td><td style="color:var(--ink-4)">${t.notes||'—'}</td><td class="amount">${t.hours}h</td><td class="amount" style="color:var(--amber)">${fmt(t.hours*rate)}</td></tr>`).join('')
       + `<tr style="font-weight:600;background:var(--bg-3)"><td colspan="3" style="font-size:12px;color:var(--ink-4)">Total</td><td class="amount">${totalHours}h</td><td class="amount" style="color:var(--amber)">${fmt(laborValue)}</td></tr>`
@@ -822,12 +899,24 @@ function showProjectDetail(name) {
     ? exp.map(e=>`<tr><td>${e.date||'—'}</td><td style="color:var(--ink-4)">${e.description||'—'}</td><td>${e.category||'—'}</td><td class="amount">${fmt(e.amount)}</td></tr>`).join('')
       + `<tr style="font-weight:600;background:var(--bg-3)"><td colspan="3" style="font-size:12px;color:var(--ink-4)">Total</td><td class="amount">${fmt(totalExpenses)}</td></tr>`
     : `<tr><td colspan="4" style="text-align:center;color:var(--ink-4);padding:16px 0">No expenses logged</td></tr>`;
+
   openModal(name, `
-    <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:20px">
-      ${kpi('Quoted', quoted!=null?fmt(quoted):'TBD','',quoted?'highlight':'')}
+    <div style="margin-bottom:16px">
+      <div style="font-size:11px;color:var(--ink-4);margin-bottom:6px">Status — click to change</div>
+      ${projStatusPills(name, status)}
+    </div>
+    <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:16px">
+      ${kpi('Est. Value', estValue!=null?fmt(estValue):'TBD','',estValue?'highlight':'')}
       ${kpi('Labour',fmt(laborValue),totalHours+'h @ $'+rate+'/hr','')}
       ${kpi('Expenses',totalExpenses>0?fmt(totalExpenses):'$0','Materials & costs','')}
       ${kpi('Remaining',remaining!==null?fmt(remaining):'—','Budget left',remaining===null?'':remaining>=0?'good':'warn')}
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:18px;font-size:11px;color:var(--ink-4);margin-bottom:20px;padding:10px 12px;background:var(--bg-2);border-radius:8px">
+      <div><strong style="color:var(--ink-2)">Team:</strong> ${players.length?players.join(', '):'—'}</div>
+      <div><strong style="color:var(--ink-2)">Start:</strong> ${startDate||'—'}</div>
+      <div><strong style="color:var(--ink-2)">End:</strong> ${endDate||'—'}</div>
+      <div><strong style="color:var(--ink-2)">Span:</strong> ${span!=null?span+'d':'—'}</div>
+      <div><strong style="color:var(--ink-2)">Dilution:</strong> ${dilutionPct!=null?dilutionPct.toFixed(0)+'% ('+hrPerDay.toFixed(1)+'h/d)':'—'}</div>
     </div>
     ${linksSection}
     <div style="margin-bottom:20px">
@@ -889,6 +978,55 @@ async function projUnlinkItem(name, id) {
   } catch (e) { claudeToast('⚠ ' + (e.message||'Unlink failed'), 'error'); }
 }
 
+// ── 2026-06-30 — project ↔ quote-line linking (mirrors invoice linking above) ──
+function projRenderQuoteLinkCandidates(name) {
+  const box = document.getElementById('pd-qlink-results');
+  const q = ((document.getElementById('pd-qlink-search')||{}).value || '').trim().toLowerCase();
+  if (!box) return;
+  if (q.length < 2) { box.innerHTML = '<div style="font-size:11px;color:var(--ink-4);padding:4px 2px">Type at least 2 characters…</div>'; return; }
+  const cands = (D.quote_items||[]).filter(qi => {
+    if ((qi.project||'').trim() === name) return false;        // already linked here
+    const hay = `${qi.quote_number||''} ${qi.contact||''} ${qi.description||''}`.toLowerCase();
+    return hay.includes(q);
+  }).slice(0, 15);
+  if (!cands.length) { box.innerHTML = '<div style="font-size:11px;color:var(--ink-4);padding:4px 2px">No matching quote lines.</div>'; return; }
+  const safe = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+  box.innerHTML = `<table style="font-size:12px"><tbody>${cands.map(qi=>{
+    const taken = (qi.project||'').trim();
+    return `<tr>
+      <td style="white-space:nowrap;color:var(--blue)">${qi.quote_number||'—'}</td>
+      <td style="color:var(--ink-4)">${attrEsc((qi.description||'').slice(0,40))}</td>
+      <td>${attrEsc(qi.contact||'')}</td>
+      <td class="amount">${fmt(qi.line_amount||0)}</td>
+      <td style="text-align:center">${taken
+        ? `<span style="font-size:10px;color:var(--ink-4)" title="Currently linked to ${attrEsc(taken)}">→ ${attrEsc(taken)}</span>`
+        : ''}<span onclick="projLinkQuoteItem('${safe}','${attrEsc(qi.id)}')" style="cursor:pointer;color:var(--sage);font-size:11px;margin-left:6px">+ link</span></td>
+    </tr>`;
+  }).join('')}</tbody></table>`;
+}
+
+async function projLinkQuoteItem(name, id) {
+  try {
+    await hubWrite('quote_items', id, { project: name });
+    const qi = (D.quote_items||[]).find(x => String(x.id) === String(id));
+    if (qi) qi.project = name;
+    claudeToast('✓ Quote line linked to ' + name, 'success');
+    showProjectDetail(name);
+    renderProjects(D.kpis);
+  } catch (e) { claudeToast('⚠ ' + (e.message||'Link failed'), 'error'); }
+}
+
+async function projUnlinkQuoteItem(name, id) {
+  try {
+    await hubWrite('quote_items', id, { project: '' });
+    const qi = (D.quote_items||[]).find(x => String(x.id) === String(id));
+    if (qi) qi.project = '';
+    claudeToast('✓ Quote line unlinked', 'success');
+    showProjectDetail(name);
+    renderProjects(D.kpis);
+  } catch (e) { claudeToast('⚠ ' + (e.message||'Unlink failed'), 'error'); }
+}
+
 async function projSaveRevenue(name) {
   const qEl = document.getElementById('pd-quoted');
   const mEl = document.getElementById('pd-manrev');
@@ -905,6 +1043,180 @@ async function projSaveRevenue(name) {
     showProjectDetail(name);
     renderProjects(D.kpis);
   } catch (e) { claudeToast('⚠ ' + (e.message||'Save failed'), 'error'); }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── NON-BILLABLE WINDOW (2026-06-30 batch) ───────────────────────────────────
+// Separate from the billable Project table — these categories have no quotes
+// or invoices and stay perpetually "open". Own period-preset set (this window
+// intentionally does NOT reuse getRange()/tsRangeMode, which only knows the
+// Timesheets tab's 2w/1m/3m/1y presets) plus a category filter and a
+// hours-over-time graph switchable between week/month/year buckets.
+// ══════════════════════════════════════════════════════════════════════════════
+let nbCategory    = 'All';   // 'All' | 'None' | one of NON_BILLABLE
+let nbRangeMode    = '2w';    // 2w | 30d | 3m | 6m | 1y | 36m | custom
+let nbCustomFrom   = null;
+let nbCustomTo     = null;
+let nbGraphMode    = 'week';  // week | month | year
+
+function nbGetRange() {
+  const today = todayMidnight();
+  let from, to;
+  if (nbRangeMode === 'custom') {
+    from = nbCustomFrom ? new Date(nbCustomFrom + 'T00:00:00') : new Date(today);
+    to   = nbCustomTo   ? new Date(nbCustomTo   + 'T00:00:00') : new Date(today);
+  } else {
+    from = new Date(today);
+    to   = new Date(today);
+    if      (nbRangeMode === '2w')  from.setDate(from.getDate() - 14);
+    else if (nbRangeMode === '30d') from.setDate(from.getDate() - 30);
+    else if (nbRangeMode === '3m')  from.setMonth(from.getMonth() - 3);
+    else if (nbRangeMode === '6m')  from.setMonth(from.getMonth() - 6);
+    else if (nbRangeMode === '1y')  from.setFullYear(from.getFullYear() - 1);
+    else if (nbRangeMode === '36m') from.setMonth(from.getMonth() - 36);
+  }
+  return { from: ds(from), to: ds(to) };
+}
+
+// ISO-8601 week label, e.g. "2026-W23" — used to bucket the hours graph by week number.
+function isoWeekLabel(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + (4 - (d.getDay() || 7)));   // shift to the Thursday of this week
+  const yearStart = new Date(d.getFullYear(), 0, 1);
+  const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  return d.getFullYear() + '-W' + String(weekNo).padStart(2, '0');
+}
+
+function showNonBillableWindow() {
+  openModal('Non-Billable Projects', nbRenderBody(), true);
+  nbRenderChart();
+}
+
+function nbRefresh() {
+  const body = document.getElementById('modal-body');
+  if (!body) return;
+  body.innerHTML = nbRenderBody();
+  nbRenderChart();
+}
+
+function nbSetCategory(v) { nbCategory = v; nbRefresh(); }
+function nbSetRange(mode) {
+  nbRangeMode = mode;
+  if (mode !== 'custom') { nbCustomFrom = null; nbCustomTo = null; }
+  nbRefresh();
+}
+function nbSetCustomFrom(v) { nbRangeMode = 'custom'; nbCustomFrom = v; nbRefresh(); }
+function nbSetCustomTo(v)   { nbRangeMode = 'custom'; nbCustomTo   = v; nbRefresh(); }
+function nbSetGraphMode(mode) { nbGraphMode = mode; nbRefresh(); }
+
+function nbMatchingEntries(list, from, to) {
+  if (nbCategory === 'None') return [];
+  return list.filter(r =>
+    isNonBillable(r.project) && r.date && r.date >= from && r.date <= to &&
+    (nbCategory === 'All' || r.project === nbCategory)
+  );
+}
+
+function nbRenderBody() {
+  const { from, to } = nbGetRange();
+  const rate = (D.kpis && D.kpis.sebRate_per_hour) || 100;
+  const filteredTs  = nbMatchingEntries(D.timesheets   || [], from, to);
+  const filteredExp = nbMatchingEntries(D.expense_log  || [], from, to);
+
+  const totalHours  = filteredTs.reduce((a,t)=>a+(t.hours||0),0);
+  const labourValue = totalHours * rate;
+  const totalExp    = filteredExp.reduce((a,e)=>a+(e.amount||0),0);
+  const entryCount  = filteredTs.length;
+
+  const byCat = {};
+  NON_BILLABLE.forEach(c => byCat[c] = 0);
+  filteredTs.forEach(t => { if (byCat[t.project] != null) byCat[t.project] += (t.hours||0); });
+  const catRows = NON_BILLABLE
+    .map(c => ({ c, h: byCat[c] || 0 }))
+    .filter(r => r.h > 0 || nbCategory === 'All')
+    .map(r => `<tr><td>${r.c}</td><td class="amount">${r.h.toFixed(1)}h</td></tr>`).join('')
+    || `<tr><td colspan="2" style="text-align:center;color:var(--ink-4);padding:10px 0">No entries in this period</td></tr>`;
+
+  const catOptions = ['All','None', ...NON_BILLABLE]
+    .map(c => `<option value="${c}"${nbCategory===c?' selected':''}>${c}</option>`).join('');
+
+  const presets = [
+    {v:'2w',l:'2 Weeks'},{v:'30d',l:'30 Days'},{v:'3m',l:'3 Months'},
+    {v:'6m',l:'6 Months'},{v:'1y',l:'1 Year'},{v:'36m',l:'36 Months'}
+  ].map(p=>`<button class="hub-pill-btn${nbRangeMode===p.v?' active':''}" onclick="nbSetRange('${p.v}')">${p.l}</button>`).join('');
+  const customBtn = `<button class="hub-pill-btn${nbRangeMode==='custom'?' active':''}" onclick="nbSetRange('custom')">Custom</button>`;
+  const customInputs = nbRangeMode === 'custom' ? `
+    <input type="date" value="${nbCustomFrom||from}" onchange="nbSetCustomFrom(this.value)" style="margin-left:8px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:11px">
+    <span style="color:var(--ink-4);font-size:11px">to</span>
+    <input type="date" value="${nbCustomTo||to}" onchange="nbSetCustomTo(this.value)" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:11px">` : '';
+
+  const graphToggle = ['week','month','year'].map(m=>
+    `<button class="hub-pill-btn${nbGraphMode===m?' active':''}" onclick="nbSetGraphMode('${m}')">${m[0].toUpperCase()+m.slice(1)}</button>`
+  ).join('');
+
+  const catSub = nbCategory === 'All' ? 'All categories' : nbCategory === 'None' ? 'No category selected' : nbCategory;
+
+  return `
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px">
+      <span style="font-size:11px;color:var(--ink-4)">Category</span>
+      <select onchange="nbSetCategory(this.value)" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:12px">
+        ${catOptions}
+      </select>
+    </div>
+    <div class="ts-range-bar">
+      <span class="ts-range-label">Period:</span>
+      ${presets}${customBtn}${customInputs}
+      <span style="font-size:10px;color:var(--ink-4);margin-left:auto;white-space:nowrap">${from} → ${to}</span>
+    </div>
+    <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:18px">
+      ${kpi('Total Hours', totalHours.toFixed(1) + 'h', catSub, 'highlight')}
+      ${kpi('Labour Value', fmt(labourValue), 'At $' + rate + '/hr', '')}
+      ${kpi('Expenses', totalExp > 0 ? fmt(totalExp) : '$0', 'Materials & costs', '')}
+      ${kpi('Entries', entryCount, 'Timesheet rows', '')}
+    </div>
+    <div style="margin-bottom:18px">
+      <div class="divider" style="margin-top:0">By Category</div>
+      <table style="font-size:12px"><thead><tr><th>Category</th><th style="text-align:right">Hours</th></tr></thead><tbody>${catRows}</tbody></table>
+    </div>
+    <div class="divider">Hours Over Time</div>
+    <div style="display:flex;gap:6px;margin-bottom:10px">${graphToggle}</div>
+    <div class="chart-wrap" style="height:260px"><canvas id="chart-nb-hours"></canvas></div>`;
+}
+
+function nbRenderChart() {
+  const canvas = document.getElementById('chart-nb-hours');
+  if (!canvas) return;
+  destroyChart('nb-hours');
+  const { from, to } = nbGetRange();
+  const filtered = nbMatchingEntries(D.timesheets || [], from, to);
+
+  const buckets = {};
+  filtered.forEach(t => {
+    if (!t.date) return;
+    let key;
+    if      (nbGraphMode === 'week')  key = isoWeekLabel(t.date);
+    else if (nbGraphMode === 'month') key = t.date.slice(0,7);
+    else                              key = t.date.slice(0,4);
+    buckets[key] = (buckets[key] || 0) + (t.hours || 0);
+  });
+  const labels = Object.keys(buckets).sort();
+  const data   = labels.map(k => buckets[k]);
+
+  charts['nb-hours'] = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: { labels, datasets: [{ label: 'Hours', data, backgroundColor: '#FFBE0B', borderRadius: 4 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: c => ` ${c.raw.toFixed(1)}h` } }
+      },
+      scales: {
+        x: { ticks: CHART_TICK, grid: { display: false } },
+        y: { ticks: CHART_TICK, grid: { color: CHART_GRID }, beginAtZero: true }
+      }
+    }
+  });
 }
 
 function showMonthDetail(idx) {
@@ -983,6 +1295,11 @@ let tsCalMonth   = new Date();
 let tsRangeMode  = '2w';
 let tsRangeFrom  = null;
 let tsRangeTo    = null;
+
+// Timesheet Log table filters — independent of the period/player selectors above;
+// these only narrow what's shown in the table itself, not the calendar/treemap/summary.
+let tsTableProject = 'All';
+let tsTableSearch   = '';
 
 function ds(d) {
   // Use local date parts — avoids UTC offset shifting the date
@@ -1109,6 +1426,12 @@ function renderTimesheet() {
       ${rangeBtns}${customBtn}${customInputs}
     </div>
 
+    <!-- Period summary -->
+    <div class="section">
+      <div class="section-head"><h2>Period Summary</h2></div>
+      <div class="section-body" id="ts-summary" style="padding:14px 16px"></div>
+    </div>
+
     <!-- Treemap -->
     <div class="section">
       <div class="section-head"><h2>Time Distribution</h2><span class="chart-clickable-hint">click "Not logged" to fill missing days</span></div>
@@ -1121,12 +1444,15 @@ function renderTimesheet() {
     <!-- Table -->
     <div class="section">
       <div class="section-head"><h2>Timesheet Log</h2></div>
+      <div class="ts-filter-bar" id="ts-table-filters" style="padding-top:0;margin-bottom:10px"></div>
       <div id="ts-table"></div>
     </div>`;
 
   renderTsCalendar();
   renderTsTreemap();
+  tsRenderTableFilters();
   renderTsTable();
+  tsRenderSummary();
 }
 
 // ── Calendar ──────────────────────────────────────────────────────────────────
@@ -1602,6 +1928,7 @@ function tsCustomRange() {
   tsRangeTo   = (document.getElementById('ts-to')||{}).value   || null;
   renderTsTreemap();
   renderTsTable();
+  tsRenderSummary();
 }
 
 // ── Treemap ───────────────────────────────────────────────────────────────────
@@ -1735,18 +2062,108 @@ function renderTsTreemap() {
   ).join('');
 }
 
-// ── Timesheet table ───────────────────────────────────────────────────────────
+// ── Period Summary ───────────────────────────────────────────────────────────
+// Plain-text + KPI digest of the SAME period/player currently selected above
+// (not affected by the Timesheet Log table filters below — this always reflects
+// the full picture for the chosen range).
+function tsRenderSummary() {
+  const el = document.getElementById('ts-summary');
+  if (!el) return;
+
+  const { from, to } = getRange();
+  const fromStr = ds(from), toStr = ds(to);
+  const rows = (D.timesheets||[]).filter(t => (t.employee||'Seb')===tsPlayer && t.date>=fromStr && t.date<=toStr);
+
+  if (!rows.length) {
+    el.innerHTML = `<div class="empty" style="padding:10px 4px"><div class="empty-icon">📋</div>No entries in this period</div>`;
+    return;
+  }
+
+  const totalHours    = rows.reduce((a,t)=>a+(t.hours||0),0);
+  const billableRows   = rows.filter(t => !isNonBillable(t.project));
+  const nbRows         = rows.filter(t => isNonBillable(t.project));
+  const billableHours  = billableRows.reduce((a,t)=>a+(t.hours||0),0);
+  const nbHours        = nbRows.reduce((a,t)=>a+(t.hours||0),0);
+  const billablePct    = totalHours>0 ? billableHours/totalHours*100 : 0;
+  const nbPct          = totalHours>0 ? nbHours/totalHours*100 : 0;
+
+  // Distinct billable projects worked on in this period, and how many already
+  // have a quote or invoice line item hand-linked (Projects tab linking feature).
+  const billableProjects = [...new Set(billableRows.map(t=>t.project).filter(Boolean))];
+  const linkedSet = new Set([
+    ...(D.quote_items||[]).map(qi=>(qi.project||'').trim()).filter(Boolean),
+    ...(D.invoice_items||[]).map(ii=>(ii.project||'').trim()).filter(Boolean),
+  ]);
+  const linkedProjects = billableProjects.filter(p => linkedSet.has(p));
+
+  const sortedDates = rows.map(t=>t.date).sort();
+  const startLabel = new Date(sortedDates[0]+'T00:00:00').toLocaleDateString('en-AU',{day:'numeric',month:'short'});
+  const endLabel   = new Date(sortedDates[sortedDates.length-1]+'T00:00:00').toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'});
+  const projectWord = billableProjects.length===1 ? 'project' : 'projects';
+
+  const linkSentence = billableProjects.length
+    ? ` ${linkedProjects.length} of ${billableProjects.length} ${projectWord} ${billableProjects.length===1?'has':'have'} a quote or invoice linked.`
+    : '';
+
+  const summarySentence = `Between <strong>${startLabel}</strong> and <strong>${endLabel}</strong>, ${tsPlayer} logged <strong>${totalHours.toFixed(1)}h</strong>` +
+    (billableProjects.length ? ` across ${billableProjects.length} billable ${projectWord}` : '') +
+    (nbHours>0 ? `, plus <strong>${nbHours.toFixed(1)}h</strong> non-billable (${nbPct.toFixed(0)}%)` : '') +
+    `.${linkSentence}`;
+
+  el.innerHTML = `
+    <div style="font-size:13px;color:var(--ink-2);line-height:1.6;margin-bottom:16px">${summarySentence}</div>
+    <div class="kpi-grid">
+      ${kpi('Total Hours', totalHours.toFixed(1)+'h', rows.length+' entr'+(rows.length===1?'y':'ies'), '')}
+      ${kpiBar('Billable', billableHours.toFixed(1)+'h', billablePct.toFixed(0)+'% of period', billablePct, 'good')}
+      ${kpiBar('Non-Billable', nbHours.toFixed(1)+'h', nbPct.toFixed(0)+'% of period', nbPct, nbPct>30?'warn':'')}
+      ${kpi('Quote/Invoice Linked', linkedProjects.length+' / '+billableProjects.length, 'billable projects with a link', (billableProjects.length && linkedProjects.length===billableProjects.length) ? 'good':'')}
+    </div>`;
+}
+
+// ── Timesheet Log table — filters + render ────────────────────────────────────
+// Project dropdown + free-text search, scoped to this table only (the period/
+// player selectors above still gate what's eligible to appear here).
+function tsRenderTableFilters() {
+  const el = document.getElementById('ts-table-filters');
+  if (!el) return;
+
+  const playerTs = (D.timesheets||[]).filter(t => (t.employee||'Seb')===tsPlayer);
+  const projects = [...new Set(playerTs.map(t=>t.project).filter(Boolean))]
+    .sort((a,b) => isNonBillable(a)===isNonBillable(b) ? a.localeCompare(b) : (isNonBillable(a)?1:-1));
+  const opts = '<option value="All">All projects</option>' +
+    projects.map(p => `<option value="${attrEsc(p)}"${tsTableProject===p?' selected':''}>${p}</option>`).join('');
+  const hasFilter = tsTableProject!=='All' || tsTableSearch;
+
+  el.innerHTML = `
+    <label>Project</label>
+    <select id="ts-table-project" onchange="tsTableSetProject(this.value)">${opts}</select>
+    <input id="ts-table-search" type="text" placeholder="Search notes or project…" value="${attrEsc(tsTableSearch)}" oninput="tsTableSetSearch(this.value)"
+      style="flex:1;min-width:140px;max-width:260px;padding:5px 10px;border-radius:var(--r);border:1px solid var(--border-2);background:var(--bg-2);color:var(--ink);font-size:12px;outline:none">
+    ${hasFilter ? `<button class="hub-pill-btn" onclick="tsTableClearFilters()">Clear</button>` : ''}`;
+}
+
+function tsTableSetProject(v) { tsTableProject = v; renderTsTable(); tsRenderTableFilters(); }
+function tsTableSetSearch(v)  { tsTableSearch  = v; renderTsTable(); }
+function tsTableClearFilters() { tsTableProject = 'All'; tsTableSearch = ''; tsRenderTableFilters(); renderTsTable(); }
+
 function renderTsTable() {
   const { from, to } = getRange();
-  const rows = (D.timesheets||[])
-    .filter(t => (t.employee||'Seb')===tsPlayer && t.date>=ds(from) && t.date<=ds(to))
-    .sort((a,b)=>b.date.localeCompare(a.date));
+  let rows = (D.timesheets||[])
+    .filter(t => (t.employee||'Seb')===tsPlayer && t.date>=ds(from) && t.date<=ds(to));
+
+  if (tsTableProject !== 'All') rows = rows.filter(t => t.project === tsTableProject);
+  if (tsTableSearch) {
+    const q = tsTableSearch.toLowerCase();
+    rows = rows.filter(t => (t.notes||'').toLowerCase().includes(q) || (t.project||'').toLowerCase().includes(q));
+  }
+  rows = rows.sort((a,b)=>b.date.localeCompare(a.date));
 
   const el = document.getElementById('ts-table');
   if (!el) return;
 
   if (!rows.length) {
-    el.innerHTML = `<div class="empty" style="padding:28px"><div class="empty-icon">⏱</div>No entries in this period</div>`;
+    const msg = (tsTableProject!=='All' || tsTableSearch) ? 'No entries match this filter' : 'No entries in this period';
+    el.innerHTML = `<div class="empty" style="padding:28px"><div class="empty-icon">⏱</div>${msg}</div>`;
     return;
   }
 
@@ -1761,7 +2178,8 @@ function renderTsTable() {
     </tr>`;
   }).join('');
 
-  el.innerHTML = `<table>
+  el.innerHTML = `<div style="padding:0 2px 8px;font-size:11px;color:var(--ink-4)">${rows.length} entr${rows.length===1?'y':'ies'}</div>
+  <table>
     <thead><tr>
       <th>Date</th><th>Project</th><th style="text-align:right">Hours</th><th>Notes</th>
     </tr></thead>
