@@ -62,9 +62,14 @@ These are **single sources of truth** — change them in one place and the new l
 
 ## Tabs (front-end `showTab` pages)
 
-Overview · Cash & Invoices · Timesheets · Profitability · P&L · Materials · Projects · Quotes & Pricing · Activity Log · Transactions · **Expenses** · **For Action**
+Timesheets · P&L · **Projects** · Quotes & Pricing · Transactions · Scan Receipt · Expenses · For Action
 
+(Overview, Cash & Invoices, Profitability, Materials and Activity Log were removed 2026-06-21 — see CHANGES_PENDING.md "Shipped" log. Scan Receipt, added the same week, hosts the Materials catalog as a sub-view.)
+
+- **Timesheets** — calendar + treemap, a **Period Summary** section (plain-text digest + KPI tiles: Total Hours, Billable, Non-Billable, Quote/Invoice Linked — reflects whatever period/player is selected above), and the Timesheet Log table with its own Project filter + notes/project search (scoped to the table only, doesn't affect the calendar/treemap/summary).
+- **Projects** — 9-column sortable/filterable table (ID, Project, Contact, Est.Value, Invoiced, Labour, Expenses, Profitability, Adj rate); default filter = Active status. Row click opens a detail modal: clickable status pills (Active/Finished/Paid/Inactive, colour-coded), multi-select line-item-level linking to both **quotes** (`quote_items`) and **invoices** (`invoice_items`), a manual Est.Value field plus an independent manual Revenue field for when no quote/invoice exists yet. Columns dropped from the trimmed table (Players, Quote No./Item/Description, Start/End/Span, Dilution) resurface in this detail modal rather than being discarded. A "Non-Billable" KPI tile opens a separate **wide** modal (`openModal(title, body, wide=true)`) — category selector (All/None/specific non-billable category), period presets (2w/30d/3m/6m/1y/36m/custom), KPI tiles, by-category table, and an hours-over-time Chart.js bar chart toggling week/month/year.
 - **Transactions** — bank_transactions browser; date chips, type/contact (Smart Suggest)/account filters; inline-editable Project (Smart Suggest) + Notes (→ hub-write).
+- **Scan Receipt** — drop/upload a receipt (image/PDF) + optional note → editable preview table (nothing hits the DB until Save) + a Materials catalog sub-view (dedupes `expense_log` by supplier+description, copy-to-clipboard quote-ready lines).
 - **Expenses** — review/edit what's been parsed into `expense_log`; date chips + project + category filters; inline-editable Description, Category (Smart Suggest from `category_list` ∪ used categories), Project (Smart Suggest), Notes (→ hub-write).
 - **For Action** — aggregates everything needing review (expense matches, overdue invoices, uncategorised transactions, untagged contacts) with a count badge.
 
@@ -90,6 +95,13 @@ xero_cache         { key, data (JSONB), updated_at }
 invoice_items      { id, invoice_number, item, description, qty, unit_price, price_excl_gst,
                      quote_number, contact, contact_id, date, due_date, status, notes, paid, created_at }
                    ← one row per invoice line item; synced from Xero via xero-sync.js?scope=invoice_items
+quote_items        { id, quote_number, item, description, qty, unit_price, line_amount,
+                     contact, contact_id, date, expiry_date, status, project, created_at }
+                   ← one row per Xero QUOTE line item; mirrors invoice_items exactly.
+                     Synced via xero-sync.js?scope=quote_items. `project` is HUB-only
+                     (hand-link a quote line to a Project from the Projects tab), never synced.
+                     Added 2026-06-30 — run supabase_quote_items_setup.sql once in Supabase
+                     SQL editor before this table exists / linking works live.
 contacts           { id, name, first_name, last_name, email, address_line1, city, region,
                      postal_code, country, phone, abn, is_customer, is_supplier,
                      categories (TEXT[]), rating (0–10), note, updated_at, created_at }
@@ -145,6 +157,36 @@ bank_transactions  { id, date, type, contact, contact_id, account_code, account_
   - Fixed 2026-06-16: the daily workflow had been failing every run with an "Invalid workflow file" YAML error (a literal newline inside a `curl -w "..."` string broke the `run: |` block scalar). Same day, added the weekly workflow — it replaces an earlier Claude-scheduled-task attempt that never worked (sandbox proxy blocks outbound calls to matierehub2.netlify.app).
   - Fixed 2026-06-17: both workflows were scheduled exactly on the hour (`0 21 * * *` / `0 20 * * 6`), which is GitHub's documented highest-congestion window for `schedule`-triggered runs — the daily sync silently skipped a day because of this. Both crons moved off the hour and a second, ~45min-later backup cron was added to each (safe — both syncs are idempotent upserts). See `BUGS.md` → "Fixed (2026-06-17)".
 - **Manual re-run from Hub console:** `fetch('/.netlify/functions/xero-sync?scope=invoice_items', { method:'POST', headers:{'Authorization':'Bearer matiere2026'} }).then(r=>r.text()).then(console.log)`
+
+### quote_items — column source map
+
+Mirrors `invoice_items` exactly, but sourced from Xero **Quotes** instead of **Invoices**. Added 2026-06-30 for the Projects tab's quote-linking feature (multi-select, line-item-level — same UX as invoice linking).
+
+| Column | Source | Notes |
+|--------|--------|-------|
+| `id` | `li.LineItemID` (Xero UUID) | Stable primary key; fallback: `QU-XXXX-01` |
+| `quote_number` | `q.QuoteNumber` | e.g. `QU-0259` |
+| `item` | `li.ItemCode` | Short code; often blank |
+| `description` | `li.Description` | Full text as on the Xero quote |
+| `qty` | `li.Quantity` | |
+| `unit_price` | `li.UnitAmount` | Excl. GST |
+| `line_amount` | `li.LineAmount` | Excl. GST, Xero's stored value |
+| `contact` | `q.Contact.Name` | Customer display name |
+| `contact_id` | `q.Contact.ContactID` | Xero UUID — FK to `contacts.id` |
+| `date` | `q.DateString` | Quote date |
+| `expiry_date` | `q.ExpiryDateString` | |
+| `status` | `q.Status` | `DRAFT`, `SENT`, `ACCEPTED`, `DECLINED`, `INVOICED`, `DELETED` |
+| `project` | *(HUB input only — never synced)* | Written when Seb hand-links a quote line to a project in the Projects tab detail modal. **Intentionally excluded from the xero-sync upsert payload** for the same reason as `invoice_items.notes` — `merge-duplicates` would wipe every hand-link on the next sync run otherwise. |
+
+### quote_items — sync details
+
+- **Triggered by:** `POST /.netlify/functions/xero-sync?scope=quote_items` with `Authorization: Bearer <SYNC_SECRET>`
+- **Fetches:** all Xero quotes (no date or status filter — full history)
+- **Writes to:** `quote_items` table directly (not `xero_cache`)
+- **Upsert key:** `id` (LineItemID) — safe to re-run; never creates duplicates
+- **Setup prerequisite:** run `supabase_quote_items_setup.sql` once in the Supabase SQL editor — the table doesn't exist until then
+- **Automated schedule:** added to `.github/workflows/xero-sync.yml` ("Xero Daily Sync") 2026-06-30, runs between the `invoice_items` and `contacts` steps — same primary (21:07 UTC) + backup (21:52 UTC) crons as the rest of that workflow
+- **Manual re-run from Hub console:** `fetch('/.netlify/functions/xero-sync?scope=quote_items', { method:'POST', headers:{'Authorization':'Bearer matiere2026'} }).then(r=>r.text()).then(console.log)`
 
 ### contacts — column source map
 
