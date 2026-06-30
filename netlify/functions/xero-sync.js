@@ -518,6 +518,65 @@ function transformInvoiceItems(invoices) {
   return rows;
 }
 
+// ── Supabase upsert for quote_items table (separate from xero_cache) ──────────
+// Mirrors sbUpsertInvoiceItems exactly — chunked in batches of 100, upsert key is
+// Xero's LineItemID (stable primary key).
+async function sbUpsertQuoteItems(rows, log) {
+  if (!rows.length) { if (log) log.push('  → 0 quote line items to write'); return; }
+  const CHUNK = 100;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const chunk = rows.slice(i, i + CHUNK);
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/quote_items`, {
+      method: 'POST',
+      headers: {
+        'apikey':        SUPABASE_SERVICE_KEY,
+        'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+        'Content-Type':  'application/json',
+        'Prefer':        'resolution=merge-duplicates'
+      },
+      body: JSON.stringify(chunk)
+    });
+    if (!res.ok) {
+      const msg = await res.text();
+      throw new Error(`Supabase quote_items upsert failed (chunk ${i}): ${res.status} ${msg.slice(0, 200)}`);
+    }
+  }
+  if (log) log.push(`  → ${rows.length} quote line items written to quote_items table`);
+}
+
+// ── Transform Xero quotes → quote_items rows ──────────────────────────────────
+// Column mapping mirrors transformInvoiceItems. `project` is intentionally omitted
+// from every row — it's a HUB-only column (see supabase_quote_items_setup.sql) and
+// must never be touched by this sync, so hand-links survive every future run.
+// Skips line items with no Description AND no LineAmount (empty Xero placeholder rows).
+function transformQuoteItems(quotes) {
+  const rows = [];
+  for (const q of quotes) {
+    (q.LineItems || []).forEach((li, idx) => {
+      const desc    = (li.Description || '').trim();
+      const lineAmt = Math.abs(li.LineAmount || 0);
+      if (!desc && lineAmt === 0) return;      // skip empty placeholder rows
+
+      rows.push({
+        id:             li.LineItemID || `${q.QuoteNumber}-${String(idx + 1).padStart(2, '0')}`,
+        quote_number:   q.QuoteNumber || '',
+        item:           (li.ItemCode || '').trim(),
+        description:    desc,
+        qty:            li.Quantity   || 1,
+        unit_price:     Math.abs(li.UnitAmount || 0),
+        line_amount:    lineAmt,
+        contact:        q.Contact?.Name      || '',
+        contact_id:     q.Contact?.ContactID || '',
+        date:           (q.DateString       || q.Date       || '').slice(0, 10) || null,
+        expiry_date:    (q.ExpiryDateString || q.ExpiryDate || '').slice(0, 10) || null,
+        status:         q.Status || ''
+        // project intentionally omitted — HUB-only, see comment above
+      });
+    });
+  }
+  return rows;
+}
+
 // ── Supabase read (used to merge new chunks into previously-cached history) ───
 async function sbSelect(key) {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return null;
@@ -1363,6 +1422,33 @@ exports.handler = async function(event) {
       }
 
       result.invoice_items_count = itemRows.length;
+    }
+
+    // ── Quote line items (all-time history → quote_items table) ──────────────
+    // Fetches ALL Xero quotes (no date filter, no status filter) so the table
+    // covers every quote ever raised. Mirrors the invoice_items block above —
+    // transformQuoteItems() shapes the rows, sbUpsertQuoteItems() upserts them
+    // directly into the `quote_items` Supabase table (not xero_cache).
+    //
+    // Run once with ?scope=quote_items to build the initial history.
+    // Re-run any time — upsert (resolution=merge-duplicates) means it's always
+    // safe to re-run, and the HUB-only `project` column is never overwritten
+    // because it's omitted from the transform's output (see transformQuoteItems).
+    if (scope.includes('quote_items')) {
+      log.push('Fetching all-time quotes for line-item history…');
+      const allQuotes = await fetchAllPages('Quotes', 'Quotes', accessToken, tenantId);
+      log.push(`  → ${allQuotes.length} quotes fetched`);
+
+      const quoteItemRows = transformQuoteItems(allQuotes);
+      log.push(`  → ${quoteItemRows.length} quote line items extracted`);
+
+      if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+        await sbUpsertQuoteItems(quoteItemRows, log);
+      } else {
+        log.push('  ⚠ SUPABASE_URL/KEY not set — skipping quote_items write');
+      }
+
+      result.quote_items_count = quoteItemRows.length;
     }
 
     // ── Contacts (all Xero contacts → contacts table) ─────────────────────────

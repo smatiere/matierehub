@@ -26,6 +26,8 @@ const WRITABLE = {
   expense_log:       ['project', 'category', 'description', 'notes'],
   // Feature 3 — hand-link an invoice line item to a project (HUB-only column).
   invoice_items:     ['project'],
+  // 2026-06-30 batch — hand-link a quote line item to a project (mirrors invoice_items).
+  quote_items:       ['project'],
   // Feature 3 — manual revenue + light project edits from the Projects tab.
   projects:          ['manual_revenue', 'manual_revenue_note', 'quoted', 'status', 'notes', 'name']
 };

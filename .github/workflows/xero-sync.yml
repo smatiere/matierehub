@@ -23,6 +23,19 @@ jobs:
           fi
           echo "invoice_items sync completed"
 
+      - name: Sync quote_items from Xero
+        run: |
+          response=$(curl -s -w "\n%{http_code}" -X POST "https://matierehub2.netlify.app/.netlify/functions/xero-sync?scope=quote_items" -H "Authorization: Bearer ${{ secrets.SYNC_SECRET }}" -H "Content-Type: application/json")
+          http_code=$(echo "$response" | tail -1)
+          body=$(echo "$response" | head -n -1)
+          echo "HTTP status: $http_code"
+          echo "Response: $body"
+          if [ "$http_code" != "200" ]; then
+            echo "quote_items sync failed with HTTP $http_code"
+            exit 1
+          fi
+          echo "quote_items sync completed"
+
       - name: Sync contacts from Xero
         run: |
           response=$(curl -s -w "\n%{http_code}" -X POST "https://matierehub2.netlify.app/.netlify/functions/xero-sync?scope=contacts" -H "Authorization: Bearer ${{ secrets.SYNC_SECRET }}" -H "Content-Type: application/json")

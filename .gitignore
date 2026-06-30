@@ -8,3 +8,5 @@ gh_bugs_payload.json
 gh_sync_payload.json
 build_xero_audit.py
 push_data.sh
+
+CHANGES_PENDING.md
