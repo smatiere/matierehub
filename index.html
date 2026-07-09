@@ -793,7 +793,17 @@ function renderProjects(k) {
   Object.values(pData).forEach(p => {
     p.manualRev = Number((definedMap[p.name] || {}).manual_revenue) || 0;
     p.invoicedValue += p.manualRev;
-    p.estValue = p.linkedQuoteValue > 0 ? p.linkedQuoteValue : p.quoted;
+    // 2026-07-09 fix: take the LARGER of the linked-quote total and the manual
+    // estimate, never just the linked-quote total on its own. A project can have
+    // several Xero quotes (variations, add-ons) and the invoice→quote auto-cascade
+    // (see autoLinkQuotesFromInvoices) links whichever quote number happens to be
+    // on a linked invoice — that can be a small variation quote, not the main one.
+    // Blindly trusting it as Est. Value silently wiped a real $39,450 manual
+    // estimate down to $8,135 on a live project the first time this ran. Manual
+    // Est. Value now acts as a floor; clear it to $0 if a linked quote should win.
+    p.estValue = (p.linkedQuoteValue > 0 || p.quoted != null)
+      ? Math.max(p.linkedQuoteValue || 0, p.quoted || 0)
+      : null;
   });
 
   // ── Derive final metrics per project ─────────────────────────────────────
@@ -1048,7 +1058,8 @@ function showProjectDetail(name) {
                    .sort((a,b)=>(b.date||'').localeCompare(a.date||''));
   const linkedTotal = linked.reduce((a,ii)=>a+(Number(ii.price_excl_gst)||0),0);
 
-  const estValue  = linkedQTotal > 0 ? linkedQTotal : quoted;
+  // Manual Est. Value is a floor, not just a fallback — see renderProjects() for why.
+  const estValue  = (linkedQTotal > 0 || quoted != null) ? Math.max(linkedQTotal, quoted || 0) : null;
   const remaining = estValue != null ? estValue - laborValue - totalExpenses : null;
   const showLinks = !isNonBillable(name);
 
@@ -1078,7 +1089,7 @@ function showProjectDetail(name) {
     <div style="margin-bottom:20px">
       <div class="divider" style="margin-top:0">Est. Value & Revenue</div>
       <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:14px;padding:12px;background:var(--bg-2);border-radius:10px">
-        <div><div style="font-size:11px;color:var(--ink-4);margin-bottom:3px">Manual Est. Value${linkedQTotal>0?' <span style="color:var(--amber)">(overridden by linked quotes)</span>':''}</div><input id="pd-quoted" type="number" step="0.01" value="${quoted!=null?quoted:''}" placeholder="0" style="${inpS};width:140px;text-align:right"></div>
+        <div><div style="font-size:11px;color:var(--ink-4);margin-bottom:3px">Manual Est. Value${linkedQTotal>0 && linkedQTotal<=Number(quoted||0)?' <span style="color:var(--amber)">(higher than linked quotes — wins as the floor)</span>':linkedQTotal>0?' <span style="color:var(--amber)">(linked quotes are higher — they win)</span>':''}</div><input id="pd-quoted" type="number" step="0.01" value="${quoted!=null?quoted:''}" placeholder="0" style="${inpS};width:140px;text-align:right"></div>
         <div><div style="font-size:11px;color:var(--ink-4);margin-bottom:3px">Manual revenue (cash)</div><input id="pd-manrev" type="number" step="0.01" value="${manRev||''}" placeholder="0" style="${inpS};width:140px;text-align:right"></div>
         <div style="flex:1;min-width:160px"><div style="font-size:11px;color:var(--ink-4);margin-bottom:3px">Manual revenue note</div><input id="pd-manrev-note" value="${attrEsc(manRevNote)}" placeholder="e.g. cash job, no invoice" style="${inpS};width:100%"></div>
         <button onclick="projSaveRevenue('${safe}')" style="padding:8px 16px;background:var(--sage);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700">Save</button>
