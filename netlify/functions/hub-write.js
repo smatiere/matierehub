@@ -24,6 +24,8 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const WRITABLE = {
   bank_transactions: ['project', 'notes', 'expense_log_id'],
   expense_log:       ['project', 'category', 'description', 'notes'],
+  // 2026-07-10 — inline notes editing from the Projects tab's Timesheets section.
+  timesheets:        ['notes'],
   // Feature 3 — hand-link an invoice line item to a project (HUB-only column).
   invoice_items:     ['project'],
   // 2026-06-30 batch — hand-link a quote line item to a project (mirrors invoice_items).

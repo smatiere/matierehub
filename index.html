@@ -487,25 +487,42 @@ async function autoUpdatePaidProjects() {
 // explicit links in one click — after which the normal "✕ unlink" (already built)
 // works on the wrong ones. Returns '' once any hand-link exists (auto-match is
 // fully superseded at that point — see the exclusion in renderProjects).
+// Fuzzy auto-match by client name/contact — brings only the SINGLE most recent
+// invoice (by date), not every invoice this client was ever billed. Summing every
+// historic invoice for a repeat customer produced bloated, meaningless "Invoiced"
+// totals — e.g. PR-016 "Kim - Manly #6" pulling in 5 unrelated old jobs (Seb's ask,
+// 2026-07-10). Used by renderProjects(), the auto-matched warning box, and its
+// "convert to explicit links" action, so all three agree on the same result.
+function projAutoMatchInvoices(name, def) {
+  def = def || {};
+  const storedContactId = def.contact_id || null;
+  const clientName = name.split(' - ')[0].trim().toLowerCase();
+  if (!clientName || clientName === 'admin') return [];
+  const allMatches = (D.invoice_items || []).filter(ii => {
+    if ((ii.project || '').trim()) return false; // hand-linked elsewhere already
+    if (storedContactId) return ii.contact_id === storedContactId;
+    return (ii.contact || '').toLowerCase().includes(clientName);
+  });
+  if (!allMatches.length) return [];
+  const lastInvoiceNumber = allMatches.slice().sort((a, b) =>
+    (b.date || '').localeCompare(a.date || '') || String(b.invoice_number||'').localeCompare(String(a.invoice_number||''))
+  )[0].invoice_number;
+  return allMatches.filter(ii => ii.invoice_number === lastInvoiceNumber)
+                   .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+}
+
 function projRenderAutoMatchedSection(name) {
   const hasHandLinks = (D.invoice_items || []).some(ii => (ii.project || '').trim() === name);
   if (hasHandLinks) return '';
   const def = (D.projects || []).find(p => p.name === name) || {};
-  const storedContactId = def.contact_id || null;
-  const clientName = name.split(' - ')[0].trim().toLowerCase();
-  if (!clientName || clientName === 'admin') return '';
-
-  const matches = (D.invoice_items || []).filter(ii => {
-    if ((ii.project || '').trim()) return false; // hand-linked elsewhere already
-    if (storedContactId) return ii.contact_id === storedContactId;
-    return (ii.contact || '').toLowerCase().includes(clientName);
-  }).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  const matches = projAutoMatchInvoices(name, def);
   if (!matches.length) return '';
 
   const total = matches.reduce((a, ii) => a + (Number(ii.price_excl_gst) || 0), 0);
+  const invNo = matches[0].invoice_number || '—';
   const safe = name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
   const rows = matches.map(ii => `<tr>
-      <td style="white-space:nowrap;color:var(--ink-4);font-size:11px">${ii.date || '—'}</td>
+      <td style="white-space:nowrap;color:var(--ink-4);font-size:11px">${ii.date ? fmtDMYDash(ii.date) : '—'}</td>
       <td style="white-space:nowrap;color:var(--blue)">${ii.invoice_number || '—'}</td>
       <td style="color:var(--ink-4)">${attrEsc((ii.description || '').slice(0, 34))}</td>
       <td>${attrEsc(ii.contact || '')}</td>
@@ -513,10 +530,10 @@ function projRenderAutoMatchedSection(name) {
     </tr>`).join('');
 
   return `<div style="margin-bottom:14px;padding:10px 12px;background:var(--bg-2);border-radius:8px;border-left:2px solid var(--amber)">
-    <div style="font-size:11px;color:var(--amber);font-weight:700;margin-bottom:4px">⚠ ${matches.length} invoice line${matches.length>1?'s':''} auto-matched by contact — not hand-linked (totalling ${fmt(total)})</div>
-    <div style="font-size:11px;color:var(--ink-4);margin-bottom:8px">Can include jobs from other years for the same client. Convert to explicit links, then unlink whatever doesn't belong to THIS job.</div>
+    <div style="font-size:11px;color:var(--amber);font-weight:700;margin-bottom:4px">⚠ Auto-matched by contact — last invoice ${attrEsc(invNo)}, ${matches.length} line${matches.length>1?'s':''} (${fmt(total)}), not hand-linked</div>
+    <div style="font-size:11px;color:var(--ink-4);margin-bottom:8px">Older invoices for the same client are ignored. Convert to an explicit link if this is the right job.</div>
     <table style="font-size:12px;margin-bottom:8px"><tbody>${rows}</tbody></table>
-    <span onclick="projConvertAutoMatched('${safe}')" style="cursor:pointer;color:var(--sage);font-weight:700;font-size:12px">+ convert all ${matches.length} to explicit links</span>
+    <span onclick="projConvertAutoMatched('${safe}')" style="cursor:pointer;color:var(--sage);font-weight:700;font-size:12px">+ convert to explicit link${matches.length>1?'s':''}</span>
   </div>`;
 }
 
@@ -524,13 +541,7 @@ async function projConvertAutoMatched(name) {
   const hasHandLinks = (D.invoice_items || []).some(ii => (ii.project || '').trim() === name);
   if (hasHandLinks) return;
   const def = (D.projects || []).find(p => p.name === name) || {};
-  const storedContactId = def.contact_id || null;
-  const clientName = name.split(' - ')[0].trim().toLowerCase();
-  const matches = (D.invoice_items || []).filter(ii => {
-    if ((ii.project || '').trim()) return false;
-    if (storedContactId) return ii.contact_id === storedContactId;
-    return clientName && clientName !== 'admin' && (ii.contact || '').toLowerCase().includes(clientName);
-  });
+  const matches = projAutoMatchInvoices(name, def);
   if (!matches.length) return;
 
   let ok = 0;
@@ -547,26 +558,30 @@ async function projConvertAutoMatched(name) {
   renderProjects(D.kpis);
 }
 
-// Scope of Work — small collapsed textarea, expandable, editable, saved to
-// projects.scope_of_work (see supabase_scope_of_work.sql).
-function projToggleScope(el) {
-  const ta = document.getElementById('pd-scope');
-  if (!ta) return;
-  const expanded = ta.rows > 2;
-  ta.rows = expanded ? 2 : 12;
-  el.textContent = expanded ? 'Expand ▾' : 'Collapse ▴';
-}
-
-async function projSaveScope(name) {
-  try {
-    const ta = document.getElementById('pd-scope');
-    const text = (ta && ta.value) || '';
-    let proj = (D.projects || []).find(p => p.name === name);
-    if (!proj) proj = await hubCreateProject(name);
-    const row = await hubWrite('projects', proj.id, { scope_of_work: text });
-    Object.assign(proj, row);
-    claudeToast('✓ Scope of work saved', 'success');
-  } catch (e) { claudeToast('⚠ ' + (e.message || 'Save failed'), 'error'); }
+// Scope of Work — read-only, auto-derived from whatever's linked to the job.
+// Was previously a free-text box (projects.scope_of_work); Seb's ask 2026-07-10:
+// it looked like a manual input and duplicated info already sitting on the
+// quote/invoice lines. Now it just lists the unique line-item descriptions —
+// hand-linked quote/invoice lines first, falling back to the fuzzy "last
+// invoice" auto-match (see projAutoMatchInvoices) when nothing is hand-linked
+// yet. Nothing to save; the projects.scope_of_work column is left in place
+// (harmless, unused) rather than migrated away.
+function projRenderScope(name, linkedQ, linked, autoInvoices) {
+  const seen = new Set();
+  const lines = [];
+  [...linkedQ, ...linked, ...(autoInvoices||[])].forEach(item => {
+    const d = (item.description || '').trim();
+    if (!d || seen.has(d.toLowerCase())) return;
+    seen.add(d.toLowerCase());
+    lines.push(d);
+  });
+  const body = lines.length
+    ? `<ul style="margin:0;padding-left:18px;font-size:13px;color:var(--ink-2);line-height:1.6">${lines.map(d=>`<li>${attrEsc(d)}</li>`).join('')}</ul>`
+    : `<div style="font-size:12px;color:var(--ink-4)">No scope details yet — link a quote or invoice line to populate this.</div>`;
+  return `<div style="margin-bottom:20px">
+    <div class="divider" style="margin-top:0">Scope of Work</div>
+    <div style="padding:10px 12px;background:var(--bg-2);border-radius:8px">${body}</div>
+  </div>`;
 }
 
 function fmt(n, decimals=0) {
@@ -756,21 +771,16 @@ function renderProjects(k) {
       p.linkedCount = (p.linkedCount || 0) + 1;
       if (ii.quote_number) p.quoteNumbers.add(ii.quote_number);
       if (ii.contact && !p.invoiceContactName) p.invoiceContactName = ii.contact;
-      return;
     }
-    if (!ii.contact) return;
-    const contactLower = ii.contact.toLowerCase();
-    Object.values(pData).forEach(p => {
-      if (linkedNames.has(p.name)) return;       // curated project → auto-match off
-      // Exact match via stored contact_id
-      if (p.storedContactId) {
-        if (ii.contact_id !== p.storedContactId) return;
-      } else {
-        // Fuzzy fallback: contact name must contain client name
-        const cl = p.clientName.toLowerCase();
-        if (!cl || cl === 'admin') return;
-        if (!contactLower.includes(cl)) return;
-      }
+  });
+
+  // Fuzzy auto-match by client name/contact — only for projects with zero
+  // explicit hand-links. Brings just the single most recent invoice per client,
+  // not every invoice ever billed to them — see projAutoMatchInvoices for why.
+  Object.values(pData).forEach(p => {
+    if (linkedNames.has(p.name)) return;          // curated project → auto-match off
+    const matches = projAutoMatchInvoices(p.name, definedMap[p.name]);
+    matches.forEach(ii => {
       p.invoicedValue += (ii.price_excl_gst || 0);
       if (ii.quote_number) p.quoteNumbers.add(ii.quote_number);
       if (!p.invoiceContactName) p.invoiceContactName = ii.contact;
@@ -1029,7 +1039,6 @@ function showProjectDetail(name) {
   const safe = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
   const manRev = defined ? (Number(defined.manual_revenue)||0) : 0;
   const manRevNote = defined ? (defined.manual_revenue_note||'') : '';
-  const scopeOfWork = defined ? (defined.scope_of_work||'') : '';
   const inpS = 'padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:13px';
 
   // Dropped table columns, surfaced here: team, span/dilution, start/end.
@@ -1063,27 +1072,29 @@ function showProjectDetail(name) {
   const remaining = estValue != null ? estValue - laborValue - totalExpenses : null;
   const showLinks = !isNonBillable(name);
 
-  const linkedQRows = linkedQ.length
-    ? linkedQ.map(qi=>`<tr><td style="white-space:nowrap;color:var(--blue)">${qi.quote_number||'—'}</td><td style="font-size:11px;color:var(--ink-3)">${attrEsc(qi.item||'')}</td><td style="color:var(--ink-4)">${attrEsc((qi.description||'').slice(0,40))}</td><td>${attrEsc(qi.contact||'')}</td><td class="amount" style="color:var(--blue)">${fmt(qi.line_amount||0)}</td><td style="text-align:center"><span onclick="projUnlinkQuoteItem('${safe}','${attrEsc(qi.id)}')" style="cursor:pointer;color:var(--pink);font-size:11px">✕ unlink</span></td></tr>`).join('')
-      + `<tr style="font-weight:600;background:var(--bg-3)"><td colspan="4" style="font-size:12px;color:var(--ink-4)">Linked total</td><td class="amount" style="color:var(--blue)">${fmt(linkedQTotal)}</td><td></td></tr>`
-    : `<tr><td colspan="6" style="text-align:center;color:var(--ink-4);padding:14px 0">No quote lines linked yet — Est. Value falls back to the manual figure above.</td></tr>`;
-
-  const linkedRows = linked.length
-    ? linked.map(ii=>`<tr><td style="white-space:nowrap;color:var(--blue)">${ii.invoice_number||'—'}</td><td style="color:var(--ink-4)">${attrEsc((ii.description||'').slice(0,46))}</td><td>${attrEsc(ii.contact||'')}</td><td class="amount" style="color:var(--blue)">${fmt(ii.price_excl_gst||0)}</td><td style="text-align:center"><span onclick="projUnlinkItem('${safe}','${attrEsc(ii.id)}')" style="cursor:pointer;color:var(--pink);font-size:11px">✕ unlink</span></td></tr>`).join('')
-      + `<tr style="font-weight:600;background:var(--bg-3)"><td colspan="3" style="font-size:12px;color:var(--ink-4)">Linked total</td><td class="amount" style="color:var(--blue)">${fmt(linkedTotal)}</td><td></td></tr>`
-    : `<tr><td colspan="5" style="text-align:center;color:var(--ink-4);padding:14px 0">No line items hand-linked yet — auto-match by client name is used until you link some.</td></tr>`;
-
-  const scopeSection = `
-    <div style="margin-bottom:20px">
-      <div class="divider" style="margin-top:0">Scope of Work</div>
-      <textarea id="pd-scope" rows="2" placeholder="What's being done on this job…" style="${inpS};width:100%;resize:vertical;font-family:inherit;line-height:1.4">${attrEsc(scopeOfWork)}</textarea>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
-        <span onclick="projToggleScope(this)" style="cursor:pointer;color:var(--blue);font-size:11px">Expand ▾</span>
-        <button onclick="projSaveScope('${safe}')" style="padding:6px 14px;background:var(--sage);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700">Save</button>
-      </div>
-    </div>`;
-
   const autoMatchedSection = projRenderAutoMatchedSection(name);
+  const scopeSection = projRenderScope(name, linkedQ, linked, projAutoMatchInvoices(name, defined));
+
+  // Merged, compact "bar" list — Seb's ask 2026-07-10: the old two-table layout
+  // (Linked Quotes / Linked Invoices, each its own table + search box) was too
+  // busy. One combined list, one search box, and the "nothing linked yet" filler
+  // copy is dropped entirely rather than shown as an empty state.
+  const linkBars = [
+    ...linkedQ.map(qi => ({ kind:'Q', id:qi.id, num:qi.quote_number, contact:qi.contact, date:qi.date, amount:qi.line_amount })),
+    ...linked.map(ii  => ({ kind:'INV', id:ii.id, num:ii.invoice_number, contact:ii.contact, date:ii.date, amount:ii.price_excl_gst })),
+  ].sort((a,b)=>(b.date||'').localeCompare(a.date||''))
+   .map(it => `
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 9px;background:var(--bg-2);border-radius:6px;margin-bottom:3px;font-size:12px">
+      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+        <span style="font-size:9px;font-weight:700;color:${it.kind==='Q'?'var(--amber)':'var(--blue)'};background:var(--bg-1);padding:1px 5px;border-radius:4px;margin-right:6px">${it.kind}</span>
+        <strong style="color:var(--blue)">${attrEsc(it.num||'—')}</strong>
+        <span style="color:var(--ink-4)"> · ${attrEsc(it.contact||'')} · ${it.date?fmtDMYDash(it.date):'—'}</span>
+      </span>
+      <span style="display:flex;align-items:center;gap:10px;white-space:nowrap">
+        <strong class="amount" style="color:var(--blue)">${fmt(it.amount||0)}</strong>
+        <span onclick="${it.kind==='Q'?`projUnlinkQuoteItem('${safe}','${attrEsc(it.id)}')`:`projUnlinkItem('${safe}','${attrEsc(it.id)}')`}" style="cursor:pointer;color:var(--pink);font-size:11px">✕</span>
+      </span>
+    </div>`).join('');
 
   const linksSection = showLinks ? `
     <div style="margin-bottom:20px">
@@ -1095,30 +1106,26 @@ function showProjectDetail(name) {
         <button onclick="projSaveRevenue('${safe}')" style="padding:8px 16px;background:var(--sage);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700">Save</button>
       </div>
 
-      <div class="divider">Linked Quotes</div>
-      <div style="font-size:12px;color:var(--ink-3);margin-bottom:6px">Hand-linked quote line items <span style="color:var(--ink-4)">(${linkedQ.length}) — sum becomes Est. Value when present</span></div>
-      <table><thead><tr><th>Quote</th><th>Item</th><th>Description</th><th>Contact</th><th style="text-align:right">Excl GST</th><th></th></tr></thead><tbody>${linkedQRows}</tbody></table>
-      <div style="margin-top:12px">
-        <input id="pd-qlink-search" placeholder="Search by quote # or contact name…" oninput="projRenderQuoteLinkCandidates('${safe}')" style="${inpS};width:100%">
-        <div id="pd-qlink-results" style="margin-top:8px"></div>
-      </div>
-
-      <div class="divider">Linked Invoices</div>
-      <div style="font-size:12px;color:var(--ink-3);margin-bottom:6px">Hand-linked invoice line items <span style="color:var(--ink-4)">(${linked.length}) — these override client-name auto-match</span></div>
+      <div class="divider">Linked Quotes & Invoices</div>
       ${autoMatchedSection}
-      <table><thead><tr><th>Invoice</th><th>Description</th><th>Contact</th><th style="text-align:right">Excl GST</th><th></th></tr></thead><tbody>${linkedRows}</tbody></table>
-      <div style="margin-top:12px">
-        <input id="pd-link-search" placeholder="Search by invoice # or contact name…" oninput="projRenderLinkCandidates('${safe}')" style="${inpS};width:100%">
-        <div id="pd-link-results" style="margin-top:8px"></div>
+      ${linkBars}
+      <div style="display:flex;flex-wrap:wrap;gap:16px;font-size:11px;color:var(--ink-4);margin:${linkBars?'6px':'0'} 0 12px">
+        ${linkedQ.length ? `<span>Quotes: <strong style="color:var(--ink-2)">${fmt(linkedQTotal)}</strong> (${linkedQ.length}) → Est. Value</span>` : ''}
+        ${linked.length ? `<span>Invoices: <strong style="color:var(--ink-2)">${fmt(linkedTotal)}</strong> (${linked.length}) → Invoiced</span>` : ''}
       </div>
+      <input id="pd-link-search" placeholder="Search quote #, invoice # or contact name…" oninput="projRenderCombinedCandidates('${safe}')" style="${inpS};width:100%">
+      <div id="pd-link-results" style="margin-top:8px"></div>
     </div>` : '';
 
+  // Notes cell is an inline-editable input (matches the Expenses/Transactions
+  // pattern) — Seb's ask 2026-07-10: allow entering notes here, not just viewing.
+  const tsNoteInp = t => `<input value="${attrEsc(t.notes||'')}" data-id="${attrEsc(t.id)}" placeholder="—" onchange="projSaveTsNote(this)" onkeydown="if(event.key==='Enter')this.blur()" onfocus="this.style.border='1px solid var(--border)';this.style.background='var(--bg-1)'" onblur="this.style.border='1px solid transparent';this.style.background='transparent'" style="width:100%;padding:4px 6px;border:1px solid transparent;border-radius:4px;background:transparent;color:var(--ink-3);font-size:12px;font-family:inherit">`;
   const tsRows = ts.length
-    ? ts.map(t=>`<tr><td>${t.date||'—'}</td><td>${t.employee||'Seb'}</td><td style="color:var(--ink-4)">${t.notes||'—'}</td><td class="amount">${t.hours}h</td><td class="amount" style="color:var(--amber)">${fmt(t.hours*rate)}</td></tr>`).join('')
+    ? ts.map(t=>`<tr><td style="white-space:nowrap">${t.date?fmtDMYDash(t.date):'—'}</td><td>${t.employee||'Seb'}</td><td style="padding:2px 4px">${tsNoteInp(t)}</td><td class="amount">${t.hours}h</td><td class="amount" style="color:var(--amber)">${fmt(t.hours*rate)}</td></tr>`).join('')
       + `<tr style="font-weight:600;background:var(--bg-3)"><td colspan="3" style="font-size:12px;color:var(--ink-4)">Total</td><td class="amount">${totalHours}h</td><td class="amount" style="color:var(--amber)">${fmt(laborValue)}</td></tr>`
     : `<tr><td colspan="5" style="text-align:center;color:var(--ink-4);padding:16px 0">No timesheet entries</td></tr>`;
   const expRows = exp.length
-    ? exp.map(e=>`<tr><td>${e.date||'—'}</td><td style="color:var(--ink-4)">${e.description||'—'}</td><td>${e.category||'—'}</td><td class="amount">${fmt(e.amount)}</td></tr>`).join('')
+    ? exp.map(e=>`<tr><td style="white-space:nowrap">${e.date?fmtDMYDash(e.date):'—'}</td><td style="color:var(--ink-4)">${e.description||'—'}</td><td>${e.category||'—'}</td><td class="amount">${fmt(e.amount)}</td></tr>`).join('')
       + `<tr style="font-weight:600;background:var(--bg-3)"><td colspan="3" style="font-size:12px;color:var(--ink-4)">Total</td><td class="amount">${fmt(totalExpenses)}</td></tr>`
     : `<tr><td colspan="4" style="text-align:center;color:var(--ink-4);padding:16px 0">No expenses logged</td></tr>`;
 
@@ -1135,8 +1142,8 @@ function showProjectDetail(name) {
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:18px;font-size:11px;color:var(--ink-4);margin-bottom:20px;padding:10px 12px;background:var(--bg-2);border-radius:8px">
       <div><strong style="color:var(--ink-2)">Team:</strong> ${players.length?players.join(', '):'—'}</div>
-      <div><strong style="color:var(--ink-2)">Start:</strong> ${startDate||'—'}</div>
-      <div><strong style="color:var(--ink-2)">End:</strong> ${endDate||'—'}</div>
+      <div><strong style="color:var(--ink-2)">Start:</strong> ${startDate?fmtDMYDash(startDate):'—'}</div>
+      <div><strong style="color:var(--ink-2)">End:</strong> ${endDate?fmtDMYDash(endDate):'—'}</div>
       <div><strong style="color:var(--ink-2)">Span:</strong> ${span!=null?span+'d':'—'}</div>
       <div><strong style="color:var(--ink-2)">Dilution:</strong> ${dilutionPct!=null?dilutionPct.toFixed(0)+'% ('+hrPerDay.toFixed(1)+'h/d)':'—'}</div>
     </div>
@@ -1152,50 +1159,50 @@ function showProjectDetail(name) {
     </div>`);
 }
 
-// ── Feature 3 — project ↔ invoice-line linking + manual revenue ───────────────
-function projRenderLinkCandidates(name) {
+// ── Combined quote+invoice search/link (2026-07-10 merge) ─────────────────────
+// One search box now covers both quote_items and invoice_items, grouped by
+// document number as compact bars (Q/INV badge) instead of the old two separate
+// full-width tables + two search boxes. Replaces the old
+// projRenderLinkCandidates / projRenderQuoteLinkCandidates pair — link/unlink
+// actions below (projLinkItem, projLinkQuoteItem, etc.) are unchanged.
+function projRenderCombinedCandidates(name) {
   const box = document.getElementById('pd-link-results');
   const q = ((document.getElementById('pd-link-search')||{}).value || '').trim().toLowerCase();
   if (!box) return;
   if (q.length < 2) { box.innerHTML = '<div style="font-size:11px;color:var(--ink-4);padding:4px 2px">Type at least 2 characters…</div>'; return; }
-  // Search is deliberately restricted to invoice # and contact name — description
-  // text is often long/garbled and made results hard to scan on a phone.
-  const cands = (D.invoice_items||[]).filter(ii => {
-    if ((ii.project||'').trim() === name) return false;        // already linked here
-    const hay = `${ii.invoice_number||''} ${ii.contact||''}`.toLowerCase();
-    return hay.includes(q);
-  }).sort((a,b)=>(b.date||'').localeCompare(a.date||'')).slice(0, 30);
-  if (!cands.length) { box.innerHTML = '<div style="font-size:11px;color:var(--ink-4);padding:4px 2px">No matching invoice lines.</div>'; return; }
   const safe = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
 
-  // Group by invoice number — multi-line invoices get a one-tap "link all" shortcut
-  // instead of linking each line one at a time.
-  const byInv = {};
-  cands.forEach(ii => { const k = ii.invoice_number || '—'; (byInv[k] = byInv[k]||[]).push(ii); });
+  // Search restricted to document # + contact name (description text is often
+  // long/garbled and made results hard to scan on a phone).
+  const qCands = (D.quote_items||[]).filter(qi => (qi.project||'').trim() !== name
+    && `${qi.quote_number||''} ${qi.contact||''}`.toLowerCase().includes(q));
+  const iCands = (D.invoice_items||[]).filter(ii => (ii.project||'').trim() !== name
+    && `${ii.invoice_number||''} ${ii.contact||''}`.toLowerCase().includes(q));
+  if (!qCands.length && !iCands.length) { box.innerHTML = '<div style="font-size:11px;color:var(--ink-4);padding:4px 2px">No matching quote or invoice lines.</div>'; return; }
 
-  box.innerHTML = Object.keys(byInv).map(invNo => {
-    const rows = byInv[invNo];
-    const invSafe = String(invNo).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-    const groupHeader = rows.length > 1
-      ? `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 7px;background:var(--bg-2);border-radius:6px;margin-bottom:3px;font-size:11px">
-           <span><strong style="color:var(--blue)">${attrEsc(invNo)}</strong> — ${rows.length} lines, ${fmt(rows.reduce((a,ii)=>a+(Number(ii.price_excl_gst)||0),0))}</span>
-           <span onclick="projLinkAllInvoice('${safe}','${invSafe}')" style="cursor:pointer;color:var(--sage);font-weight:700;font-size:11px">+ link all ${rows.length} lines</span>
-         </div>`
-      : '';
-    const table = `<table style="font-size:12px;margin-bottom:10px"><tbody>${rows.map(ii=>{
-      const taken = (ii.project||'').trim();
-      return `<tr>
-        <td style="white-space:nowrap;color:var(--ink-4);font-size:11px">${ii.date||'—'}</td>
-        <td style="white-space:nowrap;color:var(--blue)">${ii.invoice_number||'—'}</td>
-        <td style="color:var(--ink-4)">${attrEsc((ii.description||'').slice(0,34))}</td>
-        <td>${attrEsc(ii.contact||'')}</td>
-        <td class="amount">${fmt(ii.price_excl_gst||0)}</td>
-        <td style="text-align:center">${taken
-          ? `<span style="font-size:10px;color:var(--ink-4)" title="Currently linked to ${attrEsc(taken)}">→ ${attrEsc(taken)}</span>`
-          : ''}<span onclick="projLinkItem('${safe}','${attrEsc(ii.id)}')" style="cursor:pointer;color:var(--sage);font-size:11px;margin-left:6px">+ link</span></td>
-      </tr>`;
-    }).join('')}</tbody></table>`;
-    return groupHeader + table;
+  // Group each type by its document number — multi-line docs get a one-tap
+  // "link all" shortcut instead of linking each line one at a time.
+  const byQ = {}; qCands.forEach(qi => { const k = qi.quote_number || '—'; (byQ[k] = byQ[k]||[]).push(qi); });
+  const byI = {}; iCands.forEach(ii => { const k = ii.invoice_number || '—'; (byI[k] = byI[k]||[]).push(ii); });
+  const groups = [
+    ...Object.keys(byQ).map(k => ({ kind:'Q',   num:k, rows: byQ[k].sort((a,b)=>(b.date||'').localeCompare(a.date||'')) })),
+    ...Object.keys(byI).map(k => ({ kind:'INV', num:k, rows: byI[k].sort((a,b)=>(b.date||'').localeCompare(a.date||'')) })),
+  ].sort((a,b)=>(b.rows[0].date||'').localeCompare(a.rows[0].date||''));
+
+  box.innerHTML = groups.slice(0, 20).map(g => {
+    const total = g.rows.reduce((a,r)=>a+(Number(g.kind==='Q'?r.line_amount:r.price_excl_gst)||0),0);
+    const numSafe = String(g.num).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    const action = g.rows.length > 1
+      ? `<span onclick="${g.kind==='Q'?`projLinkAllQuote('${safe}','${numSafe}')`:`projLinkAllInvoice('${safe}','${numSafe}')`}" style="cursor:pointer;color:var(--sage);font-weight:700;font-size:11px;margin-left:8px">+ link all ${g.rows.length}</span>`
+      : `<span onclick="${g.kind==='Q'?`projLinkQuoteItem('${safe}','${attrEsc(g.rows[0].id)}')`:`projLinkItem('${safe}','${attrEsc(g.rows[0].id)}')`}" style="cursor:pointer;color:var(--sage);font-weight:700;font-size:11px;margin-left:8px">+ link</span>`;
+    return `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 9px;background:var(--bg-2);border-radius:6px;margin-bottom:4px;font-size:12px">
+      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+        <span style="font-size:9px;font-weight:700;color:${g.kind==='Q'?'var(--amber)':'var(--blue)'};background:var(--bg-1);padding:1px 5px;border-radius:4px;margin-right:6px">${g.kind}</span>
+        <strong style="color:var(--blue)">${attrEsc(g.num)}</strong>
+        <span style="color:var(--ink-4)"> · ${attrEsc(g.rows[0].contact||'')} · ${g.rows[0].date?fmtDMYDash(g.rows[0].date):'—'}${g.rows.length>1?` · ${g.rows.length} lines`:''}</span>
+      </span>
+      <span style="white-space:nowrap"><strong class="amount">${fmt(total)}</strong>${action}</span>
+    </div>`;
   }).join('');
 }
 
@@ -1247,50 +1254,8 @@ async function projUnlinkItem(name, id) {
 }
 
 // ── 2026-06-30 — project ↔ quote-line linking (mirrors invoice linking above) ──
-function projRenderQuoteLinkCandidates(name) {
-  const box = document.getElementById('pd-qlink-results');
-  const q = ((document.getElementById('pd-qlink-search')||{}).value || '').trim().toLowerCase();
-  if (!box) return;
-  if (q.length < 2) { box.innerHTML = '<div style="font-size:11px;color:var(--ink-4);padding:4px 2px">Type at least 2 characters…</div>'; return; }
-  // Search restricted to quote # and contact name (see invoice search above for why).
-  const cands = (D.quote_items||[]).filter(qi => {
-    if ((qi.project||'').trim() === name) return false;        // already linked here
-    const hay = `${qi.quote_number||''} ${qi.contact||''}`.toLowerCase();
-    return hay.includes(q);
-  }).sort((a,b)=>(b.date||'').localeCompare(a.date||'')).slice(0, 30);
-  if (!cands.length) { box.innerHTML = '<div style="font-size:11px;color:var(--ink-4);padding:4px 2px">No matching quote lines.</div>'; return; }
-  const safe = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-
-  // Group by quote number — same "link all lines" shortcut as invoices.
-  const byQ = {};
-  cands.forEach(qi => { const k = qi.quote_number || '—'; (byQ[k] = byQ[k]||[]).push(qi); });
-
-  box.innerHTML = Object.keys(byQ).map(quoteNo => {
-    const rows = byQ[quoteNo];
-    const qSafe = String(quoteNo).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-    const groupHeader = rows.length > 1
-      ? `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 7px;background:var(--bg-2);border-radius:6px;margin-bottom:3px;font-size:11px">
-           <span><strong style="color:var(--blue)">${attrEsc(quoteNo)}</strong> — ${rows.length} lines, ${fmt(rows.reduce((a,qi)=>a+(Number(qi.line_amount)||0),0))}</span>
-           <span onclick="projLinkAllQuote('${safe}','${qSafe}')" style="cursor:pointer;color:var(--sage);font-weight:700;font-size:11px">+ link all ${rows.length} lines</span>
-         </div>`
-      : '';
-    const table = `<table style="font-size:12px;margin-bottom:10px"><tbody>${rows.map(qi=>{
-      const taken = (qi.project||'').trim();
-      return `<tr>
-        <td style="white-space:nowrap;color:var(--ink-4);font-size:11px">${qi.date||'—'}</td>
-        <td style="white-space:nowrap;color:var(--blue)">${qi.quote_number||'—'}</td>
-        <td style="color:var(--ink-4)">${attrEsc((qi.description||'').slice(0,34))}</td>
-        <td>${attrEsc(qi.contact||'')}</td>
-        <td class="amount">${fmt(qi.line_amount||0)}</td>
-        <td style="text-align:center">${taken
-          ? `<span style="font-size:10px;color:var(--ink-4)" title="Currently linked to ${attrEsc(taken)}">→ ${attrEsc(taken)}</span>`
-          : ''}<span onclick="projLinkQuoteItem('${safe}','${attrEsc(qi.id)}')" style="cursor:pointer;color:var(--sage);font-size:11px;margin-left:6px">+ link</span></td>
-      </tr>`;
-    }).join('')}</tbody></table>`;
-    return groupHeader + table;
-  }).join('');
-}
-
+// Search UI merged into projRenderCombinedCandidates (2026-07-10) — link/unlink
+// actions below are unchanged and still called from there.
 async function projLinkQuoteItem(name, id) {
   try {
     await hubWrite('quote_items', id, { project: name });
@@ -1335,6 +1300,23 @@ async function projUnlinkQuoteItem(name, id) {
     showProjectDetail(name);
     renderProjects(D.kpis);
   } catch (e) { claudeToast('⚠ ' + (e.message||'Unlink failed'), 'error'); }
+}
+
+// Inline notes edit on a Timesheets row inside the project detail modal
+// (Seb's ask 2026-07-10). Mirrors exSaveCell's save-on-change pattern.
+async function projSaveTsNote(inp) {
+  const id = inp.dataset.id, value = inp.value.trim();
+  const row = (D.timesheets || []).find(t => String(t.id) === String(id));
+  if (row && (row.notes || '') === value) return;
+  try {
+    await hubWrite('timesheets', id, { notes: value });
+    if (row) row.notes = value;
+    inp.style.outline = '2px solid var(--sage)';
+    setTimeout(() => { inp.style.outline = 'none'; }, 700);
+  } catch (e) {
+    inp.style.outline = '2px solid var(--pink)';
+    claudeToast('⚠ ' + (e.message || 'Could not save note'), 'error');
+  }
 }
 
 async function projSaveRevenue(name) {
@@ -1567,7 +1549,11 @@ function showMonthDetail(idx) {
 // Single source of truth hub-wide. To add a new non-billable category later, add it
 // here (one line). Matching is case-insensitive (see isNonBillable). On the Projects
 // tab every name in this list is rolled up under one expandable "Non-Billable" row.
-const NON_BILLABLE = ['Daddy','Admin','Consumables','Wasted Time','Quote','Office','Holidays','Sick days','Carer days'];
+// "Eléa's bed" (both spellings, in case the accent was dropped on entry) is a
+// real project row (PR-###, see supabase_feature_updates.sql), not a category —
+// same pattern as "Admin" above. Seb's ask 2026-07-10: it was showing in the
+// billable Project table; it belongs with the non-billable ones instead.
+const NON_BILLABLE = ['Daddy','Admin','Consumables','Wasted Time','Quote','Office','Holidays','Sick days','Carer days',"Eléa's bed","Elea's bed"];
 const NON_BILLABLE_LC = NON_BILLABLE.map(s => s.toLowerCase());
 function isNonBillable(name) { return !!name && NON_BILLABLE_LC.includes(String(name).trim().toLowerCase()); }
 
@@ -3718,6 +3704,10 @@ function fmtDMY(s) {
   const p = String(s).slice(0, 10).split('-');
   return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : s;
 }
+
+// Same as fmtDMY but dash-separated (dd-mm-yyyy) — used across the Projects tab
+// per Seb's ask (2026-07-10) for consistent DD-MM-YYYY display there.
+function fmtDMYDash(s) { return fmtDMY(s).replace(/\//g, '-'); }
 
 // ── Transactions tab ─────────────────────────────────────────────────────────
 // State persists across tab switches so filters aren't lost when the user navigates away.
