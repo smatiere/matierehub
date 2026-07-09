@@ -29,7 +29,10 @@ const WRITABLE = {
   // 2026-06-30 batch — hand-link a quote line item to a project (mirrors invoice_items).
   quote_items:       ['project'],
   // Feature 3 — manual revenue + light project edits from the Projects tab.
-  projects:          ['manual_revenue', 'manual_revenue_note', 'quoted', 'status', 'notes', 'name']
+  // 2026-07-09 — scope_of_work added (see supabase_scope_of_work.sql); status is
+  // also written automatically by autoUpdatePaidProjects() (index.html) when every
+  // hand-linked invoice on a project comes back PAID from Xero.
+  projects:          ['manual_revenue', 'manual_revenue_note', 'quoted', 'status', 'notes', 'name', 'scope_of_work']
 };
 
 // ── Insert allow-list: { table: [columns the HUB may set when CREATING a row] }

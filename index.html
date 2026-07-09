@@ -364,10 +364,12 @@ async function loadData() {
       meta:                 xero.meta                 || { last_updated: new Date().toISOString() }
     };
 
-    // Cascade project links from quotes onto Xero-linked invoices before first
-    // paint — see autoLinkInvoicesFromQuotes() below.
-    const autoLinked = await autoLinkInvoicesFromQuotes();
-    if (autoLinked) claudeToast(`✓ Auto-linked ${autoLinked} invoice line${autoLinked>1?'s':''} via quote reference`, 'success');
+    // Cascade project links both ways between quotes and invoices, then check
+    // for newly-fully-paid projects — see functions below loadData().
+    const autoLinked = await cascadeLinkedQuotesAndInvoices();
+    const autoPaid   = await autoUpdatePaidProjects();
+    if (autoLinked) claudeToast(`✓ Auto-linked ${autoLinked} quote/invoice line${autoLinked>1?'s':''} via shared quote reference`, 'success');
+    if (autoPaid)   claudeToast(`✓ ${autoPaid} project${autoPaid>1?'s':''} marked Paid — invoice(s) fully paid in Xero`, 'success');
 
     document.getElementById('loading').style.display = 'none';
     document.getElementById('app').style.display = 'block';
@@ -410,6 +412,161 @@ async function autoLinkInvoicesFromQuotes() {
     catch (e) { /* skip a single failure, keep going */ }
   }
   return linked;
+}
+
+// Mirror of the above, other direction: when an invoice line is hand-linked to a
+// project, auto-link any quote line sharing the same Xero quote reference — so
+// Est. Value (driven by linked quote_items) reflects the quote as soon as one of
+// its resulting invoices is linked, without Seb having to link the quote separately.
+async function autoLinkQuotesFromInvoices() {
+  const invoiceProjectMap = {};
+  (D.invoice_items || []).forEach(ii => {
+    const proj = (ii.project || '').trim();
+    const qn = (ii.quote_number || '').trim();
+    if (proj && qn && !invoiceProjectMap[qn]) invoiceProjectMap[qn] = proj;
+  });
+  if (!Object.keys(invoiceProjectMap).length) return 0;
+
+  const toLink = (D.quote_items || []).filter(qi => {
+    const qn = (qi.quote_number || '').trim();
+    return qn && invoiceProjectMap[qn] && !(qi.project || '').trim();
+  });
+  if (!toLink.length) return 0;
+
+  let linked = 0;
+  for (const qi of toLink) {
+    const proj = invoiceProjectMap[(qi.quote_number || '').trim()];
+    try { await hubWrite('quote_items', qi.id, { project: proj }); qi.project = proj; linked++; }
+    catch (e) { /* skip a single failure, keep going */ }
+  }
+  return linked;
+}
+
+// Run both cascade directions once each (quote→invoice, then invoice→quote) — a
+// single pass of each is enough since it's a direct field copy, not recursive.
+// Call this after ANY link/bulk-link action and once on every data load.
+async function cascadeLinkedQuotesAndInvoices() {
+  const a = await autoLinkInvoicesFromQuotes();
+  const b = await autoLinkQuotesFromInvoices();
+  return a + b;
+}
+
+// Seb's ask (2026-07-09): once every hand-linked invoice on a project is PAID in
+// Xero, flip the project's status to "Paid" automatically instead of relying on
+// him to notice and click the status pill. Only ever moves status FORWARD to
+// Paid — never touches a project already Paid or one marked Inactive (that's a
+// deliberate override Seb made, not something to second-guess). Based only on
+// HAND-LINKED invoice lines (not fuzzy auto-match — see projRenderAutoMatchedSection),
+// since that's the same source of truth the Invoiced/Est.Value figures use.
+async function autoUpdatePaidProjects() {
+  let changed = 0;
+  for (const proj of (D.projects || [])) {
+    const status = proj.status || 'Active';
+    if (status === 'Paid' || status === 'Inactive') continue;
+    if (isNonBillable(proj.name)) continue;
+    const linkedInvoices = (D.invoice_items || []).filter(ii => (ii.project || '').trim() === proj.name);
+    if (!linkedInvoices.length) continue;
+    const allPaid = linkedInvoices.every(ii => (ii.status || '').toUpperCase() === 'PAID');
+    if (!allPaid) continue;
+    try {
+      const row = await hubWrite('projects', proj.id, { status: 'Paid' });
+      Object.assign(proj, row);
+      changed++;
+    } catch (e) { /* skip a single failure, keep going */ }
+  }
+  return changed;
+}
+
+// Seb's ask (2026-07-09): PR-016 ("Kim - Manly #6") was showing an Invoiced total
+// pulled in from OTHER old jobs for the same repeat client (Kim has had 6+ jobs
+// over 2 years, but only ever gets one project row per active job) — because a
+// project with ZERO hand-linked invoices falls back to matching invoices purely
+// by contact name/id (see renderProjects), and there's nowhere to unlink a line
+// that was never explicitly linked in the first place. This section surfaces
+// exactly what's being fuzzy-matched so Seb can see it, then convert it to
+// explicit links in one click — after which the normal "✕ unlink" (already built)
+// works on the wrong ones. Returns '' once any hand-link exists (auto-match is
+// fully superseded at that point — see the exclusion in renderProjects).
+function projRenderAutoMatchedSection(name) {
+  const hasHandLinks = (D.invoice_items || []).some(ii => (ii.project || '').trim() === name);
+  if (hasHandLinks) return '';
+  const def = (D.projects || []).find(p => p.name === name) || {};
+  const storedContactId = def.contact_id || null;
+  const clientName = name.split(' - ')[0].trim().toLowerCase();
+  if (!clientName || clientName === 'admin') return '';
+
+  const matches = (D.invoice_items || []).filter(ii => {
+    if ((ii.project || '').trim()) return false; // hand-linked elsewhere already
+    if (storedContactId) return ii.contact_id === storedContactId;
+    return (ii.contact || '').toLowerCase().includes(clientName);
+  }).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  if (!matches.length) return '';
+
+  const total = matches.reduce((a, ii) => a + (Number(ii.price_excl_gst) || 0), 0);
+  const safe = name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  const rows = matches.map(ii => `<tr>
+      <td style="white-space:nowrap;color:var(--ink-4);font-size:11px">${ii.date || '—'}</td>
+      <td style="white-space:nowrap;color:var(--blue)">${ii.invoice_number || '—'}</td>
+      <td style="color:var(--ink-4)">${attrEsc((ii.description || '').slice(0, 34))}</td>
+      <td>${attrEsc(ii.contact || '')}</td>
+      <td class="amount">${fmt(ii.price_excl_gst || 0)}</td>
+    </tr>`).join('');
+
+  return `<div style="margin-bottom:14px;padding:10px 12px;background:var(--bg-2);border-radius:8px;border-left:2px solid var(--amber)">
+    <div style="font-size:11px;color:var(--amber);font-weight:700;margin-bottom:4px">⚠ ${matches.length} invoice line${matches.length>1?'s':''} auto-matched by contact — not hand-linked (totalling ${fmt(total)})</div>
+    <div style="font-size:11px;color:var(--ink-4);margin-bottom:8px">Can include jobs from other years for the same client. Convert to explicit links, then unlink whatever doesn't belong to THIS job.</div>
+    <table style="font-size:12px;margin-bottom:8px"><tbody>${rows}</tbody></table>
+    <span onclick="projConvertAutoMatched('${safe}')" style="cursor:pointer;color:var(--sage);font-weight:700;font-size:12px">+ convert all ${matches.length} to explicit links</span>
+  </div>`;
+}
+
+async function projConvertAutoMatched(name) {
+  const hasHandLinks = (D.invoice_items || []).some(ii => (ii.project || '').trim() === name);
+  if (hasHandLinks) return;
+  const def = (D.projects || []).find(p => p.name === name) || {};
+  const storedContactId = def.contact_id || null;
+  const clientName = name.split(' - ')[0].trim().toLowerCase();
+  const matches = (D.invoice_items || []).filter(ii => {
+    if ((ii.project || '').trim()) return false;
+    if (storedContactId) return ii.contact_id === storedContactId;
+    return clientName && clientName !== 'admin' && (ii.contact || '').toLowerCase().includes(clientName);
+  });
+  if (!matches.length) return;
+
+  let ok = 0;
+  for (const ii of matches) {
+    try { await hubWrite('invoice_items', ii.id, { project: name }); ii.project = name; ok++; }
+    catch (e) { /* keep going, report partial success below */ }
+  }
+  const cascaded = await cascadeLinkedQuotesAndInvoices();
+  const paidChanged = await autoUpdatePaidProjects();
+  claudeToast(`✓ Converted ${ok}/${matches.length} auto-matched invoice${matches.length>1?'s':''} to explicit links — unlink any that don't belong`
+    + (cascaded ? ` (+${cascaded} quote/invoice line${cascaded>1?'s':''} auto-linked)` : '')
+    + (paidChanged ? ` (${paidChanged} project${paidChanged>1?'s':''} marked Paid)` : ''), ok ? 'success' : 'error');
+  showProjectDetail(name);
+  renderProjects(D.kpis);
+}
+
+// Scope of Work — small collapsed textarea, expandable, editable, saved to
+// projects.scope_of_work (see supabase_scope_of_work.sql).
+function projToggleScope(el) {
+  const ta = document.getElementById('pd-scope');
+  if (!ta) return;
+  const expanded = ta.rows > 2;
+  ta.rows = expanded ? 2 : 12;
+  el.textContent = expanded ? 'Expand ▾' : 'Collapse ▴';
+}
+
+async function projSaveScope(name) {
+  try {
+    const ta = document.getElementById('pd-scope');
+    const text = (ta && ta.value) || '';
+    let proj = (D.projects || []).find(p => p.name === name);
+    if (!proj) proj = await hubCreateProject(name);
+    const row = await hubWrite('projects', proj.id, { scope_of_work: text });
+    Object.assign(proj, row);
+    claudeToast('✓ Scope of work saved', 'success');
+  } catch (e) { claudeToast('⚠ ' + (e.message || 'Save failed'), 'error'); }
 }
 
 function fmt(n, decimals=0) {
@@ -862,6 +1019,7 @@ function showProjectDetail(name) {
   const safe = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
   const manRev = defined ? (Number(defined.manual_revenue)||0) : 0;
   const manRevNote = defined ? (defined.manual_revenue_note||'') : '';
+  const scopeOfWork = defined ? (defined.scope_of_work||'') : '';
   const inpS = 'padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:13px';
 
   // Dropped table columns, surfaced here: team, span/dilution, start/end.
@@ -904,6 +1062,18 @@ function showProjectDetail(name) {
       + `<tr style="font-weight:600;background:var(--bg-3)"><td colspan="3" style="font-size:12px;color:var(--ink-4)">Linked total</td><td class="amount" style="color:var(--blue)">${fmt(linkedTotal)}</td><td></td></tr>`
     : `<tr><td colspan="5" style="text-align:center;color:var(--ink-4);padding:14px 0">No line items hand-linked yet — auto-match by client name is used until you link some.</td></tr>`;
 
+  const scopeSection = `
+    <div style="margin-bottom:20px">
+      <div class="divider" style="margin-top:0">Scope of Work</div>
+      <textarea id="pd-scope" rows="2" placeholder="What's being done on this job…" style="${inpS};width:100%;resize:vertical;font-family:inherit;line-height:1.4">${attrEsc(scopeOfWork)}</textarea>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
+        <span onclick="projToggleScope(this)" style="cursor:pointer;color:var(--blue);font-size:11px">Expand ▾</span>
+        <button onclick="projSaveScope('${safe}')" style="padding:6px 14px;background:var(--sage);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700">Save</button>
+      </div>
+    </div>`;
+
+  const autoMatchedSection = projRenderAutoMatchedSection(name);
+
   const linksSection = showLinks ? `
     <div style="margin-bottom:20px">
       <div class="divider" style="margin-top:0">Est. Value & Revenue</div>
@@ -924,6 +1094,7 @@ function showProjectDetail(name) {
 
       <div class="divider">Linked Invoices</div>
       <div style="font-size:12px;color:var(--ink-3);margin-bottom:6px">Hand-linked invoice line items <span style="color:var(--ink-4)">(${linked.length}) — these override client-name auto-match</span></div>
+      ${autoMatchedSection}
       <table><thead><tr><th>Invoice</th><th>Description</th><th>Contact</th><th style="text-align:right">Excl GST</th><th></th></tr></thead><tbody>${linkedRows}</tbody></table>
       <div style="margin-top:12px">
         <input id="pd-link-search" placeholder="Search by invoice # or contact name…" oninput="projRenderLinkCandidates('${safe}')" style="${inpS};width:100%">
@@ -958,6 +1129,7 @@ function showProjectDetail(name) {
       <div><strong style="color:var(--ink-2)">Span:</strong> ${span!=null?span+'d':'—'}</div>
       <div><strong style="color:var(--ink-2)">Dilution:</strong> ${dilutionPct!=null?dilutionPct.toFixed(0)+'% ('+hrPerDay.toFixed(1)+'h/d)':'—'}</div>
     </div>
+    ${scopeSection}
     ${linksSection}
     <div style="margin-bottom:20px">
       <div class="divider" style="margin-top:0">Timesheets</div>
@@ -1021,7 +1193,11 @@ async function projLinkItem(name, id) {
     await hubWrite('invoice_items', id, { project: name });
     const ii = (D.invoice_items||[]).find(x => String(x.id) === String(id));
     if (ii) ii.project = name;
-    claudeToast('✓ Line linked to ' + name, 'success');
+    const cascaded = await cascadeLinkedQuotesAndInvoices();
+    const paidChanged = await autoUpdatePaidProjects();
+    claudeToast('✓ Line linked to ' + name
+      + (cascaded ? ` (+${cascaded} quote/invoice line${cascaded>1?'s':''} auto-linked)` : '')
+      + (paidChanged ? ` (${paidChanged} project${paidChanged>1?'s':''} marked Paid)` : ''), 'success');
     showProjectDetail(name);
     renderProjects(D.kpis);
   } catch (e) { claudeToast('⚠ ' + (e.message||'Link failed'), 'error'); }
@@ -1037,9 +1213,13 @@ async function projLinkAllInvoice(name, invoiceNumber) {
     try { await hubWrite('invoice_items', ii.id, { project: name }); ii.project = name; ok++; }
     catch (e) { /* keep going, report partial success below */ }
   }
-  claudeToast(ok === rows.length
+  const cascaded = await cascadeLinkedQuotesAndInvoices();
+  const paidChanged = await autoUpdatePaidProjects();
+  claudeToast((ok === rows.length
     ? `✓ Linked all ${ok} lines from ${invoiceNumber} to ${name}`
-    : `⚠ Linked ${ok}/${rows.length} lines from ${invoiceNumber} — retry the rest`, ok ? 'success' : 'error');
+    : `⚠ Linked ${ok}/${rows.length} lines from ${invoiceNumber} — retry the rest`)
+    + (cascaded ? ` (+${cascaded} quote/invoice line${cascaded>1?'s':''} auto-linked)` : '')
+    + (paidChanged ? ` (${paidChanged} project${paidChanged>1?'s':''} marked Paid)` : ''), ok ? 'success' : 'error');
   showProjectDetail(name);
   renderProjects(D.kpis);
 }
@@ -1105,8 +1285,11 @@ async function projLinkQuoteItem(name, id) {
     await hubWrite('quote_items', id, { project: name });
     const qi = (D.quote_items||[]).find(x => String(x.id) === String(id));
     if (qi) qi.project = name;
-    const cascaded = await autoLinkInvoicesFromQuotes();
-    claudeToast('✓ Quote line linked to ' + name + (cascaded ? ` (+${cascaded} invoice line${cascaded>1?'s':''} auto-linked via quote ref)` : ''), 'success');
+    const cascaded = await cascadeLinkedQuotesAndInvoices();
+    const paidChanged = await autoUpdatePaidProjects();
+    claudeToast('✓ Quote line linked to ' + name
+      + (cascaded ? ` (+${cascaded} quote/invoice line${cascaded>1?'s':''} auto-linked)` : '')
+      + (paidChanged ? ` (${paidChanged} project${paidChanged>1?'s':''} marked Paid)` : ''), 'success');
     showProjectDetail(name);
     renderProjects(D.kpis);
   } catch (e) { claudeToast('⚠ ' + (e.message||'Link failed'), 'error'); }
@@ -1121,11 +1304,13 @@ async function projLinkAllQuote(name, quoteNumber) {
     try { await hubWrite('quote_items', qi.id, { project: name }); qi.project = name; ok++; }
     catch (e) { /* keep going, report partial success below */ }
   }
-  const cascaded = await autoLinkInvoicesFromQuotes();
+  const cascaded = await cascadeLinkedQuotesAndInvoices();
+  const paidChanged = await autoUpdatePaidProjects();
   claudeToast((ok === rows.length
     ? `✓ Linked all ${ok} lines from ${quoteNumber} to ${name}`
     : `⚠ Linked ${ok}/${rows.length} lines from ${quoteNumber} — retry the rest`)
-    + (cascaded ? ` (+${cascaded} invoice line${cascaded>1?'s':''} auto-linked via quote ref)` : ''), ok ? 'success' : 'error');
+    + (cascaded ? ` (+${cascaded} quote/invoice line${cascaded>1?'s':''} auto-linked)` : '')
+    + (paidChanged ? ` (${paidChanged} project${paidChanged>1?'s':''} marked Paid)` : ''), ok ? 'success' : 'error');
   showProjectDetail(name);
   renderProjects(D.kpis);
 }
