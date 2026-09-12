@@ -1,10 +1,17 @@
 name: Xero Bank Transactions Monthly Reconciliation
 
-# Full-history re-pull of the bank_transactions table (BankTransactions + ACCRECPAYMENT
+# Full-history re-sync of the bank_transactions table (BankTransactions + ACCRECPAYMENT
 # back to Dec 2022), safety net for the daily sync's rolling 100-day window
 # (.github/workflows/xero-sync.yml). Catches any transaction edited/backdated by Xero or
 # an accountant (e.g. BAS/EOFY reconciliation) further back than 100 days, which the
 # daily job would otherwise never see again. Safe to re-run any time — upsert by ID.
+#
+# Runs in fixed-size (CHUNK_DAYS) date chunks rather than one call for the whole ledger.
+# This keeps each Netlify call's duration constant forever regardless of how many years
+# of history accumulate — the number of chunks grows over time, but no individual call
+# ever gets slower, so this never needs another timeout bump the way a single full-history
+# call eventually would (see project_xero_daily_sync_timeout_fix memory).
+#
 # Off-hour cron minute (avoids GitHub's exact-hour scheduling congestion, see
 # project_xero_sync_schedule_reliability memory).
 
@@ -17,15 +24,42 @@ jobs:
   reconcile:
     runs-on: ubuntu-latest
     steps:
-      - name: Full re-sync of bank_transactions from Xero
+      - name: Full re-sync of bank_transactions from Xero, in fixed-size date chunks
         run: |
-          response=$(curl -s -w "\n%{http_code}" -X POST "https://matierehub2.netlify.app/.netlify/functions/xero-sync?scope=bank_transactions" -H "Authorization: Bearer ${{ secrets.SYNC_SECRET }}" -H "Content-Type: application/json")
-          http_code=$(echo "$response" | tail -1)
-          body=$(echo "$response" | head -n -1)
-          echo "HTTP status: $http_code"
-          echo "Response: $body"
-          if [ "$http_code" != "200" ]; then
-            echo "bank_transactions full reconciliation failed with HTTP $http_code"
-            exit 1
-          fi
-          echo "bank_transactions full reconciliation completed"
+          START_DATE="2022-12-01"
+          CHUNK_DAYS=180
+          TODAY=$(date -u +%Y-%m-%d)
+          current="$START_DATE"
+          chunk_num=0
+
+          while true; do
+            chunk_num=$((chunk_num + 1))
+            next=$(date -u -d "$current + ${CHUNK_DAYS} days" +%Y-%m-%d)
+
+            if [[ "$next" > "$TODAY" ]]; then
+              # Final chunk: open-ended (no 'to'), covers current -> now
+              url="https://matierehub2.netlify.app/.netlify/functions/xero-sync?scope=bank_transactions&from=${current}"
+              is_final=true
+            else
+              url="https://matierehub2.netlify.app/.netlify/functions/xero-sync?scope=bank_transactions&from=${current}&to=${next}"
+              is_final=false
+            fi
+
+            echo "=== Chunk $chunk_num: $current to ${next} (final=${is_final}) ==="
+            response=$(curl -s -w "\n%{http_code}" -X POST "$url" -H "Authorization: Bearer ${{ secrets.SYNC_SECRET }}" -H "Content-Type: application/json")
+            http_code=$(echo "$response" | tail -1)
+            body=$(echo "$response" | head -n -1)
+            echo "HTTP status: $http_code"
+            echo "Response: $body"
+            if [ "$http_code" != "200" ]; then
+              echo "Chunk $chunk_num ($current to ${next}) failed with HTTP $http_code"
+              exit 1
+            fi
+
+            if [ "$is_final" = true ]; then
+              break
+            fi
+            current="$next"
+          done
+
+          echo "All $chunk_num chunks reconciled successfully"

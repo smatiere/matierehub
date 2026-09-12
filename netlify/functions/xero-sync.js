@@ -1333,17 +1333,34 @@ exports.handler = async function(event) {
   const params = event.queryStringParameters || {};
   const scope  = params.scope ? params.scope.split(',') : ['quotes', 'invoices', 'pnl', 'bank'];
 
-  // bank_transactions scope: optional rolling window (days) so the daily sync doesn't
-  // have to re-fetch the entire ledger every run. Omit for full history (used by the
-  // monthly reconciliation job and any manual re-seed from the Hub console).
+  // bank_transactions scope: three ways to bound the date range, checked in this order:
+  //   1. from=YYYY-MM-DD (optional to=YYYY-MM-DD) — explicit chunk, used by the monthly
+  //      reconciliation job so it can pull full history in fixed-size (e.g. 6-month)
+  //      pieces instead of one ever-growing call. `to` is exclusive.
+  //   2. days=N — rolling window from now, used by the daily sync (fast, fixed duration).
+  //   3. neither — full history from Dec 2022 (used by manual re-seeds from the console).
   const bankTxDays = params.days ? parseInt(params.days, 10) : null;
-  function xeroBankCutoffClause(days) {
-    if (!days || isNaN(days) || days <= 0) {
-      return 'Date%3E%3DDateTime(2022%2C12%2C1)';
-    }
-    const d = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-    return `Date%3E%3DDateTime(${d.getUTCFullYear()}%2C${d.getUTCMonth() + 1}%2C${d.getUTCDate()})`;
+  const bankTxFrom = params.from || null;
+  const bankTxTo   = params.to   || null;
+
+  function xeroDateLiteral(isoDate) {
+    const d = new Date(isoDate + 'T00:00:00Z');
+    return `DateTime(${d.getUTCFullYear()}%2C${d.getUTCMonth() + 1}%2C${d.getUTCDate()})`;
   }
+
+  function xeroBankCutoffClause() {
+    if (bankTxFrom) {
+      let clause = `Date%3E%3D${xeroDateLiteral(bankTxFrom)}`;
+      if (bankTxTo) clause += `%26%26Date%3C${xeroDateLiteral(bankTxTo)}`;
+      return clause;
+    }
+    if (bankTxDays && !isNaN(bankTxDays) && bankTxDays > 0) {
+      const d = new Date(Date.now() - bankTxDays * 24 * 60 * 60 * 1000);
+      return `Date%3E%3DDateTime(${d.getUTCFullYear()}%2C${d.getUTCMonth() + 1}%2C${d.getUTCDate()})`;
+    }
+    return 'Date%3E%3DDateTime(2022%2C12%2C1)';
+  }
+  const bankTxIsChunked = !!bankTxFrom; // a from= chunk should never reuse the 'bank' scope's own full-history fetch
 
   // ── Optional: seed a fresh refresh token from POST body ──────────────────
   // Useful when Netlify Blobs has a stale token and the fresh one is in the browser.
@@ -1557,11 +1574,13 @@ exports.handler = async function(event) {
     // P&L dashboard. Run once to seed history; safe to re-run any time (upsert by ID).
     // Requires the bank_transactions table to exist (see supabase_bank_transactions.sql).
     if (scope.includes('bank_transactions')) {
-      const cutoffClause = xeroBankCutoffClause(bankTxDays);
-      const rangeLabel = bankTxDays ? `last ${bankTxDays} days` : 'Dec 2022 → now (full history)';
+      const cutoffClause = xeroBankCutoffClause();
+      const rangeLabel = bankTxFrom
+        ? `${bankTxFrom} to ${bankTxTo || 'now'} (reconciliation chunk)`
+        : (bankTxDays ? `last ${bankTxDays} days` : 'Dec 2022 → now (full history)');
       log.push(`Fetching bank transaction history for bank_transactions table (${rangeLabel})…`);
       // Re-use already-fetched data only when this call is also full-history and `bank` scope ran too
-      let bankAll = (!bankTxDays) ? result.bank_transactions : null;
+      let bankAll = (!bankTxDays && !bankTxIsChunked) ? result.bank_transactions : null;
       if (!bankAll) {
         bankAll = await fetchAllPages(
           `BankTransactions?where=${cutoffClause}&unitdp=2`,
