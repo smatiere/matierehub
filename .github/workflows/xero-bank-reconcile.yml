@@ -1,0 +1,31 @@
+name: Xero Bank Transactions Monthly Reconciliation
+
+# Full-history re-pull of the bank_transactions table (BankTransactions + ACCRECPAYMENT
+# back to Dec 2022), safety net for the daily sync's rolling 100-day window
+# (.github/workflows/xero-sync.yml). Catches any transaction edited/backdated by Xero or
+# an accountant (e.g. BAS/EOFY reconciliation) further back than 100 days, which the
+# daily job would otherwise never see again. Safe to re-run any time — upsert by ID.
+# Off-hour cron minute (avoids GitHub's exact-hour scheduling congestion, see
+# project_xero_sync_schedule_reliability memory).
+
+on:
+  schedule:
+    - cron: "23 22 1 * *"
+  workflow_dispatch:
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Full re-sync of bank_transactions from Xero
+        run: |
+          response=$(curl -s -w "\n%{http_code}" -X POST "https://matierehub2.netlify.app/.netlify/functions/xero-sync?scope=bank_transactions" -H "Authorization: Bearer ${{ secrets.SYNC_SECRET }}" -H "Content-Type: application/json")
+          http_code=$(echo "$response" | tail -1)
+          body=$(echo "$response" | head -n -1)
+          echo "HTTP status: $http_code"
+          echo "Response: $body"
+          if [ "$http_code" != "200" ]; then
+            echo "bank_transactions full reconciliation failed with HTTP $http_code"
+            exit 1
+          fi
+          echo "bank_transactions full reconciliation completed"
