@@ -62,7 +62,7 @@ These are **single sources of truth** — change them in one place and the new l
 
 ## Tabs (front-end `showTab` pages)
 
-Timesheets · P&L · **Projects** · Quotes & Pricing · Transactions · Scan Receipt · Expenses · For Action
+Timesheets · P&L · **Projects** · Quotes & Pricing · Transactions · Scan Receipt · Expenses · **Shopping List** · For Action
 
 (Overview, Cash & Invoices, Profitability, Materials and Activity Log were removed 2026-06-21 — see CHANGES_PENDING.md "Shipped" log. Scan Receipt, added the same week, hosts the Materials catalog as a sub-view.)
 
@@ -71,7 +71,12 @@ Timesheets · P&L · **Projects** · Quotes & Pricing · Transactions · Scan Re
 - **Transactions** — bank_transactions browser; date chips, type/contact (Smart Suggest)/account filters; inline-editable Project (Smart Suggest) + Notes (→ hub-write).
 - **Scan Receipt** — drop/upload a receipt (image/PDF) + optional note → editable preview table (nothing hits the DB until Save) + a Materials catalog sub-view (dedupes `expense_log` by supplier+description, copy-to-clipboard quote-ready lines).
 - **Expenses** — review/edit what's been parsed into `expense_log`; date chips + project + category filters; inline-editable Description, Category (Smart Suggest from `category_list` ∪ used categories), Project (Smart Suggest), Notes (→ hub-write).
+- **Shopping List** (added 2026-09-18) — one card per job's materials list (`shopping_lists`), tap an item to tick it off (PATCHes the whole `items` JSONB array via hub-write), "Mark done"/"Reopen" per list, "+ New list" for the rare manual case. Lists are normally created automatically by the Xero MCP connector's `create_quote` tool when Seb approves a quote from his phone — see `netlify/functions/xero-mcp.js`.
 - **For Action** — aggregates everything needing review (expense matches, overdue invoices, uncategorised transactions, untagged contacts) with a count badge.
+
+**Job-status baseline** (added 2026-09-18, no new tab) — `projects.baseline_scope/baseline_price/baseline_labour_hours/baseline_materials_estimate/baseline_set_at`, set automatically when a quote is approved (status → `Quoted`). Shown read-only in the Projects detail modal (`projRenderBaseline`) as baseline vs. actual (timesheets hours, expense_log total), so Seb can see after the job whether he came in on budget, over/under on materials, or over/under on time.
+
+**Xero MCP connector** (added 2026-09-18) — `netlify/functions/xero-mcp.js` is a standalone MCP server (stateless JSON-RPC over HTTPS) exposing `find_contact`, `create_contact`, `create_quote`, `create_invoice`, so Seb can drive Xero straight from the Claude iOS app with no browser/desktop Hub tab open. Reuses the exact token pattern from `xero-sync.js` (refresh token in Netlify Blobs, tenant looked up live via `/connections`) — no new Xero credentials. Register as a Custom Connector at `https://matierehub2.netlify.app/.netlify/functions/xero-mcp` with header `Authorization: Bearer <MCP_SHARED_SECRET>` (new env var, Seb picks the value). `create_quote` also creates the shopping list + job baseline in one call when `job_name`/`materials`/`labour_hours` are given — this is the phone-only version of "approve a quote."
 
 **Smart Suggest** = the hub-wide type-ahead pattern (`smartSuggest(input, getItems, onPick)`): a fixed-position, body-appended dropdown that suggests existing values as you type. Used on Contact / Project / Category fields.
 
@@ -88,7 +93,13 @@ timesheets         { id, date, project, hours, rate, value, employee, notes, cre
 expense_log        { id, date, supplier, description, category, project, qty, unit_price, amount, notes, created_at }
                    ← notes column ADDED & LIVE 2026-06-20 (ran: ALTER TABLE expense_log ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT '';).
                      HUB-only annotation. Editable from the Expenses tab via hub-write (project, category, description, notes).
-projects           { id, name, status, quoted, notes, created_at }
+projects           { id, name, status, quoted, notes, manual_revenue, manual_revenue_note, scope_of_work, created_at,
+                     baseline_scope, baseline_price, baseline_labour_hours, baseline_materials_estimate, baseline_set_at }
+                   ← baseline_* added 2026-09-18 (supabase_shopping_list_and_baseline.sql); status
+                     gained a 'Quoted' value, set automatically by xero-mcp.js's create_quote tool
+shopping_lists     { id, project, title, items (JSONB: [{name,qty,checked}]), status, created_at, updated_at }
+                   ← added 2026-09-18 (supabase_shopping_list_and_baseline.sql); one row per job's
+                     materials list, normally created by xero-mcp.js's create_quote tool
 xero_cache         { key, data (JSONB), updated_at }
                    ← key is one of: kpis, monthly, open_invoices, top_customers,
                      quotes, fy_summary, cost_detail_monthly, account_categories, meta
@@ -286,6 +297,7 @@ Runs **alongside** the existing GitHub-internal crons below, not replacing them 
 - `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` — live database connection (used by `claude-parse.js` and `xero-sync.js`)
 - `SYNC_SECRET` — bearer-token password for `xero-sync` calls. Value: `matiere2026`. Also stored as a GitHub Actions secret for automated workflows.
 - `XERO_CLIENT_ID` / `XERO_CLIENT_SECRET` / `XERO_REFRESH_TOKEN` — Xero OAuth (see `XERO_NOTES.md` / [[reference_xero_connection]]). The redirect URI is hardcoded in `index.html` and `xero-auth.js` (`https://matierehub2.netlify.app/xero-callback`) — there is no `XERO_REDIRECT_URI` env var
+- `MCP_SHARED_SECRET` — **new, 2026-09-18, needs to be added by Seb before the Xero MCP connector works.** A password Seb picks himself (Netlify env var, not generated by Claude); sent as `Authorization: Bearer <value>` when registering `xero-mcp.js` as a Custom Connector in Claude. Without it the function still runs but is open to the internet with no auth.
 
 **Note:** `GITHUB_TOKEN` and `XERO_REDIRECT_URI` were removed from Netlify on 2026-06-08 as genuinely unused — the only function that read `GITHUB_TOKEN` (`migrate-to-supabase.js`, a one-off helper whose job was already done) has also been deleted. **Claude pushing code changes to GitHub does NOT use any Netlify env var** — it uses a personal-access token Claude holds in memory ([[reference_github_token]]) and calls the GitHub Contents API directly from its own sandbox.
 

@@ -34,14 +34,26 @@ const WRITABLE = {
   // 2026-07-09 — scope_of_work added (see supabase_scope_of_work.sql); status is
   // also written automatically by autoUpdatePaidProjects() (index.html) when every
   // hand-linked invoice on a project comes back PAID from Xero.
-  projects:          ['manual_revenue', 'manual_revenue_note', 'quoted', 'status', 'notes', 'name', 'scope_of_work']
+  // 2026-09-18 — baseline_* added (see supabase_shopping_list_and_baseline.sql):
+  // set automatically by the Xero MCP connector's create_quote tool when a quote
+  // is approved, but also editable here in case Seb wants to adjust by hand.
+  projects:          ['manual_revenue', 'manual_revenue_note', 'quoted', 'status', 'notes', 'name', 'scope_of_work',
+                       'baseline_scope', 'baseline_price', 'baseline_labour_hours', 'baseline_materials_estimate', 'baseline_set_at'],
+  // 2026-09-18 — shopping list feature: tick items off (items JSONB, whole array
+  // rewritten per PATCH) and mark a list done, from the Hub or from the phone.
+  shopping_lists:    ['items', 'status', 'title', 'project']
 };
 
 // ── Insert allow-list: { table: [columns the HUB may set when CREATING a row] }
 // Used for "create a project on the spot" (Feature 1). The row id is generated
 // server-side (PR-### sequence) — never accepted from the client.
 const CREATABLE = {
-  projects: ['name', 'status', 'quoted', 'notes', 'manual_revenue', 'manual_revenue_note']
+  projects:       ['name', 'status', 'quoted', 'notes', 'manual_revenue', 'manual_revenue_note',
+                    'baseline_scope', 'baseline_price', 'baseline_labour_hours', 'baseline_materials_estimate', 'baseline_set_at'],
+  // 2026-09-18 — shopping lists are usually created by the Xero MCP connector
+  // (create_quote) but the Hub can also start one by hand from the new tab.
+  // Row id is generated server-side (SL-### sequence) — never from the client.
+  shopping_lists: ['project', 'title', 'items', 'status']
 };
 
 async function sbPatch(table, query, body) {
@@ -95,6 +107,17 @@ async function nextProjectId() {
   return `PR-${String(next).padStart(3, '0')}`;
 }
 
+// Generate the next SL-### shopping list id by scanning existing ids (same
+// pattern as nextProjectId — used both here and by the xero-mcp connector).
+async function nextShoppingListId() {
+  const rows = await sbGet('shopping_lists', '?select=id');
+  const nums = rows
+    .map(r => parseInt(String(r.id || '').replace(/^SL-/, ''), 10))
+    .filter(n => !isNaN(n));
+  const next = nums.length ? Math.max(...nums) + 1 : 1;
+  return `SL-${String(next).padStart(3, '0')}`;
+}
+
 exports.handler = async (event) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -136,6 +159,11 @@ exports.handler = async (event) => {
         row.status = row.status || 'Active';
         if (row.quoted == null) row.quoted = 0;
         if (!row.notes) row.notes = `Created ${new Date().toISOString().slice(0, 10)} via HUB`;
+      }
+      if (table === 'shopping_lists') {
+        row.id     = await nextShoppingListId();
+        row.status = row.status || 'open';
+        if (!row.items) row.items = [];
       }
       const created = await sbPost(table, row);
       return { statusCode: 200, headers, body: JSON.stringify({ ok: true, row: Array.isArray(created) ? created[0] : created }) };

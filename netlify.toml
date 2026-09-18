@@ -8,7 +8,7 @@
 [functions."claude-parse"]
   timeout = 26
 
-[functions."xero-sync"]
+[functions."xero-mcp"]
   timeout = 26
 
 # SPA routing — serve index.html for all non-file paths (enables /xero-callback)

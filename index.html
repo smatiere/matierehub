@@ -99,6 +99,7 @@ tr:hover td{background:var(--bg-3)}
 .badge-red{background:rgba(255,0,110,.15);color:var(--pink)}
 .badge-blue{background:rgba(58,134,255,.15);color:var(--blue)}
 .badge-gray{background:var(--bg-3);color:var(--ink-4)}
+.badge-purple{background:rgba(131,56,236,.15);color:var(--purple)}
 
 /* ── Mini bars ── */
 .mini-bar{background:var(--bg-3);border-radius:2px;height:4px;overflow:hidden;margin-top:6px}
@@ -249,6 +250,7 @@ body{padding-bottom:62px}
   <div class="tab" onclick="showTab('transactions',this)">Transactions</div>
   <div class="tab" onclick="showTab('receipts',this)">Scan Receipt</div>
   <div class="tab" onclick="showTab('expenses',this)">Expenses</div>
+  <div class="tab" onclick="showTab('shopping',this)">Shopping List</div>
   <div class="tab" onclick="showTab('action',this)">For Action <span id="fa-count" style="display:none;background:var(--orange);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;font-weight:600;margin-left:4px"></span></div>
 </div>
 
@@ -259,6 +261,7 @@ body{padding-bottom:62px}
 <div class="page" id="page-transactions"></div>
 <div class="page" id="page-receipts"></div>
 <div class="page" id="page-expenses"></div>
+<div class="page" id="page-shopping"></div>
 <div class="page" id="page-action"></div>
 
 <div id="modal-overlay" class="modal-overlay" onclick="if(event.target===this)closeModal()">
@@ -330,7 +333,7 @@ async function hubWrite(table, id, fields) {
 // ── Data load — live from Supabase ────────────────────────────────────────────
 async function loadData() {
   try {
-    const [timesheets, expenses, projects, xeroRows, invoiceItems, quoteItems] = await Promise.all([
+    const [timesheets, expenses, projects, xeroRows, invoiceItems, quoteItems, shoppingLists] = await Promise.all([
       sbGet('/rest/v1/timesheets?select=*&order=date.asc,id.asc'),
       sbGet('/rest/v1/expense_log?select=*&order=date.asc,id.asc'),
       sbGet('/rest/v1/projects?select=*&order=id.asc'),
@@ -340,7 +343,10 @@ async function loadData() {
       // supabase_quote_items_setup.sql in the Supabase SQL editor it 404s.
       // Swallow that one failure so a missing table doesn't take down the
       // whole HUB; quote-linking just stays empty until the table exists.
-      sbGet('/rest/v1/quote_items?select=id,quote_number,contact,contact_id,line_amount,status,date,expiry_date,description,item,project').catch(() => [])
+      sbGet('/rest/v1/quote_items?select=id,quote_number,contact,contact_id,line_amount,status,date,expiry_date,description,item,project').catch(() => []),
+      // shopping_lists (added 2026-09-18) — same "table might not exist yet"
+      // guard until supabase_shopping_list_and_baseline.sql has been run.
+      sbGet('/rest/v1/shopping_lists?select=*&order=created_at.desc').catch(() => [])
     ]);
 
     const xero = {};
@@ -352,6 +358,7 @@ async function loadData() {
       projects,
       invoice_items:        invoiceItems,
       quote_items:          quoteItems,
+      shopping_lists:       shoppingLists,
       kpis:                 xero.kpis                 || {},
       monthly:              xero.monthly              || { labels:[], periods:[], revenue:[], materials:[], wages_owner:[] },
       open_invoices:        xero.open_invoices        || [],
@@ -558,6 +565,44 @@ async function projConvertAutoMatched(name) {
   renderProjects(D.kpis);
 }
 
+// Job-status baseline (2026-09-18) — projects.baseline_* is set once, when a
+// quote is approved (normally by the Xero MCP connector's create_quote tool),
+// capturing the agreed scope/price/labour-materials estimate. This block
+// compares that baseline against actuals already computed by showProjectDetail
+// (timesheets hours, expense_log total) so Seb can see at a glance whether a
+// job ran on-budget, over/under on materials, or over/under on time. Read-only
+// here — edit baseline_* via Supabase/hub-write directly if it needs correcting.
+function projRenderBaseline(defined, actualHours, actualMaterials, rate) {
+  if (!defined || defined.baseline_set_at == null) return '';
+  const bHours = defined.baseline_labour_hours != null ? Number(defined.baseline_labour_hours) : null;
+  const bMat   = defined.baseline_materials_estimate != null ? Number(defined.baseline_materials_estimate) : null;
+  const bPrice = defined.baseline_price != null ? Number(defined.baseline_price) : null;
+  const hoursDelta = bHours != null ? actualHours - bHours : null;
+  const matDelta   = bMat != null ? actualMaterials - bMat : null;
+  const deltaStyle = d => d == null ? 'var(--ink-4)' : d > 0 ? 'var(--orange)' : 'var(--sage)';
+  const deltaText  = (d, unit) => d == null ? '—' : (d > 0 ? '+' : '') + d.toFixed(unit==='h'?1:0) + (unit==='h'?'h':'') + (d>0?' over':d<0?' under':' on budget');
+  return `<div style="margin-bottom:20px">
+    <div class="divider" style="margin-top:0">Baseline (quoted ${new Date(defined.baseline_set_at).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'})})</div>
+    ${defined.baseline_scope ? `<div style="font-size:12px;color:var(--ink-3);margin-bottom:10px;padding:8px 10px;background:var(--bg-2);border-radius:6px">${attrEsc(defined.baseline_scope)}</div>` : ''}
+    <div style="display:flex;flex-wrap:wrap;gap:12px">
+      <div style="flex:1;min-width:140px;padding:10px 12px;background:var(--bg-2);border-radius:8px">
+        <div style="font-size:10px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">Price quoted</div>
+        <div style="font-size:16px;font-weight:700">${bPrice!=null?fmt(bPrice):'—'}</div>
+      </div>
+      <div style="flex:1;min-width:140px;padding:10px 12px;background:var(--bg-2);border-radius:8px">
+        <div style="font-size:10px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">Labour — baseline vs actual</div>
+        <div style="font-size:16px;font-weight:700">${bHours!=null?bHours+'h':'—'} <span style="font-size:12px;font-weight:400;color:var(--ink-4)">vs ${actualHours}h</span></div>
+        <div style="font-size:11px;color:${deltaStyle(hoursDelta)}">${deltaText(hoursDelta,'h')}</div>
+      </div>
+      <div style="flex:1;min-width:140px;padding:10px 12px;background:var(--bg-2);border-radius:8px">
+        <div style="font-size:10px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">Materials — baseline vs actual</div>
+        <div style="font-size:16px;font-weight:700">${bMat!=null?fmt(bMat):'—'} <span style="font-size:12px;font-weight:400;color:var(--ink-4)">vs ${fmt(actualMaterials)}</span></div>
+        <div style="font-size:11px;color:${deltaStyle(matDelta)}">${deltaText(matDelta,'$')}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
 // Scope of Work — read-only, auto-derived from whatever's linked to the job.
 // Was previously a free-text box (projects.scope_of_work); Seb's ask 2026-07-10:
 // it looked like a manual input and duplicated info already sitting on the
@@ -602,7 +647,96 @@ function showTab(name, el) {
   if (name === 'expenses') renderExpenses();
   if (name === 'receipts') renderReceipts();
   if (name === 'action') renderForAction();
+  if (name === 'shopping') renderShopping();
   if (name === 'projects' && D) renderProjects(D.kpis);
+}
+
+// ── Shopping List (2026-09-18) ─────────────────────────────────────────────
+// One row per job's materials list (shopping_lists.items is a JSONB array of
+// {name, qty, checked}). Tapping an item toggles `checked` and PATCHes the
+// whole items array via hubWrite — simplest possible sync from the phone
+// while shopping. Lists are normally created by the Xero MCP connector's
+// create_quote tool (job approved → shopping list of materials); the "+ New
+// list" button here covers the odd manual case.
+async function renderShopping() {
+  const page = document.getElementById('page-shopping');
+  const lists = (D && D.shopping_lists) || [];
+  if (!lists.length) {
+    page.innerHTML = `<div class="section"><div style="padding:24px;text-align:center;color:var(--ink-4)">
+      No shopping lists yet. These are created automatically when a quote is approved via the Xero connector, or start one by hand:
+      <div style="margin-top:12px"><button onclick="shopNewList()" style="padding:8px 16px;background:var(--amber);color:#000;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700">+ New list</button></div>
+    </div></div>`;
+    return;
+  }
+  const open = lists.filter(l => l.status !== 'done');
+  const done = lists.filter(l => l.status === 'done');
+  const renderList = l => {
+    const items = Array.isArray(l.items) ? l.items : [];
+    const checkedCount = items.filter(it => it.checked).length;
+    const rows = items.map((it, i) => `
+      <div onclick="shopToggleItem('${attrEsc(l.id)}',${i})" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer;background:${it.checked?'var(--bg-1)':'var(--bg-2)'}">
+        <span style="width:18px;height:18px;flex:none;border-radius:4px;border:1px solid var(--border-2);display:flex;align-items:center;justify-content:center;background:${it.checked?'var(--sage)':'transparent'};color:#fff;font-size:12px">${it.checked?'✓':''}</span>
+        <span style="flex:1;${it.checked?'color:var(--ink-4);text-decoration:line-through':''}">${attrEsc(it.name||'')}</span>
+        <span style="color:var(--ink-4);font-size:12px">${attrEsc(it.qty||'')}</span>
+      </div>`).join('');
+    return `<div class="section" style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border)">
+        <div><strong>${attrEsc(l.title||l.project||l.id)}</strong>${l.project?`<div style="font-size:11px;color:var(--ink-4)">${attrEsc(l.project)}</div>`:''}</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:11px;color:var(--ink-4)">${checkedCount}/${items.length}</span>
+          ${l.status!=='done' ? `<button onclick="shopSetStatus('${attrEsc(l.id)}','done')" style="padding:5px 10px;background:transparent;border:1px solid var(--border-2);color:var(--ink-3);border-radius:6px;cursor:pointer;font-size:11px">Mark done</button>`
+                               : `<button onclick="shopSetStatus('${attrEsc(l.id)}','open')" style="padding:5px 10px;background:transparent;border:1px solid var(--border-2);color:var(--ink-3);border-radius:6px;cursor:pointer;font-size:11px">Reopen</button>`}
+        </div>
+      </div>
+      <div style="padding:8px">${rows || '<div style="padding:10px;color:var(--ink-4);font-size:12px">No items</div>'}</div>
+    </div>`;
+  };
+  page.innerHTML = `
+    <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+      <button onclick="shopNewList()" style="padding:8px 16px;background:var(--amber);color:#000;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700">+ New list</button>
+    </div>
+    ${open.map(renderList).join('')}
+    ${done.length ? `<div class="divider">Done</div>${done.map(renderList).join('')}` : ''}`;
+}
+
+async function shopToggleItem(id, idx) {
+  const list = (D.shopping_lists||[]).find(l => l.id === id);
+  if (!list) return;
+  const items = Array.isArray(list.items) ? [...list.items] : [];
+  if (!items[idx]) return;
+  items[idx] = { ...items[idx], checked: !items[idx].checked };
+  try {
+    const row = await hubWrite('shopping_lists', id, { items });
+    list.items = row.items;
+    renderShopping();
+  } catch (e) { claudeToast('Could not save: ' + e.message, 'error'); }
+}
+
+async function shopSetStatus(id, status) {
+  try {
+    const row = await hubWrite('shopping_lists', id, { status });
+    const list = (D.shopping_lists||[]).find(l => l.id === id);
+    if (list) list.status = row.status;
+    renderShopping();
+  } catch (e) { claudeToast('Could not save: ' + e.message, 'error'); }
+}
+
+async function shopNewList() {
+  const project = prompt('Job / project name for this list:');
+  if (!project) return;
+  const itemsRaw = prompt('Materials, one per line (e.g. "10x 90mm screws"):');
+  if (!itemsRaw) return;
+  const items = itemsRaw.split('\n').map(l => l.trim()).filter(Boolean).map(name => ({ name, qty: '', checked: false }));
+  try {
+    const r = await fetch('/.netlify/functions/hub-write', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ table: 'shopping_lists', insert: true, fields: { project, title: project, items, status: 'open' } })
+    });
+    const out = await r.json();
+    if (!r.ok || !out.ok) throw new Error(out.error || 'insert failed');
+    D.shopping_lists = [out.row, ...(D.shopping_lists||[])];
+    renderShopping();
+  } catch (e) { claudeToast('Could not create list: ' + e.message, 'error'); }
 }
 
 function kpi(label, value, sub, style='') {
@@ -655,8 +789,11 @@ let projFilterText   = '';
 let projFilterStatus = 'Active';   // default filter per spec
 let PROJ_SORTED       = [];        // cached billable rows for projRenderRows() (avoids re-aggregating per keystroke)
 
-const PROJECT_STATUSES   = ['Active','Finished','Paid','Inactive'];
-const PROJ_STATUS_BADGE  = { Active:'badge-green', Finished:'badge-blue', Paid:'badge-amber', Inactive:'badge-gray' };
+// 'Quoted' added 2026-09-18 — set automatically when a quote is approved via
+// the Xero MCP connector (job-status baseline feature); still hand-changeable
+// like any other status via the pills in showProjectDetail().
+const PROJECT_STATUSES   = ['Quoted','Active','Finished','Paid','Inactive'];
+const PROJ_STATUS_BADGE  = { Quoted:'badge-purple', Active:'badge-green', Finished:'badge-blue', Paid:'badge-amber', Inactive:'badge-gray' };
 
 function projStatusBadge(status) {
   const s = status || 'Active';
@@ -1147,6 +1284,7 @@ function showProjectDetail(name) {
       <div><strong style="color:var(--ink-2)">Span:</strong> ${span!=null?span+'d':'—'}</div>
       <div><strong style="color:var(--ink-2)">Dilution:</strong> ${dilutionPct!=null?dilutionPct.toFixed(0)+'% ('+hrPerDay.toFixed(1)+'h/d)':'—'}</div>
     </div>
+    ${projRenderBaseline(defined, totalHours, totalExpenses, rate)}
     ${scopeSection}
     ${linksSection}
     <div style="margin-bottom:20px">
