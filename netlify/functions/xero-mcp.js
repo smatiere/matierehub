@@ -196,10 +196,18 @@ async function toolFindContact({ query }) {
 }
 
 async function toolCreateContact({ name, email, phone, address_line1, city, postal_code }) {
+  // Guard: a blank/whitespace Name silently produces a Xero contact with no
+  // client details on quotes/invoices (see BUGS.md 2026-09-18 — QU-0285).
+  // Fail loudly instead so the caller fixes the call rather than shipping a
+  // broken contact.
+  const cleanName = (name || '').trim();
+  if (!cleanName) {
+    throw new Error('name is required and cannot be blank. Use the same "FirstName - Suburb" identifier as the quote title, e.g. "Vladimir - Manly Vale" — not just the first name.');
+  }
   const accessToken = await getAccessToken();
   const tenantId = await getTenantId(accessToken);
   const payload = { Contacts: [{
-    Name: name,
+    Name: cleanName,
     EmailAddress: email || undefined,
     Phones: phone ? [{ PhoneType: 'MOBILE', PhoneNumber: phone }] : undefined,
     Addresses: (address_line1 || city) ? [{ AddressType: 'STREET', AddressLine1: address_line1 || '', City: city || '', PostalCode: postal_code || '' }] : undefined
@@ -309,7 +317,7 @@ const TOOLS = [
   },
   {
     name: 'create_contact',
-    description: 'Create a new client contact in Xero (for a lead not yet in Xero). Returns the new ContactID to use with create_quote/create_invoice.',
+    description: 'Create a new client contact in Xero (for a lead not yet in Xero). IMPORTANT: name must be the full client identifier in the same "FirstName - Suburb" pattern you will use as the create_quote title (e.g. "Vladimir - Manly Vale"), not just the first name — this is what shows as the client on the quote/invoice PDF. Also pass address_line1/city/postal_code when known, so the address prints too. Returns the new ContactID to use with create_quote/create_invoice.',
     inputSchema: { type: 'object', properties: {
       name: { type: 'string' }, email: { type: 'string' }, phone: { type: 'string' },
       address_line1: { type: 'string' }, city: { type: 'string' }, postal_code: { type: 'string' }
