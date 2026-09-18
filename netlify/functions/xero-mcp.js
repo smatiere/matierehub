@@ -368,8 +368,16 @@ exports.handler = async function (event) {
   if (event.httpMethod !== 'POST') return { statusCode: 405, headers: cors, body: JSON.stringify({ error: 'Method not allowed' }) };
 
   if (MCP_SHARED_SECRET) {
+    // Claude's custom-connector UI only offers a fixed dropdown of extra header
+    // names (Authorization is reserved there for the connector's own OAuth flow,
+    // which this server doesn't implement) — X-Api-Key is one of the presets, so
+    // that's what Seb enters in Claude, with Authentication set to "No sign-in".
+    // Still accept a bare Authorization: Bearer header too, for anything else
+    // (curl, a future integration) that can set arbitrary headers.
+    const apiKey = event.headers['x-api-key'] || event.headers['X-Api-Key'] || '';
     const auth = event.headers.authorization || event.headers.Authorization || '';
-    if (auth !== `Bearer ${MCP_SHARED_SECRET}`) {
+    const ok = apiKey === MCP_SHARED_SECRET || auth === `Bearer ${MCP_SHARED_SECRET}`;
+    if (!ok) {
       return { statusCode: 401, headers: cors, body: JSON.stringify({ error: 'Unauthorized' }) };
     }
   }
