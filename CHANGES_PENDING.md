@@ -6,6 +6,23 @@
 
 ---
 
+## Follow-up fix — 2026-09-18b (create_contact blank-name bug, deployed)
+
+Seb reported QU-0285's client details were missing on the PDF even though the Xero contact
+existed — root cause: `create_contact` was called with just "Vladimir" instead of the full
+"Vladimir - Manly Vale" identifier (and no address), so the contact printed with a thin/blank
+name on the quote. Fixed in `netlify/functions/xero-mcp.js`:
+- `toolCreateContact` now rejects a blank/whitespace name outright (fails loudly instead of
+  silently creating a broken contact).
+- `create_contact`'s tool description now explicitly tells the calling model to pass the same
+  "FirstName - Suburb" identifier used as the `create_quote` title, plus the address fields.
+- Deployed as a single commit (`9087fbd5`) via the Git Data API + device_bash method — no code
+  change to `toolCreateQuote`'s contact-linking logic, since auto-renaming an *existing* Xero
+  contact to match a new quote's title would be unsafe for repeat clients.
+- **One-off manual fix still needed**: Seb, please rename the existing "Vladimir" contact in
+  Xero to "Vladimir - Manly Vale" and add the address (11 Kenneth Rd, Manly Vale NSW 2093) —
+  takes 30 seconds in the Xero contact editor. QU-0285 itself can be left as-is or re-quoted.
+
 ## Pending batch — 2026-09-18 (Xero MCP connector + Shopping List + Job-status baseline)
 
 Seb's three "tonight" asks, built together since the baseline + shopping list are wired into the connector's `create_quote` tool. ⚠️ **Run `supabase_shopping_list_and_baseline.sql` in the Supabase SQL editor at/before deploy** — creates `shopping_lists` and adds `projects.baseline_*` columns. Everything else is backward-compatible (guarded with `.catch(() => [])` where it reads the new table) so skipping this step temporarily won't break the rest of the Hub.

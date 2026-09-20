@@ -255,6 +255,15 @@ async function toolCreateQuote(args) {
   const priceTotal = q.SubTotal;
   const materialsTotal = (materials || []).reduce((s, m) => s + (Number(m.cost) || 0), 0) || undefined;
 
+  // Fallback: if the caller didn't pass a separate `materials` breakdown, build
+  // the shopping list straight from the quote's own line items instead of
+  // skipping it — Seb's shopping lists are meant to exist for every approved
+  // quote (see the empty-state copy on the Shopping List tab), so this is what
+  // makes that true even when the assistant only fills in line_items.
+  const materialsForList = (materials && materials.length)
+    ? materials
+    : line_items.map(li => ({ name: li.description, qty: li.quantity ? String(li.quantity) : '', cost: li.unit_amount }));
+
   const [baseline, shoppingList] = await Promise.all([
     upsertJobBaseline({
       job_name: job_name || contact_name || q.Contact?.Name,
@@ -263,7 +272,7 @@ async function toolCreateQuote(args) {
       labour_hours,
       materials_estimate: materialsTotal
     }).catch(e => ({ error: e.message })),
-    createShoppingList({ job_name: job_name || contact_name || q.Contact?.Name, client_name: contact_name || q.Contact?.Name, materials }).catch(e => ({ error: e.message }))
+    createShoppingList({ job_name: job_name || contact_name || q.Contact?.Name, client_name: contact_name || q.Contact?.Name, materials: materialsForList }).catch(e => ({ error: e.message }))
   ]);
 
   return {
