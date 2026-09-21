@@ -3,6 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Matiere Hub">
+<link rel="apple-touch-icon" href="logo.png">
 <title>Matière Hub</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
@@ -116,6 +120,16 @@ tr:hover td{background:var(--bg-3)}
 .spinner-sm{width:14px;height:14px;border:2px solid var(--border-2);border-top-color:var(--amber);border-radius:50%;animation:spin .7s linear infinite;display:inline-block}
 @keyframes spin{to{transform:rotate(360deg)}}
 #error-box{display:none;background:rgba(255,0,110,.1);border:1px solid rgba(255,0,110,.3);border-radius:var(--r);padding:16px;margin:20px;color:var(--pink);font-size:13px}
+#hub-gate{display:none;position:fixed;inset:0;background:#000;z-index:2000;align-items:center;justify-content:center;padding:20px}
+.hub-gate-card{width:100%;max-width:300px;text-align:center}
+.hub-gate-title{font-size:16px;font-weight:700;letter-spacing:.22em;color:var(--ink);margin-bottom:4px}
+.hub-gate-sub{font-size:11px;color:var(--ink-4);letter-spacing:.06em;margin-bottom:22px;text-transform:uppercase}
+#hub-gate-pw{width:100%;background:var(--bg-3);border:1px solid var(--border-2);color:var(--ink);padding:11px 14px;border-radius:var(--r);font-size:14px;outline:none;text-align:center;margin-bottom:12px}
+#hub-gate-pw:focus{border-color:var(--amber)}
+#hub-gate-btn{width:100%;background:var(--amber);color:#000;border:none;padding:11px;border-radius:var(--r);font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;transition:background .15s}
+#hub-gate-btn:hover:not(:disabled){background:var(--gold-2)}
+#hub-gate-btn:disabled{opacity:.5;cursor:not-allowed}
+#hub-gate-error{display:none;margin-top:14px;font-size:12px;color:var(--pink)}
 
 /* ── Log entries ── */
 .log-entry{padding:12px 0;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:12px}
@@ -221,6 +235,20 @@ body{padding-bottom:62px}
 </style>
 </head>
 <body>
+
+<div id="hub-gate">
+  <div class="hub-gate-card">
+    <img src="https://raw.githubusercontent.com/smatiere/matierehub/main/logo.png"
+         alt="Matiere" height="26"
+         style="display:block;filter:invert(1);image-rendering:crisp-edges;margin:0 auto 18px">
+    <div class="hub-gate-title">MATIÈRE HUB</div>
+    <div class="hub-gate-sub">Enter password to continue</div>
+    <input id="hub-gate-pw" type="password" placeholder="Password" autocomplete="current-password"
+           onkeydown="if(event.key==='Enter') hubTryLogin()">
+    <button id="hub-gate-btn" onclick="hubTryLogin()">Unlock</button>
+    <div id="hub-gate-error"></div>
+  </div>
+</div>
 
 <div id="loading"><div class="spinner"></div><span style="font-size:12px;letter-spacing:.08em">LOADING MATIÈRE HUB</span></div>
 <div id="error-box"></div>
@@ -4789,15 +4817,73 @@ async function faLink(bankTxId, expenseLogId) {
   }
 }
 
-// ── Boot ──────────────────────────────────────────────────────────────────────
-(async () => {
+// ── Auth gate ──────────────────────────────────────────────────────────────
+// Single shared password (server-checked via netlify/functions/hub-auth.js,
+// never shipped in this file) gates the whole HUB. Once a browser enters it
+// correctly, hub_auth_token stays in localStorage and it's never asked again
+// on that device. Admin-only for now (full access) — member/guest roles
+// with restricted access can be layered on top later (see CLAUDE.md).
+const HUB_AUTH_KEY = 'hub_auth_token';
+
+function hubShowGate(errorMsg) {
+  document.getElementById('loading').style.display = 'none';
+  const gate = document.getElementById('hub-gate');
+  gate.style.display = 'flex';
+  const err = document.getElementById('hub-gate-error');
+  if (errorMsg) { err.textContent = errorMsg; err.style.display = 'block'; }
+  else { err.style.display = 'none'; }
+  const pw = document.getElementById('hub-gate-pw');
+  pw.value = '';
+  pw.focus();
+}
+
+async function hubTryLogin() {
+  const pwInput = document.getElementById('hub-gate-pw');
+  const btn = document.getElementById('hub-gate-btn');
+  const password = pwInput.value;
+  if (!password) return;
+  btn.disabled = true; btn.textContent = 'Checking…';
+  try {
+    const r = await fetch('/.netlify/functions/hub-auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok && data.ok) {
+      localStorage.setItem(HUB_AUTH_KEY, data.token);
+      document.getElementById('hub-gate').style.display = 'none';
+      document.getElementById('loading').style.display = 'flex';
+      bootHub();
+    } else {
+      hubShowGate(data.error === 'Wrong password' ? 'Wrong password — try again.' : (data.error || 'Could not verify password.'));
+    }
+  } catch (e) {
+    hubShowGate('Could not reach the Hub — check your connection.');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Unlock';
+  }
+}
+
+function hubCheckAuth() {
+  if (localStorage.getItem(HUB_AUTH_KEY)) {
+    bootHub();
+  } else {
+    hubShowGate();
+  }
+}
+
+async function bootHub() {
   if (window.location.pathname === '/xero-callback' || window.location.search.includes('code=')) {
     await handleXeroCallback();
   }
   if (window.location.search.includes('xero=connected')) history.replaceState({}, '', '/');
   updateXeroBtn();
   loadData();
-})();
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+hubCheckAuth();
 </script>
 </body>
 </html>

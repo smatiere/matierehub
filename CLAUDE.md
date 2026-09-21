@@ -43,10 +43,21 @@ Workflow proven 2026-06-20 (Batches 1–3 = ~13 changes shipped in a single buil
 | `netlify/functions/claude-parse.js` | Parses natural language input via Claude Haiku API, writes updates directly to **Supabase** (`SUPABASE_URL`/`SUPABASE_SERVICE_KEY`) — no longer touches `data.json` or GitHub |
 | `netlify/functions/hub-write.js` | **Generic HUB write API** — the single endpoint for all direct-from-HUB structured edits (inline table edits, buttons, forms). Browser anon key stays read-only; this writes with the service key against a server-side allow-list (`WRITABLE`). Add a table/column there to make it editable — no Supabase admin needed. POST `{table,id,fields}`. |
 | `netlify/functions/xero-sync.js` | Syncs financial data from Xero into the Supabase `xero_cache` table (was: `data.json`) |
+| `netlify/functions/hub-auth.js` | Password gate for the whole Hub — checks a submitted password against `HUB_ADMIN_PASSWORD` (Netlify env var, never in the page). Front-door deterrent only (anon key is already read-only); see CHANGES_PENDING.md batch 20. |
 | `XERO_NOTES.md` | Xero connection playbook — OAuth flow, token-rotation race fix, P&L date-range rules, all failed approaches. Read before touching anything Xero-related |
 | `netlify.toml` | Netlify build config |
 | `BUGS.md` | Known issues tracker — check before suggesting fixes |
 | `DECISIONS.md` | Architectural decisions log — check before suggesting alternatives |
+
+---
+
+## Security — password gate
+
+The Hub has a single shared password gate (added 2026-09-21, see CHANGES_PENDING.md batch 20) — full-screen overlay in `index.html`, checked server-side by `netlify/functions/hub-auth.js` against the `HUB_ADMIN_PASSWORD` Netlify env var. Correct password → browser stores a token in `localStorage` (`hub_auth_token`) and is never asked again on that device.
+
+This is a front-door deterrent, not a full auth system: the Supabase anon key the browser uses is already read-only (see hub-write.js above), so someone who went looking in devtools/network requests could still reach read data directly. What it closes is casual/accidental access — the URL previously loaded straight into live financial data for anyone who had the link.
+
+Only one role exists today: `admin` (full access — Seb). The response from `hub-auth.js` already returns a `role` field so member/guest profiles with restricted per-tab access can be added later without reworking the gate (e.g. a small allow-list of {password → role} pairs server-side, tab rendering checks the stored role). Not built yet — ask before assuming it exists.
 
 ---
 
