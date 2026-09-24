@@ -172,10 +172,24 @@ async function upsertJobBaseline({ job_name, scope, price, labour_hours, materia
   return rows[0];
 }
 
+// 2026-09-24 — items can now carry supplier/special-order details captured at
+// quoting time (special, supplier, supplier_email, lead_time, specs,
+// delivery_fee, order_url) so the Shopping List tab can surface them without
+// a schema change (items is JSONB — extra keys just ride along).
 async function createShoppingList({ job_name, client_name, materials }) {
   if (!materials || !materials.length) return null;
   const id = await nextId('shopping_lists', 'SL');
-  const items = materials.map(m => ({ name: m.name || m.description || String(m), qty: m.qty || '', checked: false }));
+  const items = materials.map(m => {
+    const item = { name: m.name || m.description || String(m), qty: m.qty || '', checked: false };
+    if (m.special)         item.special = true;
+    if (m.supplier)        item.supplier = m.supplier;
+    if (m.supplier_email)  item.supplier_email = m.supplier_email;
+    if (m.lead_time)       item.lead_time = m.lead_time;
+    if (m.specs)           item.specs = m.specs;
+    if (m.delivery_fee != null) item.delivery_fee = m.delivery_fee;
+    if (m.order_url)       item.order_url = m.order_url;
+    return item;
+  });
   const rows = await sbPost('shopping_lists', {
     id, project: job_name || '', title: client_name ? `${client_name} — materials` : 'Materials', items, status: 'open'
   });
@@ -346,7 +360,14 @@ const TOOLS = [
       job_name: { type: 'string', description: 'Project/job name for the baseline + shopping list (defaults to contact_name)' },
       labour_hours: { type: 'number', description: 'Estimated labour hours behind this quote, for the baseline record' },
       materials: { type: 'array', description: 'Materials for the shopping list + baseline materials estimate', items: { type: 'object', properties: {
-        name: { type: 'string' }, qty: { type: 'string' }, cost: { type: 'number', description: 'Estimated cost of this line, ex GST' }
+        name: { type: 'string' }, qty: { type: 'string' }, cost: { type: 'number', description: 'Estimated cost of this line, ex GST' },
+        special: { type: 'boolean', description: 'True if this item needs a supplier quote or special/custom order — it is highlighted at the top of the Shopping List tab' },
+        supplier: { type: 'string', description: 'Supplier name for this item, shown when the item is tapped' },
+        supplier_email: { type: 'string', description: 'Supplier email, used to prefill the "Email supplier" draft when the item is tapped' },
+        lead_time: { type: 'string', description: 'Lead time as quoted by the supplier, e.g. "2-3 weeks"' },
+        specs: { type: 'string', description: 'Spec/size/finish details needed to order the exact item' },
+        delivery_fee: { type: 'number', description: 'Delivery fee quoted for this item, ex GST' },
+        order_url: { type: 'string', description: 'Link to the supplier\'s product page or online order form for this item' }
       } } }
     }, required: ['line_items'] }
   },

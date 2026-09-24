@@ -687,13 +687,47 @@ function showTab(name, el) {
   if (name === 'projects' && D) renderProjects(D.kpis);
 }
 
-// ── Shopping List (2026-09-18) ─────────────────────────────────────────────
+// ── Shopping List (2026-09-18, filters+priority+collapse added 2026-09-24) ──
 // One row per job's materials list (shopping_lists.items is a JSONB array of
-// {name, qty, checked}). Tapping an item toggles `checked` and PATCHes the
-// whole items array via hubWrite — simplest possible sync from the phone
-// while shopping. Lists are normally created by the Xero MCP connector's
-// create_quote tool (job approved → shopping list of materials); the "+ New
-// list" button here covers the odd manual case.
+// {name, qty, checked, + optional special/supplier/supplier_email/lead_time/
+// specs/delivery_fee/order_url captured at quoting time). Tapping a normal
+// item toggles `checked` and PATCHes the whole items array via hubWrite —
+// simplest possible sync from the phone while shopping. Tapping a `special`
+// item (needs a supplier quote / custom order) opens its details instead of
+// ticking it — use the checkbox itself to tick a special item off. Lists are
+// normally created by the Xero MCP connector's create_quote tool (job
+// approved → shopping list of materials); the "+ New list" button here
+// covers the odd manual case.
+//
+// Default view: only Active-project lists that aren't done yet, with just
+// the most recent one expanded — "Show done" / "Show quoted-only jobs" pills
+// reveal the rest. SHOP holds that filter + collapse state client-side only.
+let SHOP = { showDone: false, showQuotedOnly: false, expanded: null };
+
+function shopProjectStatus(name) {
+  if (!name) return null;
+  const p = (D.projects || []).find(pr => (pr.name || '').toLowerCase() === String(name).toLowerCase());
+  return p ? p.status : null;
+}
+
+function shopToggleFilter(key) {
+  SHOP[key] = !SHOP[key];
+  renderShopping();
+}
+
+function shopToggleExpand(id) {
+  if (SHOP.expanded === null) SHOP.expanded = {};
+  SHOP.expanded[id] = !SHOP.expanded[id];
+  renderShopping();
+}
+
+function shopFilterBar(hiddenDone, hiddenQuoted) {
+  return `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <button class="hub-pill-btn${SHOP.showDone?' active':''}" onclick="shopToggleFilter('showDone')">Done${hiddenDone?` (${hiddenDone} hidden)`:''}</button>
+    <button class="hub-pill-btn${SHOP.showQuotedOnly?' active':''}" onclick="shopToggleFilter('showQuotedOnly')">Quoted-only jobs${hiddenQuoted?` (${hiddenQuoted} hidden)`:''}</button>
+  </div>`;
+}
+
 async function renderShopping() {
   const page = document.getElementById('page-shopping');
   const lists = (D && D.shopping_lists) || [];
@@ -704,35 +738,113 @@ async function renderShopping() {
     </div></div>`;
     return;
   }
-  const open = lists.filter(l => l.status !== 'done');
-  const done = lists.filter(l => l.status === 'done');
+
+  const hiddenDone = lists.filter(l => l.status === 'done').length;
+  const hiddenQuoted = lists.filter(l => l.status !== 'done' && shopProjectStatus(l.project) === 'Quoted').length;
+  const visible = lists.filter(l => {
+    if (l.status === 'done' && !SHOP.showDone) return false;
+    if (l.status !== 'done' && shopProjectStatus(l.project) === 'Quoted' && !SHOP.showQuotedOnly) return false;
+    return true;
+  });
+
+  // Default-expand only the most recent open list, once — after that, whatever
+  // the user has clicked open/closed is preserved across re-renders.
+  if (SHOP.expanded === null) {
+    SHOP.expanded = {};
+    const firstOpen = visible.find(l => l.status !== 'done');
+    if (firstOpen) SHOP.expanded[firstOpen.id] = true;
+  }
+
+  const topBar = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px">
+      ${shopFilterBar(hiddenDone, hiddenQuoted)}
+      <button onclick="shopNewList()" style="padding:8px 16px;background:var(--amber);color:#000;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700">+ New list</button>
+    </div>`;
+
+  if (!visible.length) {
+    page.innerHTML = `${topBar}<div class="section"><div style="padding:24px;text-align:center;color:var(--ink-4)">No shopping lists match the current filters.</div></div>`;
+    return;
+  }
+
+  const open = visible.filter(l => l.status !== 'done');
+  const done = visible.filter(l => l.status === 'done');
+
   const renderList = l => {
-    const items = Array.isArray(l.items) ? l.items : [];
-    const checkedCount = items.filter(it => it.checked).length;
-    const rows = items.map((it, i) => `
-      <div onclick="shopToggleItem('${attrEsc(l.id)}',${i})" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer;background:${it.checked?'var(--bg-1)':'var(--bg-2)'}">
-        <span style="width:18px;height:18px;flex:none;border-radius:4px;border:1px solid var(--border-2);display:flex;align-items:center;justify-content:center;background:${it.checked?'var(--sage)':'transparent'};color:#fff;font-size:12px">${it.checked?'✓':''}</span>
-        <span style="flex:1;${it.checked?'color:var(--ink-4);text-decoration:line-through':''}">${attrEsc(it.name||'')}</span>
+    const rawItems = Array.isArray(l.items) ? l.items : [];
+    // Stable sort — items needing a supplier quote/special order float to the
+    // top; order within each group (special / normal) is otherwise unchanged.
+    const ordered = rawItems.map((it, i) => ({ it, i })).sort((a, b) => (b.it.special ? 1 : 0) - (a.it.special ? 1 : 0));
+    const checkedCount = rawItems.filter(it => it.checked).length;
+    const rows = ordered.map(({ it, i }) => {
+      const isSpecial = !!it.special;
+      const rowClick = isSpecial ? `shopShowSpecial('${attrEsc(l.id)}',${i})` : `shopToggleItem('${attrEsc(l.id)}',${i})`;
+      return `
+      <div onclick="${rowClick}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer;background:${it.checked?'var(--bg-1)':'var(--bg-2)'};${isSpecial?'border-left:3px solid var(--amber)':''}">
+        <span onclick="event.stopPropagation();shopToggleItem('${attrEsc(l.id)}',${i})" style="width:18px;height:18px;flex:none;border-radius:4px;border:1px solid var(--border-2);display:flex;align-items:center;justify-content:center;background:${it.checked?'var(--sage)':'transparent'};color:#fff;font-size:12px">${it.checked?'✓':''}</span>
+        <span style="flex:1;${it.checked?'color:var(--ink-4);text-decoration:line-through':''}">${attrEsc(it.name||'')}${isSpecial?' <span style="color:var(--amber);font-size:10px;font-weight:700;letter-spacing:.03em;margin-left:4px">⚡ SPECIAL ORDER</span>':''}</span>
         <span style="color:var(--ink-4);font-size:12px">${attrEsc(it.qty||'')}</span>
-      </div>`).join('');
+        ${isSpecial ? '<span style="color:var(--amber);font-size:14px">›</span>' : ''}
+      </div>`;
+    }).join('');
+    const expanded = !!SHOP.expanded[l.id];
     return `<div class="section" style="margin-bottom:12px">
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border)">
-        <div><strong>${attrEsc(l.title||l.project||l.id)}</strong>${l.project?`<div style="font-size:11px;color:var(--ink-4)">${attrEsc(l.project)}</div>`:''}</div>
+      <div onclick="shopToggleExpand('${attrEsc(l.id)}')" style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="color:var(--ink-4);font-size:11px;display:inline-block;transition:transform .15s;transform:rotate(${expanded?90:0}deg)">›</span>
+          <div><strong>${attrEsc(l.title||l.project||l.id)}</strong>${l.project?`<div style="font-size:11px;color:var(--ink-4)">${attrEsc(l.project)}</div>`:''}</div>
+        </div>
         <div style="display:flex;align-items:center;gap:10px">
-          <span style="font-size:11px;color:var(--ink-4)">${checkedCount}/${items.length}</span>
-          ${l.status!=='done' ? `<button onclick="shopSetStatus('${attrEsc(l.id)}','done')" style="padding:5px 10px;background:transparent;border:1px solid var(--border-2);color:var(--ink-3);border-radius:6px;cursor:pointer;font-size:11px">Mark done</button>`
-                               : `<button onclick="shopSetStatus('${attrEsc(l.id)}','open')" style="padding:5px 10px;background:transparent;border:1px solid var(--border-2);color:var(--ink-3);border-radius:6px;cursor:pointer;font-size:11px">Reopen</button>`}
+          <span style="font-size:11px;color:var(--ink-4)">${checkedCount}/${rawItems.length}</span>
+          ${l.status!=='done' ? `<button onclick="event.stopPropagation();shopSetStatus('${attrEsc(l.id)}','done')" style="padding:5px 10px;background:transparent;border:1px solid var(--border-2);color:var(--ink-3);border-radius:6px;cursor:pointer;font-size:11px">Mark done</button>`
+                               : `<button onclick="event.stopPropagation();shopSetStatus('${attrEsc(l.id)}','open')" style="padding:5px 10px;background:transparent;border:1px solid var(--border-2);color:var(--ink-3);border-radius:6px;cursor:pointer;font-size:11px">Reopen</button>`}
         </div>
       </div>
-      <div style="padding:8px">${rows || '<div style="padding:10px;color:var(--ink-4);font-size:12px">No items</div>'}</div>
+      ${expanded ? `<div style="padding:8px">${rows || '<div style="padding:10px;color:var(--ink-4);font-size:12px">No items</div>'}</div>` : ''}
     </div>`;
   };
-  page.innerHTML = `
-    <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
-      <button onclick="shopNewList()" style="padding:8px 16px;background:var(--amber);color:#000;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700">+ New list</button>
-    </div>
+
+  page.innerHTML = `${topBar}
     ${open.map(renderList).join('')}
     ${done.length ? `<div class="divider">Done</div>${done.map(renderList).join('')}` : ''}`;
+}
+
+// Special/custom-order item detail — supplier, lead time, specs, delivery
+// fee gathered at quoting time (see xero-mcp.js's create_quote `materials`),
+// plus a prefilled "Email supplier" draft and, if given, a link to order online.
+function shopShowSpecial(listId, idx) {
+  const list = (D.shopping_lists || []).find(l => l.id === listId);
+  if (!list) return;
+  const items = Array.isArray(list.items) ? list.items : [];
+  const it = items[idx];
+  if (!it) return;
+  const job = list.project || list.title || '';
+
+  const subject = encodeURIComponent(`Order enquiry — ${it.name || 'materials'}${job ? ' — ' + job : ''}`);
+  const bodyLines = [
+    `Hi${it.supplier ? ' ' + it.supplier : ''},`, '',
+    'Could you please confirm availability, price and delivery for:',
+    `- ${it.name || ''}${it.qty ? ' — qty ' + it.qty : ''}`,
+    it.specs ? `Specs: ${it.specs}` : '', '',
+    job ? `This is for job: ${job}.` : '',
+    'Thanks,', 'Sebastien — Matiere'
+  ].filter(Boolean);
+  const mailto = `mailto:${it.supplier_email ? encodeURIComponent(it.supplier_email) : ''}?subject=${subject}&body=${encodeURIComponent(bodyLines.join('\n'))}`;
+
+  const detailRows = [
+    ['Supplier', it.supplier],
+    ['Lead time', it.lead_time],
+    ['Specs', it.specs],
+    ['Delivery fee', it.delivery_fee != null ? fmt(it.delivery_fee) : null],
+    ['Qty', it.qty]
+  ].filter(r => r[1]).map(r => `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px"><span style="color:var(--ink-4)">${r[0]}</span><span>${attrEsc(String(r[1]))}</span></div>`).join('');
+
+  openModal(attrEsc(it.name || 'Special order item'), `
+    <div style="margin-bottom:14px">${detailRows || '<div style="color:var(--ink-4);font-size:12px">No supplier details captured for this item yet — add them via the Claude bar or the xero-mcp create_quote call.</div>'}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <a href="${mailto}" style="padding:8px 16px;background:var(--amber);color:#000;border-radius:6px;font-size:13px;font-weight:700;text-decoration:none">✉ Email supplier</a>
+      ${it.order_url ? `<a href="${attrEsc(it.order_url)}" target="_blank" rel="noopener" style="padding:8px 16px;background:transparent;border:1px solid var(--border-2);color:var(--ink-2);border-radius:6px;font-size:13px;font-weight:700;text-decoration:none">🛒 Order online</a>` : ''}
+    </div>
+  `);
 }
 
 async function shopToggleItem(id, idx) {
@@ -3870,6 +3982,70 @@ async function ssLoadContacts() {
 }
 const ssProjectNames = () => (D && D.projects ? D.projects.map(p => p.name).filter(Boolean) : []);
 
+// -- Fuzzy project matching (client mirror of claude-parse.js's server-side
+// matcher) --------------------------------------------------------------
+// Bug (2026-09-24): the Scan Receipt project fields (per-line + "apply to all")
+// only accepted an exact (case-insensitive) match -- anything else was saved
+// verbatim with no warning, so a typo/partial name silently never linked to
+// the real project. Natural-language entries via the Claude bar already get
+// this fuzzy behaviour server-side; this brings the same logic client-side.
+function ssTokenise(str) {
+  return String(str || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);
+}
+
+// Valid project names ordered so a tied fuzzy score resolves to the project
+// Seb most likely means: Active projects first, then most recently created.
+function ssProjectCandidates() {
+  const projects = (D && D.projects) ? D.projects.slice() : [];
+  return projects
+    .filter(p => p.name)
+    .sort((a, b) => {
+      const aActive = a.status === 'Active' ? 0 : 1;
+      const bActive = b.status === 'Active' ? 0 : 1;
+      if (aActive !== bActive) return aActive - bActive;
+      return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+    })
+    .map(p => p.name);
+}
+
+// name: typed text. candidates: ordered valid names (earlier = preferred on a tie).
+// Returns {match, score} -- score 1.0 = exact, else token-overlap 0..1, null match if none.
+function fuzzyMatchProject(name, candidates) {
+  const clean = (name || '').trim();
+  if (!clean) return { match: null, score: 0 };
+  const exact = candidates.find(c => c.toLowerCase() === clean.toLowerCase());
+  if (exact) return { match: exact, score: 1.0 };
+  const inputTokens = ssTokenise(clean);
+  let bestMatch = null, bestScore = 0;
+  for (const c of candidates) {
+    const cTokens = ssTokenise(c);
+    const overlap = inputTokens.filter(t => cTokens.includes(t)).length;
+    const score = overlap / Math.max(inputTokens.length, cTokens.length, 1);
+    if (score > bestScore) { bestScore = score; bestMatch = c; }
+  }
+  return { match: bestMatch, score: bestScore };
+}
+
+// Canonicalise a typed project name into RC.items[idx].project -- same 0.6
+// confidence threshold as the server-side matcher. Flags the row as
+// unmatched (amber outline, same as a blank field) rather than silently
+// saving unlinkable free text when nothing is confident enough.
+function rcApplyProjectToRow(idx, typed, inp) {
+  const raw = (typed || '').trim();
+  if (!raw) { RC.items[idx].project = ''; RC.items[idx]._projUnmatched = false; if (inp) inp.value = ''; return; }
+  const { match, score } = fuzzyMatchProject(raw, [...ssProjectCandidates(), ...NON_BILLABLE]);
+  if (match && score >= 0.6) {
+    RC.items[idx].project = match;
+    RC.items[idx]._projUnmatched = false;
+    if (inp) inp.value = match;
+    if (score < 1) claudeToast(`Matched "${raw}" -> "${match}"`, 'success', 2000);
+  } else {
+    RC.items[idx].project = raw;
+    RC.items[idx]._projUnmatched = true;
+    claudeToast(`No project match for "${raw}" - pick from the list or it won't be linked`, 'unclear');
+  }
+}
+
 // Escape a value for safe use inside an HTML attribute (value="…")
 function attrEsc(s) {
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -4492,7 +4668,7 @@ function rcRenderTable() {
       <tbody>
         ${RC.items.map((it,i) => {
           const lowCat  = !it.category;
-          const lowProj = !it.project;
+          const lowProj = !it.project || it._projUnmatched;
           return `
           <tr data-row="${i}" style="border-top:1px solid var(--border);background:${it._inc?(i%2===0?'var(--bg-1)':'var(--bg-2)'):'transparent'};opacity:${it._inc?1:0.45}">
             <td style="text-align:center"><input type="checkbox" class="rc-inc" data-idx="${i}" ${it._inc?'checked':''}></td>
@@ -4519,10 +4695,11 @@ function rcRenderTable() {
     inp.addEventListener('blur',  () => { inp.style.border='1px solid transparent'; inp.style.background='transparent'; });
     inp.addEventListener('keydown', e => { if (e.key==='Enter') inp.blur(); });
     inp.addEventListener('change', () => {
-      RC.items[idx][field] = (field==='qty'||field==='unit_price') ? (parseFloat(inp.value)||0) : inp.value.trim();
-      if (field==='qty'||field==='unit_price') rcRecalc(idx);
+      if (field === 'qty' || field === 'unit_price') { RC.items[idx][field] = parseFloat(inp.value) || 0; rcRecalc(idx); return; }
+      if (field === 'project') { rcApplyProjectToRow(idx, inp.value, inp); return; }
+      RC.items[idx][field] = inp.value.trim();
     });
-    if (field === 'project')  smartSuggest(inp, ssProjectNames, v => { RC.items[idx].project = v; }, raw => rcCreateProj(raw, p => { RC.items[idx].project = p.name; inp.value = p.name; }));
+    if (field === 'project')  smartSuggest(inp, ssProjectNames, v => { RC.items[idx].project = v; RC.items[idx]._projUnmatched = false; }, raw => rcCreateProj(raw, p => { RC.items[idx].project = p.name; RC.items[idx]._projUnmatched = false; inp.value = p.name; }));
     if (field === 'category') smartSuggest(inp, () => EX_CATEGORIES || [], v => { RC.items[idx].category = v; });
   });
   // "Allocate one project to every line" control
@@ -4559,18 +4736,25 @@ async function rcCreateProj(name, cb) {
   } catch (e) { claudeToast('⚠ ' + (e.message || 'Could not create project'), 'error'); }
 }
 
-// Feature 5 — apply one project to every parsed line at once.
+// Feature 5 -- apply one project to every parsed line at once.
 function rcApplyProjectAll() {
   const inp = document.getElementById('rc-allproj');
   const val = (inp && inp.value || '').trim();
   if (!val) { claudeToast('Type or pick a project first', 'unclear'); return; }
-  // Canonicalise to an existing project name (case-insensitive) when possible.
-  const match = ssProjectNames().find(n => n.toLowerCase() === val.toLowerCase())
-             || NON_BILLABLE.find(n => n.toLowerCase() === val.toLowerCase()) || val;
-  (RC.items || []).forEach(it => { it.project = match; });
+  // Fuzzy-canonicalise (same logic + 0.6 threshold as the Claude-bar timesheet/
+  // expense parser) instead of requiring an exact match.
+  const { match, score } = fuzzyMatchProject(val, [...ssProjectCandidates(), ...NON_BILLABLE]);
+  const unmatched = !(match && score >= 0.6);
+  const final = unmatched ? val : match;
+  (RC.items || []).forEach(it => { it.project = final; it._projUnmatched = unmatched; });
+  if (inp) inp.value = final;
   rcRenderTable();
   const n = (RC.items || []).length;
-  claudeToast(`✓ "${match}" set on ${n} line${n !== 1 ? 's' : ''}`, 'success');
+  if (unmatched) {
+    claudeToast(`No project match for "${val}" - set as typed on ${n} line${n !== 1 ? 's' : ''}, but it won't link to a real project`, 'unclear');
+  } else {
+    claudeToast(`"${final}" set on ${n} line${n !== 1 ? 's' : ''}${score < 1 ? ` (matched from "${val}")` : ''}`, 'success');
+  }
 }
 
 // Discard a parsed receipt without saving. Keeps the attached file(s) so Seb can

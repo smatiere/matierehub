@@ -2,6 +2,68 @@
 
 **Purpose:** accumulate many edits locally, deploy ONCE. Editing files is free; only a push to `main` triggers a Netlify build (= credits). See CLAUDE.md → "Deploying changes" for the full workflow.
 
+## Fix + feature — 2026-09-24b (Shopping List: filters, priority items, collapse — not yet deployed)
+
+Root cause of the Shopping List tab showing nothing at all (SL-002 → SL-005) was fixed
+separately the same day — RLS was enabled on `shopping_lists` with no policy, silently
+returning `[]` to the anon key; Seb disabled RLS directly in Supabase (no code change,
+already live). This batch is the follow-up UX Seb asked for once the tab was visible again:
+
+1. **Filters at the top of the tab** (`shopFilterBar`, `SHOP` state, `index.html`) — by
+   default the tab now only shows lists for non-"Quoted" projects that aren't marked done.
+   Two pill toggles reveal the rest: "Done (N hidden)" and "Quoted-only jobs (N hidden)".
+   Project status is looked up by matching `shopping_lists.project` to `projects.name`
+   (case-insensitive); a list whose project can't be matched is shown (fails open, not hidden).
+2. **Special/custom-order items float to the top + get a detail popup** — `items` (JSONB,
+   no schema change needed) can now carry optional `special`, `supplier`, `supplier_email`,
+   `lead_time`, `specs`, `delivery_fee`, `order_url` per item, captured at quoting time via
+   `netlify/functions/xero-mcp.js`'s `create_quote` `materials` array (schema extended,
+   `createShoppingList` carries the fields through). A `special:true` item gets an amber
+   left-border + "⚡ SPECIAL ORDER" tag and sorts above normal items (stable sort — order
+   within each group unchanged). Tapping a special item opens a modal (`shopShowSpecial`)
+   with whatever details were captured, a "✉ Email supplier" mailto: link (prefilled subject
+   + body from the item/job), and a "🛒 Order online" link when `order_url` is set. Tapping
+   its checkbox (not the row) still ticks it off directly, same as a normal item.
+3. **Collapse by default** — only the most recent open list starts expanded
+   (`SHOP.expanded`, lazily defaulted once); every other list starts collapsed with a
+   chevron, click the header to expand/collapse. State is in-memory only (resets on reload),
+   consistent with the rest of the tab's UI state elsewhere in the Hub.
+
+Files: `index.html`, `netlify/functions/xero-mcp.js`. No Supabase schema change (items stays
+JSONB). Syntax-checked locally (`node -c`). **Not yet deployed** — needs the next batch push,
+same as the fuzzy-match fix below.
+
+---
+
+## Fix — 2026-09-24 (Scan Receipt project field — fuzzy match, not yet deployed)
+
+Seb reported: on a multi-line scanned receipt, editing a line's Project field (or the
+"apply one project to every line" box) required typing the EXACT existing project name —
+anything close-but-not-exact (e.g. "mark" instead of "Mark - Nth Balgowlah") was saved
+verbatim with no warning, so the line silently never linked to the real project.
+
+Root cause: `rcApplyProjectAll()` only did a case-insensitive exact-string match, and the
+per-line `rc-cell[data-field="project"]` change handler did no matching at all — it just
+saved whatever was typed. Meanwhile natural-language entries via the Claude bar
+(`claude-parse.js`'s `fuzzyMatchProject`, three-tier token-overlap scoring, 0.6 confidence
+threshold) already handle this correctly server-side.
+
+Fix — brought the same fuzzy-match logic client-side (`index.html`):
+- New `fuzzyMatchProject(name, candidates)` — token-overlap scorer mirroring
+  claude-parse.js's server-side matcher exactly (same 0.6 threshold).
+- New `ssProjectCandidates()` — valid project names ordered Active-first, then most
+  recently created, so a tied score resolves to the more likely intended project.
+- Per-line project field (`rc-cell[data-field="project"]` change handler, via new
+  `rcApplyProjectToRow()`) and `rcApplyProjectAll()` both now canonicalise typed text
+  through this matcher instead of requiring an exact match.
+- If nothing scores >= 0.6, the typed text is kept but the row is flagged (amber outline,
+  same treatment as a blank field, via `it._projUnmatched`) and a toast warns it won't
+  link to a real project — previously this failed completely silently.
+
+**Not yet deployed** — committed locally only. Add to the next batch push.
+
+---
+
 **Status:** ⏳ Pending — three features built 2026-09-18, not yet deployed (needs one `supabase_shopping_list_and_baseline.sql` run + one `git push` + `MCP_SHARED_SECRET` env var + connector registration in Claude).
 
 ---
