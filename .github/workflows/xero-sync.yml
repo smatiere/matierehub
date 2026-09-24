@@ -51,7 +51,7 @@ jobs:
 
       - name: Sync bank_transactions from Xero
         run: |
-          response=$(curl -s -w "\n%{http_code}" -X POST "https://matierehub2.netlify.app/.netlify/functions/xero-sync?scope=bank_transactions" -H "Authorization: Bearer ${{ secrets.SYNC_SECRET }}" -H "Content-Type: application/json")
+          response=$(curl -s -w "\n%{http_code}" -X POST "https://matierehub2.netlify.app/.netlify/functions/xero-sync?scope=bank_transactions&days=100" -H "Authorization: Bearer ${{ secrets.SYNC_SECRET }}" -H "Content-Type: application/json")
           http_code=$(echo "$response" | tail -1)
           body=$(echo "$response" | head -n -1)
           echo "HTTP status: $http_code"
