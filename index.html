@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="Matiere Hub">
-<link rel="apple-touch-icon" href="logo.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <title>Matière Hub</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
@@ -103,6 +103,7 @@ tr:hover td{background:var(--bg-3)}
 .badge-red{background:rgba(255,0,110,.15);color:var(--pink)}
 .badge-blue{background:rgba(58,134,255,.15);color:var(--blue)}
 .badge-gray{background:var(--bg-3);color:var(--ink-4)}
+.badge-purple{background:rgba(131,56,236,.15);color:var(--purple)}
 
 /* ── Mini bars ── */
 .mini-bar{background:var(--bg-3);border-radius:2px;height:4px;overflow:hidden;margin-top:6px}
@@ -119,6 +120,20 @@ tr:hover td{background:var(--bg-3)}
 .spinner-sm{width:14px;height:14px;border:2px solid var(--border-2);border-top-color:var(--amber);border-radius:50%;animation:spin .7s linear infinite;display:inline-block}
 @keyframes spin{to{transform:rotate(360deg)}}
 #error-box{display:none;background:rgba(255,0,110,.1);border:1px solid rgba(255,0,110,.3);border-radius:var(--r);padding:16px;margin:20px;color:var(--pink);font-size:13px}
+#hub-gate{display:none;position:fixed;inset:0;background:#000;z-index:2000;align-items:center;justify-content:center;padding:20px}
+.hub-gate-card{width:100%;max-width:300px;text-align:center}
+.hub-gate-title{font-size:16px;font-weight:700;letter-spacing:.22em;color:var(--ink);margin-bottom:4px}
+.hub-gate-sub{font-size:11px;color:var(--ink-4);letter-spacing:.06em;margin-bottom:22px;text-transform:uppercase}
+#hub-gate-pw{width:100%;background:var(--bg-3);border:1px solid var(--border-2);color:var(--ink);padding:11px 14px;border-radius:var(--r);font-size:14px;outline:none;text-align:center;margin-bottom:12px}
+#hub-gate-pw:focus{border-color:var(--amber)}
+.hub-gate-pw-wrap{position:relative;margin-bottom:12px}
+.hub-gate-pw-wrap #hub-gate-pw{margin-bottom:0;padding-right:52px}
+#hub-gate-pw-toggle{position:absolute;top:0;right:0;bottom:0;width:44px;background:none;border:none;color:var(--ink-4);font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;cursor:pointer}
+#hub-gate-pw-toggle:hover{color:var(--ink-2)}
+#hub-gate-btn{width:100%;background:var(--amber);color:#000;border:none;padding:11px;border-radius:var(--r);font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;transition:background .15s}
+#hub-gate-btn:hover:not(:disabled){background:var(--gold-2)}
+#hub-gate-btn:disabled{opacity:.5;cursor:not-allowed}
+#hub-gate-error{display:none;margin-top:14px;font-size:12px;color:var(--pink)}
 
 /* ── Log entries ── */
 .log-entry{padding:12px 0;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:12px}
@@ -142,8 +157,9 @@ tr:hover td{background:var(--bg-3)}
 @keyframes modalIn{from{transform:translateY(12px);opacity:0}to{transform:translateY(0);opacity:1}}
 .modal-head{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;border-radius:8px 8px 0 0}
 .modal-head h3{font-size:14px;font-weight:600;color:var(--ink);letter-spacing:.02em}
-.modal-close{background:var(--bg-3);border:1px solid var(--border);font-size:14px;cursor:pointer;color:var(--ink-3);line-height:1;padding:4px 9px;border-radius:var(--r)}
+.modal-close{background:var(--bg-3);border:1px solid var(--border);font-size:17px;cursor:pointer;color:var(--ink-3);line-height:1;padding:9px 14px;border-radius:var(--r);min-width:40px;min-height:40px;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
 .modal-close:hover{color:var(--ink)}
+.modal-close:active{background:var(--bg-1);color:var(--ink)}
 .modal-body{padding:20px;max-height:72vh;overflow-y:auto}
 .modal-body .kpi{padding:12px}
 .modal-body .kpi-value{font-size:20px}
@@ -225,6 +241,23 @@ body{padding-bottom:62px}
 </head>
 <body>
 
+<div id="hub-gate">
+  <div class="hub-gate-card">
+    <img src="https://raw.githubusercontent.com/smatiere/matierehub/main/logo.png"
+         alt="Matiere" height="26"
+         style="display:block;filter:invert(1);image-rendering:crisp-edges;margin:0 auto 18px">
+    <div class="hub-gate-title">MATIÈRE HUB</div>
+    <div class="hub-gate-sub">Enter password to continue</div>
+    <div class="hub-gate-pw-wrap">
+      <input id="hub-gate-pw" type="password" placeholder="Password" autocomplete="current-password"
+             onkeydown="if(event.key==='Enter') hubTryLogin()">
+      <button id="hub-gate-pw-toggle" type="button" onclick="hubToggleGatePw()">Show</button>
+    </div>
+    <button id="hub-gate-btn" onclick="hubTryLogin()">Unlock</button>
+    <div id="hub-gate-error"></div>
+  </div>
+</div>
+
 <div id="loading"><div class="spinner"></div><span style="font-size:12px;letter-spacing:.08em">LOADING MATIÈRE HUB</span></div>
 <div id="error-box"></div>
 
@@ -253,6 +286,7 @@ body{padding-bottom:62px}
   <div class="tab" onclick="showTab('transactions',this)">Transactions</div>
   <div class="tab" onclick="showTab('receipts',this)">Scan Receipt</div>
   <div class="tab" onclick="showTab('expenses',this)">Expenses</div>
+  <div class="tab" onclick="showTab('shopping',this)">Shopping List</div>
   <div class="tab" onclick="showTab('action',this)">For Action <span id="fa-count" style="display:none;background:var(--orange);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;font-weight:600;margin-left:4px"></span></div>
 </div>
 
@@ -263,6 +297,7 @@ body{padding-bottom:62px}
 <div class="page" id="page-transactions"></div>
 <div class="page" id="page-receipts"></div>
 <div class="page" id="page-expenses"></div>
+<div class="page" id="page-shopping"></div>
 <div class="page" id="page-action"></div>
 
 <div id="modal-overlay" class="modal-overlay" onclick="if(event.target===this)closeModal()">
@@ -334,7 +369,7 @@ async function hubWrite(table, id, fields) {
 // ── Data load — live from Supabase ────────────────────────────────────────────
 async function loadData() {
   try {
-    const [timesheets, expenses, projects, xeroRows, invoiceItems, quoteItems] = await Promise.all([
+    const [timesheets, expenses, projects, xeroRows, invoiceItems, quoteItems, shoppingLists] = await Promise.all([
       sbGet('/rest/v1/timesheets?select=*&order=date.asc,id.asc'),
       sbGet('/rest/v1/expense_log?select=*&order=date.asc,id.asc'),
       sbGet('/rest/v1/projects?select=*&order=id.asc'),
@@ -344,7 +379,10 @@ async function loadData() {
       // supabase_quote_items_setup.sql in the Supabase SQL editor it 404s.
       // Swallow that one failure so a missing table doesn't take down the
       // whole HUB; quote-linking just stays empty until the table exists.
-      sbGet('/rest/v1/quote_items?select=id,quote_number,contact,contact_id,line_amount,status,date,expiry_date,description,item,project').catch(() => [])
+      sbGet('/rest/v1/quote_items?select=id,quote_number,contact,contact_id,line_amount,status,date,expiry_date,description,item,project').catch(() => []),
+      // shopping_lists (added 2026-09-18) — same "table might not exist yet"
+      // guard until supabase_shopping_list_and_baseline.sql has been run.
+      sbGet('/rest/v1/shopping_lists?select=*&order=created_at.desc').catch(() => [])
     ]);
 
     const xero = {};
@@ -356,6 +394,7 @@ async function loadData() {
       projects,
       invoice_items:        invoiceItems,
       quote_items:          quoteItems,
+      shopping_lists:       shoppingLists,
       kpis:                 xero.kpis                 || {},
       monthly:              xero.monthly              || { labels:[], periods:[], revenue:[], materials:[], wages_owner:[] },
       open_invoices:        xero.open_invoices        || [],
@@ -562,6 +601,44 @@ async function projConvertAutoMatched(name) {
   renderProjects(D.kpis);
 }
 
+// Job-status baseline (2026-09-18) — projects.baseline_* is set once, when a
+// quote is approved (normally by the Xero MCP connector's create_quote tool),
+// capturing the agreed scope/price/labour-materials estimate. This block
+// compares that baseline against actuals already computed by showProjectDetail
+// (timesheets hours, expense_log total) so Seb can see at a glance whether a
+// job ran on-budget, over/under on materials, or over/under on time. Read-only
+// here — edit baseline_* via Supabase/hub-write directly if it needs correcting.
+function projRenderBaseline(defined, actualHours, actualMaterials, rate) {
+  if (!defined || defined.baseline_set_at == null) return '';
+  const bHours = defined.baseline_labour_hours != null ? Number(defined.baseline_labour_hours) : null;
+  const bMat   = defined.baseline_materials_estimate != null ? Number(defined.baseline_materials_estimate) : null;
+  const bPrice = defined.baseline_price != null ? Number(defined.baseline_price) : null;
+  const hoursDelta = bHours != null ? actualHours - bHours : null;
+  const matDelta   = bMat != null ? actualMaterials - bMat : null;
+  const deltaStyle = d => d == null ? 'var(--ink-4)' : d > 0 ? 'var(--orange)' : 'var(--sage)';
+  const deltaText  = (d, unit) => d == null ? '—' : (d > 0 ? '+' : '') + d.toFixed(unit==='h'?1:0) + (unit==='h'?'h':'') + (d>0?' over':d<0?' under':' on budget');
+  return `<div style="margin-bottom:20px">
+    <div class="divider" style="margin-top:0">Baseline (quoted ${new Date(defined.baseline_set_at).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'})})</div>
+    ${defined.baseline_scope ? `<div style="font-size:12px;color:var(--ink-3);margin-bottom:10px;padding:8px 10px;background:var(--bg-2);border-radius:6px">${attrEsc(defined.baseline_scope)}</div>` : ''}
+    <div style="display:flex;flex-wrap:wrap;gap:12px">
+      <div style="flex:1;min-width:140px;padding:10px 12px;background:var(--bg-2);border-radius:8px">
+        <div style="font-size:10px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">Price quoted</div>
+        <div style="font-size:16px;font-weight:700">${bPrice!=null?fmt(bPrice):'—'}</div>
+      </div>
+      <div style="flex:1;min-width:140px;padding:10px 12px;background:var(--bg-2);border-radius:8px">
+        <div style="font-size:10px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">Labour — baseline vs actual</div>
+        <div style="font-size:16px;font-weight:700">${bHours!=null?bHours+'h':'—'} <span style="font-size:12px;font-weight:400;color:var(--ink-4)">vs ${actualHours}h</span></div>
+        <div style="font-size:11px;color:${deltaStyle(hoursDelta)}">${deltaText(hoursDelta,'h')}</div>
+      </div>
+      <div style="flex:1;min-width:140px;padding:10px 12px;background:var(--bg-2);border-radius:8px">
+        <div style="font-size:10px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">Materials — baseline vs actual</div>
+        <div style="font-size:16px;font-weight:700">${bMat!=null?fmt(bMat):'—'} <span style="font-size:12px;font-weight:400;color:var(--ink-4)">vs ${fmt(actualMaterials)}</span></div>
+        <div style="font-size:11px;color:${deltaStyle(matDelta)}">${deltaText(matDelta,'$')}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
 // Scope of Work — read-only, auto-derived from whatever's linked to the job.
 // Was previously a free-text box (projects.scope_of_work); Seb's ask 2026-07-10:
 // it looked like a manual input and duplicated info already sitting on the
@@ -606,7 +683,96 @@ function showTab(name, el) {
   if (name === 'expenses') renderExpenses();
   if (name === 'receipts') renderReceipts();
   if (name === 'action') renderForAction();
+  if (name === 'shopping') renderShopping();
   if (name === 'projects' && D) renderProjects(D.kpis);
+}
+
+// ── Shopping List (2026-09-18) ─────────────────────────────────────────────
+// One row per job's materials list (shopping_lists.items is a JSONB array of
+// {name, qty, checked}). Tapping an item toggles `checked` and PATCHes the
+// whole items array via hubWrite — simplest possible sync from the phone
+// while shopping. Lists are normally created by the Xero MCP connector's
+// create_quote tool (job approved → shopping list of materials); the "+ New
+// list" button here covers the odd manual case.
+async function renderShopping() {
+  const page = document.getElementById('page-shopping');
+  const lists = (D && D.shopping_lists) || [];
+  if (!lists.length) {
+    page.innerHTML = `<div class="section"><div style="padding:24px;text-align:center;color:var(--ink-4)">
+      No shopping lists yet. These are created automatically when a quote is approved via the Xero connector, or start one by hand:
+      <div style="margin-top:12px"><button onclick="shopNewList()" style="padding:8px 16px;background:var(--amber);color:#000;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700">+ New list</button></div>
+    </div></div>`;
+    return;
+  }
+  const open = lists.filter(l => l.status !== 'done');
+  const done = lists.filter(l => l.status === 'done');
+  const renderList = l => {
+    const items = Array.isArray(l.items) ? l.items : [];
+    const checkedCount = items.filter(it => it.checked).length;
+    const rows = items.map((it, i) => `
+      <div onclick="shopToggleItem('${attrEsc(l.id)}',${i})" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer;background:${it.checked?'var(--bg-1)':'var(--bg-2)'}">
+        <span style="width:18px;height:18px;flex:none;border-radius:4px;border:1px solid var(--border-2);display:flex;align-items:center;justify-content:center;background:${it.checked?'var(--sage)':'transparent'};color:#fff;font-size:12px">${it.checked?'✓':''}</span>
+        <span style="flex:1;${it.checked?'color:var(--ink-4);text-decoration:line-through':''}">${attrEsc(it.name||'')}</span>
+        <span style="color:var(--ink-4);font-size:12px">${attrEsc(it.qty||'')}</span>
+      </div>`).join('');
+    return `<div class="section" style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border)">
+        <div><strong>${attrEsc(l.title||l.project||l.id)}</strong>${l.project?`<div style="font-size:11px;color:var(--ink-4)">${attrEsc(l.project)}</div>`:''}</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:11px;color:var(--ink-4)">${checkedCount}/${items.length}</span>
+          ${l.status!=='done' ? `<button onclick="shopSetStatus('${attrEsc(l.id)}','done')" style="padding:5px 10px;background:transparent;border:1px solid var(--border-2);color:var(--ink-3);border-radius:6px;cursor:pointer;font-size:11px">Mark done</button>`
+                               : `<button onclick="shopSetStatus('${attrEsc(l.id)}','open')" style="padding:5px 10px;background:transparent;border:1px solid var(--border-2);color:var(--ink-3);border-radius:6px;cursor:pointer;font-size:11px">Reopen</button>`}
+        </div>
+      </div>
+      <div style="padding:8px">${rows || '<div style="padding:10px;color:var(--ink-4);font-size:12px">No items</div>'}</div>
+    </div>`;
+  };
+  page.innerHTML = `
+    <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+      <button onclick="shopNewList()" style="padding:8px 16px;background:var(--amber);color:#000;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700">+ New list</button>
+    </div>
+    ${open.map(renderList).join('')}
+    ${done.length ? `<div class="divider">Done</div>${done.map(renderList).join('')}` : ''}`;
+}
+
+async function shopToggleItem(id, idx) {
+  const list = (D.shopping_lists||[]).find(l => l.id === id);
+  if (!list) return;
+  const items = Array.isArray(list.items) ? [...list.items] : [];
+  if (!items[idx]) return;
+  items[idx] = { ...items[idx], checked: !items[idx].checked };
+  try {
+    const row = await hubWrite('shopping_lists', id, { items });
+    list.items = row.items;
+    renderShopping();
+  } catch (e) { claudeToast('Could not save: ' + e.message, 'error'); }
+}
+
+async function shopSetStatus(id, status) {
+  try {
+    const row = await hubWrite('shopping_lists', id, { status });
+    const list = (D.shopping_lists||[]).find(l => l.id === id);
+    if (list) list.status = row.status;
+    renderShopping();
+  } catch (e) { claudeToast('Could not save: ' + e.message, 'error'); }
+}
+
+async function shopNewList() {
+  const project = prompt('Job / project name for this list:');
+  if (!project) return;
+  const itemsRaw = prompt('Materials, one per line (e.g. "10x 90mm screws"):');
+  if (!itemsRaw) return;
+  const items = itemsRaw.split('\n').map(l => l.trim()).filter(Boolean).map(name => ({ name, qty: '', checked: false }));
+  try {
+    const r = await fetch('/.netlify/functions/hub-write', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ table: 'shopping_lists', insert: true, fields: { project, title: project, items, status: 'open' } })
+    });
+    const out = await r.json();
+    if (!r.ok || !out.ok) throw new Error(out.error || 'insert failed');
+    D.shopping_lists = [out.row, ...(D.shopping_lists||[])];
+    renderShopping();
+  } catch (e) { claudeToast('Could not create list: ' + e.message, 'error'); }
 }
 
 function kpi(label, value, sub, style='') {
@@ -659,8 +825,11 @@ let projFilterText   = '';
 let projFilterStatus = 'Active';   // default filter per spec
 let PROJ_SORTED       = [];        // cached billable rows for projRenderRows() (avoids re-aggregating per keystroke)
 
-const PROJECT_STATUSES   = ['Active','Finished','Paid','Inactive'];
-const PROJ_STATUS_BADGE  = { Active:'badge-green', Finished:'badge-blue', Paid:'badge-amber', Inactive:'badge-gray' };
+// 'Quoted' added 2026-09-18 — set automatically when a quote is approved via
+// the Xero MCP connector (job-status baseline feature); still hand-changeable
+// like any other status via the pills in showProjectDetail().
+const PROJECT_STATUSES   = ['Quoted','Active','Finished','Paid','Inactive'];
+const PROJ_STATUS_BADGE  = { Quoted:'badge-purple', Active:'badge-green', Finished:'badge-blue', Paid:'badge-amber', Inactive:'badge-gray' };
 
 function projStatusBadge(status) {
   const s = status || 'Active';
@@ -1151,6 +1320,7 @@ function showProjectDetail(name) {
       <div><strong style="color:var(--ink-2)">Span:</strong> ${span!=null?span+'d':'—'}</div>
       <div><strong style="color:var(--ink-2)">Dilution:</strong> ${dilutionPct!=null?dilutionPct.toFixed(0)+'% ('+hrPerDay.toFixed(1)+'h/d)':'—'}</div>
     </div>
+    ${projRenderBaseline(defined, totalHours, totalExpenses, rate)}
     ${scopeSection}
     ${linksSection}
     <div style="margin-bottom:20px">
@@ -1158,7 +1328,10 @@ function showProjectDetail(name) {
       <table><thead><tr><th>Date</th><th>By</th><th>Notes</th><th style="text-align:right">Hours</th><th style="text-align:right">Value</th></tr></thead><tbody>${tsRows}</tbody></table>
     </div>
     <div>
-      <div class="divider">Expenses</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px" class="divider">
+        <span>Expenses</span>
+        <span onclick="rcStartForProject('${safe}')" style="cursor:pointer;color:var(--amber);font-weight:700;font-size:12px;white-space:nowrap;text-transform:none;letter-spacing:normal">📷 Scan a receipt for this job</span>
+      </div>
       <table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right">Amount</th></tr></thead><tbody>${expRows}</tbody></table>
     </div>`);
 }
@@ -4099,7 +4272,19 @@ async function exSaveCell(inp) {
 // Seb corrects project/category/qty/price, excludes junk lines, then Save commits
 // the batch via the existing expense_batch path (pendingAction). Second sub-view
 // is a Materials Catalog deduped from expense_log, for reuse when quoting.
-const RC = { view:'scan', items:null, supplier:'', files:[], parsing:false, catSearch:'', catSupplier:'', catProject:'' };
+const RC = { view:'scan', items:null, supplier:'', files:[], parsing:false, catSearch:'', catSupplier:'', catProject:'', presetProject:null,
+             xeroAccounts:null, xeroBankAccountId:null, xeroExport:true };
+
+// Entry point from a Project card's "📷 Scan a receipt for this job" button
+// (2026-09-24, Seb's ask) — jumps straight to the Scan Receipt tab with the
+// project pre-set, so parsed lines are allocated without retyping the name.
+function rcStartForProject(name) {
+  closeModal();
+  RC.view = 'scan'; RC.items = null; RC.files = []; RC.supplier = '';
+  RC.presetProject = name; RC.note = name;
+  const tabEl = [...document.querySelectorAll('.tab')].find(t => /'receipts'/.test(t.getAttribute('onclick') || ''));
+  showTab('receipts', tabEl);
+}
 
 async function renderReceipts() {
   const el = document.getElementById('page-receipts');
@@ -4129,7 +4314,14 @@ function rcRenderScan() {
   const body = document.getElementById('rc-body');
   if (!body) return;
   const inp = 'padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:13px';
+  const presetBanner = RC.presetProject ? `
+    <div style="display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;margin-bottom:14px;font-size:12px">
+      <span style="color:var(--ink-4)">Scanning for job:</span>
+      <strong style="color:var(--sage)">${attrEsc(RC.presetProject)}</strong>
+      <span onclick="RC.presetProject=null;rcRenderScan()" style="cursor:pointer;color:var(--ink-4);margin-left:auto" title="Clear — don't allocate to a project">✕ clear</span>
+    </div>` : '';
   body.innerHTML = `
+    ${presetBanner}
     <div id="rc-drop" style="border:2px dashed var(--border-2);border-radius:12px;padding:26px;text-align:center;background:var(--bg-2);cursor:pointer;transition:all .15s"
          onclick="document.getElementById('rc-file-input').click()">
       <div style="font-size:30px;margin-bottom:8px">🧾</div>
@@ -4229,6 +4421,10 @@ async function rcParse() {
     }
     RC.items = data.items.map(it => ({ ...it, _inc: true }));
     RC.supplier = data.supplier || RC.items.find(i=>i.supplier)?.supplier || '';
+    // Came from a Project card ("scan a receipt for this job") — allocate any
+    // line the parser didn't already guess a project for, rather than leaving
+    // it blank for Seb to type out. He can still edit or override per-line.
+    if (RC.presetProject) RC.items.forEach(it => { if (!it.project) it.project = RC.presetProject; });
     rcRenderTable();
   } catch(err) {
     if (prev) prev.innerHTML = `<div style="color:var(--pink);padding:20px;text-align:center">⚠ ${(err.message||'Parse failed').replace(/</g,'&lt;')}</div>`;
@@ -4277,10 +4473,11 @@ function rcRenderTable() {
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px;padding:10px 12px;background:var(--bg-2);border-radius:8px">
       <span style="font-size:12px;color:var(--ink-3)">Allocate one project to every line:</span>
-      <input type="text" id="rc-allproj" placeholder="Project…" style="${cell.replace('transparent','var(--bg-1)')};border-color:var(--border);min-width:160px;flex:0 1 200px">
+      <input type="text" id="rc-allproj" placeholder="Project…" value="${attrEsc(RC.presetProject||'')}" style="${cell.replace('transparent','var(--bg-1)')};border-color:var(--border);min-width:160px;flex:0 1 200px">
       <button onclick="rcApplyProjectAll()" style="padding:6px 12px;background:var(--amber);color:#000;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700">Apply to all</button>
       <span style="font-size:11px;color:var(--ink-4)">Sets the project on all lines below — then tweak any exceptions individually.</span>
     </div>
+    ${rcRenderXeroExportBox()}
     <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
       <thead><tr style="background:var(--bg-2);text-align:left">
         <th style="padding:8px 8px;width:34px;text-align:center" title="Include">✓</th>
@@ -4331,6 +4528,7 @@ function rcRenderTable() {
   // "Allocate one project to every line" control
   const allProj = document.getElementById('rc-allproj');
   if (allProj) smartSuggest(allProj, ssProjectNames, () => {}, raw => rcCreateProj(raw, p => { allProj.value = p.name; }));
+  rcPopulateXeroPayment();
   wrap.querySelectorAll('input.rc-inc').forEach(cb => {
     cb.addEventListener('change', () => {
       const idx = +cb.dataset.idx;
@@ -4379,7 +4577,7 @@ function rcApplyProjectAll() {
 // re-parse or swap them; confirms first if there are edits to lose.
 function rcCancel() {
   if (RC.items && RC.items.length && !confirm('Discard this parsed receipt? Nothing has been saved and your edits will be lost.')) return;
-  RC.items = null; RC.supplier = '';
+  RC.items = null; RC.supplier = ''; RC.presetProject = null;
   rcRenderScan();
 }
 
@@ -4391,6 +4589,9 @@ async function rcSave() {
     description:r.description||'', category:r.category||'', project:r.project||'',
     qty:parseFloat(r.qty)||1, unit_price:parseFloat(r.unit_price)||0, amount:r.amount
   }));
+  // Remember before rcRenderScan() resets RC — the Xero export (if ticked) runs
+  // straight after the local save succeeds, using the same line items.
+  const wantsXeroExport = !!(document.getElementById('rc-xero-export') || {}).checked;
   const btn = document.getElementById('rc-save-btn');
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
   try {
@@ -4403,11 +4604,132 @@ async function rcSave() {
     // Optimistic in-memory update so Expenses/Projects reflect it immediately
     if (data.entries && D) { D.expense_log = D.expense_log || []; data.entries.forEach(e => D.expense_log.push(e)); }
     claudeToast(`✓ ${data.label || (items.length+' lines saved')}`, 'success');
-    RC.items = null; RC.files = []; RC.supplier = ''; RC.note = '';
+    if (wantsXeroExport) await rcExportToXero(items, data.label);
+    RC.items = null; RC.files = []; RC.supplier = ''; RC.note = ''; RC.presetProject = null;
     rcRenderScan();
   } catch(err) {
     claudeToast('⚠ ' + (err.message||'Save failed'), 'error');
     if (btn) { btn.disabled = false; btn.textContent = 'Save lines'; }
+  }
+}
+
+// ── Xero export (Scan Receipt → draft Spend Money transaction) ─────────────
+// One-click alternative to re-keying the same receipt into Xero by hand: once
+// the batch is saved to MatiereHub, optionally also POSTs it to Xero as a
+// DRAFT bank transaction (Type SPEND — "already paid, receipt in hand", the
+// modern equivalent of the old Expense Claims "Receipt"). Seb reviews and
+// approves it from within Xero, same pattern as create_quote/create_invoice.
+// Runs entirely through the Hub's own Xero session (xeroApiCall) — no new
+// connector, no new OAuth scopes (accounting.contacts + .banktransactions are
+// already granted). Nothing here writes to expense_log — the payment method
+// lives only in which Xero bank account the transaction is posted against.
+async function rcLoadXeroAccounts() {
+  if (RC.xeroAccounts) return RC.xeroAccounts;
+  const res = await xeroApiCall('Accounts', 'GET');
+  const accounts = res.Accounts || [];
+  const expenseMap = {};
+  accounts.filter(a => a.Class === 'EXPENSE').forEach(a => { if (a.Name) expenseMap[a.Name.toLowerCase().trim()] = a.Code; });
+  const bankAccounts = accounts
+    .filter(a => a.Type === 'BANK' && a.Status === 'ACTIVE')
+    .map(a => ({ AccountID: a.AccountID, Code: a.Code, Name: a.Name }));
+  RC.xeroAccounts = { expenseMap, bankAccounts };
+  return RC.xeroAccounts;
+}
+
+// Rendered inline in rcRenderTable, right above the line-items table. Hidden
+// entirely when the Hub isn't connected to Xero — nothing to export to.
+function rcRenderXeroExportBox() {
+  if (!localStorage.getItem('xero_access_token')) return '';
+  return `
+    <div id="rc-xero-box" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px;padding:10px 12px;background:var(--bg-2);border-radius:8px">
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-3);cursor:pointer">
+        <input type="checkbox" id="rc-xero-export" ${RC.xeroExport===false?'':'checked'} onchange="RC.xeroExport=this.checked">
+        Also create a draft in Xero
+      </label>
+      <span style="font-size:12px;color:var(--ink-3)">Paid via:</span>
+      <select id="rc-xero-payment" onchange="RC.xeroBankAccountId=this.value" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-2);font-size:12px;min-width:170px">
+        <option value="">Loading accounts…</option>
+      </select>
+    </div>`;
+}
+
+// Populates the "Paid via" select once the table has been inserted into the DOM.
+async function rcPopulateXeroPayment() {
+  const sel = document.getElementById('rc-xero-payment');
+  if (!sel) return;
+  try {
+    const { bankAccounts } = await rcLoadXeroAccounts();
+    if (!bankAccounts.length) { sel.innerHTML = '<option value="">No Xero bank accounts found</option>'; return; }
+    sel.innerHTML = bankAccounts.map(a => `<option value="${a.AccountID}">${a.Name.replace(/</g,'&lt;')}</option>`).join('');
+    // Default payment method: the last one used this session, else the first
+    // active bank account — Seb can always switch it in the dropdown per receipt.
+    const preferred = (RC.xeroBankAccountId && bankAccounts.some(a=>a.AccountID===RC.xeroBankAccountId))
+      ? RC.xeroBankAccountId : bankAccounts[0].AccountID;
+    sel.value = preferred;
+    RC.xeroBankAccountId = preferred;
+  } catch(e) { sel.innerHTML = '<option value="">Could not load Xero accounts</option>'; }
+}
+
+async function rcExportToXero(items, batchLabel) {
+  const bankAccountId = RC.xeroBankAccountId || (document.getElementById('rc-xero-payment')||{}).value;
+  if (!bankAccountId) { claudeToast('⚠ Saved to MatiereHub, but no Xero bank account was selected — export skipped', 'unclear'); return null; }
+  try {
+    const { expenseMap } = await rcLoadXeroAccounts();
+    const supplier = (items.find(i=>i.supplier)||{}).supplier || RC.supplier || 'Unknown supplier';
+
+    // Find or create the supplier contact (exact match first, then a loose
+    // contains-match — mirrors find_contact in the xero-mcp connector).
+    const contactsRes = await xeroApiCall('Contacts', 'GET');
+    const allContacts = contactsRes.Contacts || [];
+    let contact = allContacts.find(c => (c.Name||'').toLowerCase() === supplier.toLowerCase())
+               || allContacts.find(c => (c.Name||'').toLowerCase().includes(supplier.toLowerCase()));
+    if (!contact) {
+      const created = await xeroApiCall('Contacts', 'POST', { Contacts: [{ Name: supplier }] });
+      contact = created.Contacts && created.Contacts[0];
+    }
+    if (!contact) throw new Error('Could not find or create a Xero contact for "' + supplier + '"');
+
+    // Category → Xero expense account code. expense_log categories are kept in
+    // sync with the chart of accounts (see DATA_REFERENCE.md), so this is
+    // normally a direct name match; anything unrecognised falls back to
+    // "Sundry Expenses" and is flagged in the confirmation toast for review.
+    const missingCats = [];
+    const lineItems = items.map(it => {
+      const key = (it.category || '').toLowerCase().trim();
+      const code = expenseMap[key] || expenseMap['sundry expenses'];
+      if (!expenseMap[key]) missingCats.push(it.category || '(blank)');
+      return {
+        Description: it.description || '(no description)',
+        Quantity: parseFloat(it.qty) || 1,
+        UnitAmount: parseFloat(it.unit_price) || 0,
+        AccountCode: code,
+        TaxType: 'INPUT'
+      };
+    });
+
+    const payload = { BankTransactions: [{
+      Type: 'SPEND',
+      Contact: { ContactID: contact.ContactID },
+      Date: (items[0] && items[0].date) || new Date().toISOString().slice(0,10),
+      Status: 'DRAFT',
+      LineAmountTypes: 'Exclusive',
+      Reference: `MatiereHub — ${batchLabel || supplier}`,
+      BankAccount: { AccountID: bankAccountId },
+      LineItems: lineItems
+    }] };
+
+    const res = await xeroApiCall('BankTransactions', 'POST', payload);
+    if (!res || !res.BankTransactions || !res.BankTransactions.length) {
+      const msg = (res && res.Elements && res.Elements[0] && res.Elements[0].ValidationErrors
+        && res.Elements[0].ValidationErrors.map(e=>e.Message).join('; ')) || (res && res.error) || 'Xero rejected the transaction';
+      throw new Error(msg);
+    }
+    const warn = missingCats.length ? ` — category "${[...new Set(missingCats)].join('", "')}" mapped to Sundry Expenses, check in Xero` : '';
+    claudeToast(`✓ Draft created in Xero for ${supplier} — review under Bank Transactions ▸ Drafts${warn}`, missingCats.length ? 'unclear' : 'success');
+    return res.BankTransactions[0];
+  } catch(e) {
+    claudeToast('⚠ Saved to MatiereHub, but the Xero export failed: ' + (e.message||e), 'error');
+    return null;
   }
 }
 
@@ -4655,15 +4977,81 @@ async function faLink(bankTxId, expenseLogId) {
   }
 }
 
-// ── Boot ──────────────────────────────────────────────────────────────────────
-(async () => {
+// ── Auth gate ──────────────────────────────────────────────────────────────
+// Single shared password (server-checked via netlify/functions/hub-auth.js,
+// never shipped in this file) gates the whole HUB. Once a browser enters it
+// correctly, hub_auth_token stays in localStorage and it's never asked again
+// on that device. Admin-only for now (full access) — member/guest roles
+// with restricted access can be layered on top later (see CLAUDE.md).
+const HUB_AUTH_KEY = 'hub_auth_token';
+
+function hubToggleGatePw() {
+  const pw = document.getElementById('hub-gate-pw');
+  const btn = document.getElementById('hub-gate-pw-toggle');
+  const showing = pw.type === 'text';
+  pw.type = showing ? 'password' : 'text';
+  btn.textContent = showing ? 'Show' : 'Hide';
+}
+
+function hubShowGate(errorMsg) {
+  document.getElementById('loading').style.display = 'none';
+  const gate = document.getElementById('hub-gate');
+  gate.style.display = 'flex';
+  const err = document.getElementById('hub-gate-error');
+  if (errorMsg) { err.textContent = errorMsg; err.style.display = 'block'; }
+  else { err.style.display = 'none'; }
+  const pw = document.getElementById('hub-gate-pw');
+  pw.value = '';
+  pw.focus();
+}
+
+async function hubTryLogin() {
+  const pwInput = document.getElementById('hub-gate-pw');
+  const btn = document.getElementById('hub-gate-btn');
+  const password = pwInput.value;
+  if (!password) return;
+  btn.disabled = true; btn.textContent = 'Checking…';
+  try {
+    const r = await fetch('/.netlify/functions/hub-auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok && data.ok) {
+      localStorage.setItem(HUB_AUTH_KEY, data.token);
+      document.getElementById('hub-gate').style.display = 'none';
+      document.getElementById('loading').style.display = 'flex';
+      bootHub();
+    } else {
+      hubShowGate(data.error === 'Wrong password' ? 'Wrong password — try again.' : (data.error || 'Could not verify password.'));
+    }
+  } catch (e) {
+    hubShowGate('Could not reach the Hub — check your connection.');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Unlock';
+  }
+}
+
+function hubCheckAuth() {
+  if (localStorage.getItem(HUB_AUTH_KEY)) {
+    bootHub();
+  } else {
+    hubShowGate();
+  }
+}
+
+async function bootHub() {
   if (window.location.pathname === '/xero-callback' || window.location.search.includes('code=')) {
     await handleXeroCallback();
   }
   if (window.location.search.includes('xero=connected')) history.replaceState({}, '', '/');
   updateXeroBtn();
   loadData();
-})();
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+hubCheckAuth();
 </script>
 </body>
 </html>

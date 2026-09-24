@@ -86,3 +86,17 @@ Why things are built the way they are. Read before suggesting alternatives.
 
 **Decision:** Not used.
 **Why:** Google Sheets Drive connector can only create new files, cannot append rows. Airtable requires a paid subscription. See CLAUDE.md failed approaches for full history.
+
+---
+
+## Project ↔ Quote/Invoice linking: suggest, never auto-write
+
+**Decision (2026-09-24, Seb's ask):** Nothing is allowed to write a `project` value onto `quote_items`/`invoice_items` on its own. A match — however confident — is only ever surfaced as a suggestion inside the Project detail card (`projRenderAutoMatchedSection` for invoices, the linked-quotes/invoices search for quotes), and only becomes a real link when Seb explicitly clicks to confirm it (`projConvertAutoMatched`, or picking a search result).
+
+**Current state (audited 2026-09-24):** already correct everywhere —
+- `xero-sync.js` intentionally omits `project` from both `transformInvoiceItems()` and the quote-items transform (HUB-owned column, see the Supabase upsert-ownership rule above).
+- `netlify/functions/xero-mcp.js` (`create_quote`/`create_invoice`) only touches the `projects` table (baseline) and `shopping_lists` — it never writes `quote_items`/`invoice_items` rows or their `project` field.
+- `netlify/functions/claude-parse.js` never patches `project` on either table (only `notes`).
+- Invoice fuzzy-matching (`projAutoMatchInvoices`) is read-only/display-only until "+ convert to explicit link" is clicked; quotes have no fuzzy-match at all, only the manual search-and-link box.
+
+**Rule going forward:** any future feature that can guess a project for a quote/invoice line (the in-progress quote-assistant, the Xero MCP connector, a smarter parser, etc.) must render the guess as a suggestion in the Project card for Seb to confirm — never write `project` directly as a side effect of creation/sync/parsing.

@@ -10,3 +10,4 @@ build_xero_audit.py
 push_data.sh
 
 CHANGES_PENDING.md
+.github_config.json

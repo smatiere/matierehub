@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Matiere Pty Ltd — Financial Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
+    <style>
+        :root {
+            --bg-primary: #f0f2f5;
+            --bg-card: #ffffff;
+            --bg-header: #1b2a4a;
+            --bg-header-accent: #243660;
+            --text-primary: #1a202c;
+            --text-secondary: #718096;
+            --text-on-dark: #ffffff;
+            --color-1: #3b82f6;
+            --color-2: #f59e0b;
+            --color-3: #10b981;
+            --color-4: #ef4444;
+            --color-5: #8b5cf6;
+            --color-6: #06b6d4;
+            --positive: #10b981;
+            --negative: #ef4444;
+            --warning: #f59e0b;
+            --gap: 16px;
+            --radius: 10px;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.5;
+            min-height: 100vh;
+        }
+        .dashboard-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: var(--gap);
+        }
+
+        /* Header */
+        .dashboard-header {
+            background: linear-gradient(135deg, var(--bg-header) 0%, var(--bg-header-accent) 100%);
+            color: var(--text-on-dark);
+            padding: 20px 28px;
+            border-radius: var(--radius);
+            margin-bottom: var(--gap);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        .header-left h1 { font-size: 22px; font-weight: 700; }
+        .header-left .subtitle { font-size: 13px; color: rgba(255,255,255,0.65); margin-top: 2px; }
+        .header-badge {
+            background: rgba(255,255,255,0.12);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 20px;
+            padding: 6px 14px;
+            font-size: 12px;
+            color: rgba(255,255,255,0.85);
+        }
+
+        /* Section Labels */
+        .section-label {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            margin-bottom: 10px;
+            margin-top: 6px;
+        }
+
+        /* KPI Row */
+        .kpi-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: var(--gap);
+            margin-bottom: var(--gap);
+        }
+        .kpi-card {
+            background: var(--bg-card);
+            border-radius: var(--radius);
+            padding: 20px 22px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+            border-left: 4px solid transparent;
+            position: relative;
+            overflow: hidden;
+        }
+        .kpi-card::after {
+            content: '';
+            position: absolute;
+            top: 0; right: 0;
+            width: 60px; height: 60px;
+            border-radius: 0 0 0 60px;
+            opacity: 0.06;
+        }
+        .kpi-card.blue { border-left-color: var(--color-1); } .kpi-card.blue::after { background: var(--color-1); }
+        .kpi-card.green { border-left-color: var(--color-3); } .kpi-card.green::after { background: var(--color-3); }
+        .kpi-card.amber { border-left-color: var(--color-2); } .kpi-card.amber::after { background: var(--color-2); }
+        .kpi-card.purple { border-left-color: var(--color-5); } .kpi-card.purple::after { background: var(--color-5); }
+        .kpi-card.red { border-left-color: var(--color-4); } .kpi-card.red::after { background: var(--color-4); }
+        .kpi-card.teal { border-left-color: var(--color-6); } .kpi-card.teal::after { background: var(--color-6); }
+
+        .kpi-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            margin-bottom: 6px;
+        }
+        .kpi-value {
+            font-size: 26px;
+            font-weight: 800;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+        .kpi-change {
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .kpi-change.positive { color: var(--positive); }
+        .kpi-change.negative { color: var(--negative); }
+        .kpi-change.neutral { color: var(--text-secondary); }
+
+        /* Chart rows */
+        .chart-row-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--gap);
+            margin-bottom: var(--gap);
+        }
+        .chart-row-3 {
+            display: grid;
+            grid-template-columns: 1.4fr 1fr 1fr;
+            gap: var(--gap);
+            margin-bottom: var(--gap);
+        }
+        .chart-container {
+            background: var(--bg-card);
+            border-radius: var(--radius);
+            padding: 20px 22px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+        }
+        .chart-container h3 {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+        .chart-subtitle {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-bottom: 16px;
+        }
+        .chart-container canvas { max-height: 260px; }
+
+        /* KPI row 2 */
+        .kpi-row-3 {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: var(--gap);
+            margin-bottom: var(--gap);
+        }
+
+        /* Table */
+        .table-section {
+            background: var(--bg-card);
+            border-radius: var(--radius);
+            padding: 20px 22px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+            margin-bottom: var(--gap);
+            overflow-x: auto;
+        }
+        .table-section h3 {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            margin-top: 16px;
+        }
+        .data-table thead th {
+            text-align: left;
+            padding: 9px 12px;
+            border-bottom: 2px solid #e2e8f0;
+            color: var(--text-secondary);
+            font-weight: 700;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+        }
+        .data-table tbody td {
+            padding: 11px 12px;
+            border-bottom: 1px solid #f7fafc;
+            vertical-align: middle;
+        }
+        .data-table tbody tr:last-child td { border-bottom: none; }
+        .data-table tbody tr:hover { background: #f7fafc; }
+        .badge {
+            display: inline-block;
+            padding: 3px 9px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 700;
+        }
+        .badge-red { background: #fee2e2; color: #dc2626; }
+        .badge-amber { background: #fef3c7; color: #d97706; }
+        .badge-green { background: #d1fae5; color: #059669; }
+
+        /* Footer */
+        .dashboard-footer {
+            text-align: center;
+            font-size: 11px;
+            color: var(--text-secondary);
+            padding: 10px 0 16px;
+        }
+        .dashboard-footer a { color: var(--color-1); text-decoration: none; }
+        .dashboard-footer a:hover { text-decoration: underline; }
+
+        /* Divider */
+        .divider-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .divider-row span { white-space: nowrap; }
+        .divider-line { flex: 1; height: 1px; background: #e2e8f0; }
+
+        @media (max-width: 900px) {
+            .kpi-row { grid-template-columns: repeat(2, 1fr); }
+            .kpi-row-3 { grid-template-columns: repeat(2, 1fr); }
+            .chart-row-2, .chart-row-3 { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 500px) {
+            .kpi-row { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+<div class="dashboard-container">
+
+    <!-- Header -->
+    <header class="dashboard-header">
+        <div class="header-left">
+            <h1>Matiere Pty Ltd</h1>
+            <div class="subtitle">Financial Dashboard · Powered by Xero · AUD</div>
+        </div>
+        <div class="header-badge">Data as of 25 May 2026</div>
+    </header>
+
+    <!-- KPI Row 1: P&L Highlights -->
+    <div class="section-label">Profit & Loss — FY2025/26 YTD vs Prior Year</div>
+    <div class="kpi-row" style="margin-bottom:var(--gap)">
+        <div class="kpi-card blue">
+            <div class="kpi-label">Total Revenue</div>
+            <div class="kpi-value">$157,429</div>
+            <div class="kpi-change positive">▲ +26.8% vs prior year ($124,169)</div>
+        </div>
+        <div class="kpi-card green">
+            <div class="kpi-label">Gross Profit</div>
+            <div class="kpi-value">$103,111</div>
+            <div class="kpi-change positive">▲ +19.3% vs prior year ($86,405)</div>
+        </div>
+        <div class="kpi-card purple">
+            <div class="kpi-label">Net Profit</div>
+            <div class="kpi-value">$60,755</div>
+            <div class="kpi-change positive">▲ Swung from −$1,319 loss</div>
+        </div>
+        <div class="kpi-card amber">
+            <div class="kpi-label">Total Expenses</div>
+            <div class="kpi-value">$42,357</div>
+            <div class="kpi-change positive">▼ −51.7% vs prior year ($87,724)</div>
+        </div>
+    </div>
+
+    <!-- KPI Row 2: Cash & Balance Sheet -->
+    <div class="section-label">Cash & Balance Sheet — As of 24 May 2026</div>
+    <div class="kpi-row-3" style="margin-bottom:var(--gap)">
+        <div class="kpi-card teal">
+            <div class="kpi-label">Cash Balance</div>
+            <div class="kpi-value">$17,173</div>
+            <div class="kpi-change neutral">Available cash on hand</div>
+        </div>
+        <div class="kpi-card green">
+            <div class="kpi-label">Working Capital</div>
+            <div class="kpi-value">$24,022</div>
+            <div class="kpi-change neutral">Current assets − current liabilities</div>
+        </div>
+        <div class="kpi-card blue">
+            <div class="kpi-label">Net Equity</div>
+            <div class="kpi-value">$41,071</div>
+            <div class="kpi-change neutral">Total assets − total liabilities</div>
+        </div>
+    </div>
+
+    <!-- Charts Row 1 -->
+    <div class="chart-row-2">
+        <div class="chart-container">
+            <h3>P&amp;L Comparison — Current vs Prior Year</h3>
+            <div class="chart-subtitle">Revenue, Cost of Sales, Expenses &amp; Net Profit (AUD)</div>
+            <canvas id="pnl-chart"></canvas>
+        </div>
+        <div class="chart-container">
+            <h3>Top Customers by Revenue</h3>
+            <div class="chart-subtitle">Last 12 months · AUD</div>
+            <canvas id="customers-chart"></canvas>
+        </div>
+    </div>
+
+    <!-- Charts Row 2 -->
+    <div class="chart-row-2">
+        <div class="chart-container">
+            <h3>Expense Breakdown — Current Year</h3>
+            <div class="chart-subtitle">Top expense categories (AUD)</div>
+            <canvas id="expenses-chart"></canvas>
+        </div>
+        <div class="chart-container">
+            <h3>Balance Sheet Snapshot</h3>
+            <div class="chart-subtitle">Assets vs Liabilities vs Equity (AUD)</div>
+            <canvas id="balance-chart"></canvas>
+        </div>
+    </div>
+
+    <!-- Receivables Table -->
+    <div class="section-label">Accounts Receivable</div>
+    <div class="table-section">
+        <h3>Outstanding Invoices <span style="font-weight:400;color:var(--text-secondary)">— All 11 invoices are overdue · Total owed: <strong style="color:var(--negative)">$14,156</strong></span></h3>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Invoice #</th>
+                    <th>Customer</th>
+                    <th>Amount Due</th>
+                    <th>Due Date</th>
+                    <th>Days Overdue</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody id="receivables-tbody"></tbody>
+        </table>
+    </div>
+
+    <!-- Cost of Sales Table -->
+    <div class="section-label">Income Sources</div>
+    <div class="chart-row-2">
+        <div class="table-section" style="margin-bottom:0">
+            <h3>Revenue Accounts</h3>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Account</th>
+                        <th>Current Year</th>
+                        <th>Prior Year</th>
+                        <th>Change</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Sales</td>
+                        <td><strong>$157,327</strong></td>
+                        <td>$120,164</td>
+                        <td><span class="badge badge-green">+30.9%</span></td>
+                    </tr>
+                    <tr>
+                        <td>Airtasker – Sales</td>
+                        <td><strong>$102</strong></td>
+                        <td>$4,005</td>
+                        <td><span class="badge badge-red">−97.5%</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="table-section" style="margin-bottom:0">
+            <h3>Cost of Sales</h3>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Account</th>
+                        <th>Current Year</th>
+                        <th>Prior Year</th>
+                        <th>Change</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Materials</td>
+                        <td><strong>$53,665</strong></td>
+                        <td>$37,239</td>
+                        <td><span class="badge badge-red">+44.1%</span></td>
+                    </tr>
+                    <tr>
+                        <td>Consumables</td>
+                        <td><strong>$697</strong></td>
+                        <td>$419</td>
+                        <td><span class="badge badge-red">+66.5%</span></td>
+                    </tr>
+                    <tr>
+                        <td>Purchases</td>
+                        <td><strong>−$44</strong></td>
+                        <td>$106</td>
+                        <td><span class="badge badge-green">credit</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div style="height:var(--gap)"></div>
+
+    <footer class="dashboard-footer">
+        Matiere Pty Ltd · Data sourced from Xero ·
+        <a href="https://reporting.xero.com/!JFb4B/v2/Run/Analytics/profitability?source=xero-mcp" target="_blank">View in Xero →</a>
+        &nbsp;·&nbsp; Last refreshed: 21 May 2026
+    </footer>
+</div>
+
+<script>
+    // ── Data ──────────────────────────────────────────────────────────────
+    const COLORS = ['#3b82f6','#f59e0b','#10b981','#ef4444','#8b5cf6','#06b6d4','#f97316','#ec4899'];
+
+    const RECEIVABLES = [
+        { invoice: 'INV-0245', customer: 'Nik – Collaroy',       amount: 3361.88, due: '2025-05-13', overdue: 377 },
+        { invoice: 'INV-0319', customer: 'Samantha Kirchner',     amount: 3360.50, due: '2026-02-16', overdue: 98  },
+        { invoice: 'INV-0242', customer: 'Nik – Collaroy',       amount: 2461.25, due: '2025-05-07', overdue: 383 },
+    ];
+
+    const TOP_CUSTOMERS = [
+        { name: 'Serena – Manly Vale', amount: 36833.50 },
+        { name: 'Selvi – Seaforth',    amount: 23741.00 },
+        { name: 'Mark Shippen',        amount: 22924.00 },
+        { name: 'Peter Black',         amount: 9225.70  },
+        { name: 'Samantha Kirchner',   amount: 7249.00  },
+    ];
+
+    const EXPENSES = [
+        { name: 'Rent',                      amount: 14591.20 },
+        { name: 'Wages & Salaries',          amount: 11426.01 },
+        { name: 'Accounting & Bookkeeping',  amount: 4543.65  },
+        { name: 'Motor Vehicle Ins.',        amount: 1967.18  },
+        { name: 'Mobile Phone',              amount: 1864.41  },
+        { name: 'Other (24 accounts)',       amount: 7963.33  },
+    ];
+
+    // ── Helpers ───────────────────────────────────────────────────────────
+    function fmt(v, type = 'currency') {
+        if (type === 'currency') {
+            if (v >= 1e6) return `$${(v/1e6).toFixed(2)}M`;
+            if (v >= 1e3) return `$${(v/1e3).toFixed(1)}K`;
+            return `$${v.toFixed(0)}`;
+        }
+        if (type === 'pct') return `${v > 0 ? '+' : ''}${v.toFixed(1)}%`;
+        return v.toLocaleString();
+    }
+
+    // ── P&L Comparison Bar Chart ──────────────────────────────────────────
+    new Chart(document.getElementById('pnl-chart').getContext('2d'), {
+        type: 'bar',
+        data: {
+            labels: ['Revenue', 'Cost of Sales', 'Expenses', 'Net Profit'],
+            datasets: [
+                {
+                    label: 'FY2025/26 YTD',
+                    data: [157428.78, 54317.33, 42356.78, 60754.67],
+                    backgroundColor: '#3b82f6cc',
+                    borderColor: '#3b82f6',
+                    borderWidth: 1.5,
+                    borderRadius: 5,
+                },
+                {
+                    label: 'Prior Year',
+                    data: [124169.05, 37764.48, 87723.83, -1319.26],
+                    backgroundColor: '#94a3b8cc',
+                    borderColor: '#94a3b8',
+                    borderWidth: 1.5,
+                    borderRadius: 5,
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'top', labels: { usePointStyle: true, padding: 16, font: { size: 12 } } },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => ` ${ctx.dataset.label}: ${fmt(ctx.parsed.y)}`
+                    }
+                }
+            },
+            scales: {
+                x: { grid: { display: false } },
+                y: {
+                    ticks: { callback: v => fmt(v) },
+                    grid: { color: '#f1f5f9' }
+                }
+            }
+        }
+    });
+
+    // ── Top Customers Horizontal Bar ──────────────────────────────────────
+    new Chart(document.getElementById('customers-chart').getContext('2d'), {
+        type: 'bar',
+        data: {
+            labels: TOP_CUSTOMERS.map(c => c.name),
+            datasets: [{
+                label: 'Revenue',
+                data: TOP_CUSTOMERS.map(c => c.amount),
+                backgroundColor: COLORS.map(c => c + 'cc'),
+                borderColor: COLORS,
+                borderWidth: 1.5,
+                borderRadius: 5,
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => ` ${fmt(ctx.parsed.x)}`
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    beginAtZero: true,
+                    grid: { color: '#f1f5f9' },
+                    ticks: { callback: v => fmt(v) }
+                },
+                y: { grid: { display: false } }
+            }
+        }
+    });
+
+    // ── Expenses Doughnut ────────────────────────────────────────────────
+    new Chart(document.getElementById('expenses-chart').getContext('2d'), {
+        type: 'doughnut',
+        data: {
+            labels: EXPENSES.map(e => e.name),
+            datasets: [{
+                data: EXPENSES.map(e => e.amount),
+                backgroundColor: COLORS.map(c => c + 'cc'),
+                borderColor: '#ffffff',
+                borderWidth: 2,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '58%',
+            plugins: {
+                legend: { position: 'right', labels: { usePointStyle: true, padding: 12, font: { size: 11 } } },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => {
+                            const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+                            const pct = ((ctx.parsed / total) * 100).toFixed(1);
+                            return ` ${fmt(ctx.parsed)} (${pct}%)`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    // ── Balance Sheet Bar ────────────────────────────────────────────────
+    new Chart(document.getElementById('balance-chart').getContext('2d'), {
+        type: 'bar',
+        data: {
+            labels: ['Current Assets', 'Non-Current Assets', 'Total Assets', 'Current Liabilities', 'Net Equity'],
+            datasets: [{
+                label: 'Amount (AUD)',
+                data: [14156.20, 2587.63, 33916.43, 7307.28, 41070.93],
+                backgroundColor: ['#06b6d4cc','#3b82f6cc','#10b981cc','#ef4444cc','#8b5cf6cc'],
+                borderColor:     ['#06b6d4','#3b82f6','#10b981','#ef4444','#8b5cf6'],
+                borderWidth: 1.5,
+                borderRadius: 5,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: { label: ctx => ` ${fmt(ctx.parsed.y)}` }
+                }
+            },
+            scales: {
+                x: { grid: { display: false }, ticks: { font: { size: 10 } } },
+                y: {
+                    beginAtZero: true,
+                    ticks: { callback: v => fmt(v) },
+                    grid: { color: '#f1f5f9' }
+                }
+            }
+        }
+    });
+
+    // ── Receivables Table ────────────────────────────────────────────────
+    const tbody = document.getElementById('receivables-tbody');
+    RECEIVABLES.forEach(inv => {
+        const badgeClass = inv.overdue > 180 ? 'badge-red' : inv.overdue > 60 ? 'badge-amber' : 'badge-green';
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td><strong>${inv.invoice}</strong></td>
+            <td>${inv.customer}</td>
+            <td><strong style="color:var(--negative)">$${inv.amount.toLocaleString('en-AU', {minimumFractionDigits:2, maximumFractionDigits:2})}</strong></td>
+            <td>${inv.due}</td>
+            <td><span class="badge ${badgeClass}">${inv.overdue} days</span></td>
+            <td><span class="badge badge-red">Overdue</span></td>
+        `;
+        tbody.appendChild(row);
+    });
+    // Add note row
+    const noteRow = document.createElement('tr');
+    noteRow.innerHTML = `
+        <td colspan="6" style="color:var(--text-secondary);font-size:12px;padding:12px;font-style:italic;text-align:center;">
+            + 8 additional overdue invoices not shown in detail. Total receivables outstanding: <strong>$14,156.20</strong>
+        </td>
+    `;
+    tbody.appendChild(noteRow);
+</script>
+</body>
+</html>
