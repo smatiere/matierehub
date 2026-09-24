@@ -747,14 +747,6 @@ async function renderShopping() {
     return true;
   });
 
-  // Default-expand only the most recent open list, once — after that, whatever
-  // the user has clicked open/closed is preserved across re-renders.
-  if (SHOP.expanded === null) {
-    SHOP.expanded = {};
-    const firstOpen = visible.find(l => l.status !== 'done');
-    if (firstOpen) SHOP.expanded[firstOpen.id] = true;
-  }
-
   const topBar = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px">
       ${shopFilterBar(hiddenDone, hiddenQuoted)}
@@ -768,6 +760,15 @@ async function renderShopping() {
 
   const open = visible.filter(l => l.status !== 'done');
   const done = visible.filter(l => l.status === 'done');
+
+  // Default-expand only the most recent open list, once there actually is one
+  // to expand (a first paint that's filtered down to nothing must not burn the
+  // one-shot default) — after that, whatever the user has clicked stays as-is.
+  if (SHOP.expanded === null && open.length) {
+    SHOP.expanded = {};
+    SHOP.expanded[open[0].id] = true;
+  }
+  if (SHOP.expanded === null) SHOP.expanded = {};
 
   const renderList = l => {
     const rawItems = Array.isArray(l.items) ? l.items : [];
