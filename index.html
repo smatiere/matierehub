@@ -328,6 +328,22 @@ body{padding-bottom:62px}
 <div id="claude-toast"></div>
 
 <script>
+// The functions that read or write business data check the login token; add it to those calls.
+(function () {
+  const plainFetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    if (/\/\.netlify\/functions\/(hub-write|claude-parse)/.test(url)) {
+      const token = localStorage.getItem('hub_auth_token');
+      if (token) {
+        const headers = new Headers((init && init.headers) || (typeof input !== 'string' && input.headers) || {});
+        headers.set('x-hub-token', token);
+        init = Object.assign({}, init, { headers });
+      }
+    }
+    return plainFetch(input, init);
+  };
+})();
 let D = null;
 let charts = {};
 

@@ -118,15 +118,20 @@ async function nextShoppingListId() {
   return `SL-${String(next).padStart(3, '0')}`;
 }
 
+const { guardHub } = require('../lib/hub-guard');
+
 exports.handler = async (event) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, x-hub-token, x-hub-key',
     'Content-Type': 'application/json'
   };
 
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
   if (event.httpMethod !== 'POST')    return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
+
+  const denied = guardHub(event, headers);
+  if (denied) return denied;
   if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return { statusCode: 500, headers, body: JSON.stringify({ error: 'Supabase env vars not configured' }) };
 
   try {
