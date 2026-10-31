@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="Matiere Hub">
@@ -237,6 +239,206 @@ tr:hover td{background:var(--bg-3)}
 #claude-toast.error{background:var(--pink);color:#fff;opacity:1}
 #claude-toast.unclear{background:var(--amber);color:#000;opacity:1}
 body{padding-bottom:62px}
+
+/* ── Schedule tab (2026-11-01) ── */
+#page-schedule{max-width:1280px}
+.sch-top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+.sch-top h1{font-size:22px;font-weight:700;letter-spacing:-.01em}
+.sch-top-act{display:flex;gap:8px;align-items:center}
+.sch-sub{font-size:12px;color:var(--ink-3)}
+.sch-empty{padding:14px;color:var(--ink-4);font-size:13px;text-align:center}
+.sch-empty.big{padding:40px 16px;line-height:1.6}
+.sch-btn,.sch-ic,.sch-pick,.sch-link{font:inherit;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.sch-btn{display:inline-flex;align-items:center;justify-content:center;min-height:38px;padding:0 14px;background:var(--bg-3);border:1px solid var(--border-2);color:var(--ink-2);border-radius:8px;font-size:13px;font-weight:600;text-decoration:none;transition:background .15s,border-color .15s}
+.sch-btn:hover{border-color:var(--ink-4);color:var(--ink)}
+.sch-btn.pri{background:var(--amber);border-color:var(--amber);color:#000}
+.sch-btn.pri:hover{background:var(--gold-2)}
+.sch-btn.danger{color:var(--pink);border-color:rgba(255,0,110,.35);background:transparent}
+.sch-ic{width:38px;height:38px;display:inline-flex;align-items:center;justify-content:center;background:var(--bg-3);border:1px solid var(--border-2);color:var(--ink-2);border-radius:8px;font-size:18px;line-height:1}
+.sch-ic.sm{width:32px;height:32px;font-size:13px;flex:none}
+.sch-link{background:none;border:none;color:var(--ink-3);font-size:12px;padding:10px 4px;text-align:left;text-decoration:underline;text-underline-offset:3px}
+.sch-btn:focus-visible,.sch-ic:focus-visible,.sch-in:focus-visible,.sch-card:focus-visible,.sch-att:focus-visible,.sch-pill:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+
+.sch-layout{display:grid;grid-template-columns:340px minmax(0,1fr);gap:16px;align-items:start}
+.sch-layout>*{min-width:0}
+.sch-col-pipe{position:sticky;top:112px;max-height:calc(100vh - 220px);overflow-y:auto;padding-right:2px}
+.sch-banner{position:sticky;top:96px;z-index:20;display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--amber);color:#000;padding:10px 14px;border-radius:10px;margin-bottom:12px;font-size:13px}
+.sch-banner button{background:#000;color:#fff;border:none;border-radius:6px;padding:6px 12px;font-weight:600;cursor:pointer}
+
+.sch-attn{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px;margin-bottom:16px}
+.sch-att{display:flex;gap:10px;align-items:flex-start;text-align:left;font:inherit;color:var(--ink);background:var(--bg-2);border:1px solid var(--border);border-left:3px solid var(--ink-4);border-radius:10px;padding:10px 12px;cursor:pointer;min-height:54px}
+.sch-att.r0{border-left-color:var(--pink)}.sch-att.r1{border-left-color:var(--orange)}.sch-att.r2{border-left-color:var(--amber)}.sch-att.r3{border-left-color:var(--blue)}
+.sch-att i{font-style:normal;font-size:17px;line-height:1.2}
+.sch-att span{display:flex;flex-direction:column;gap:2px;min-width:0}
+.sch-att b{font-size:13px;font-weight:600}
+.sch-att small{font-size:11.5px;color:var(--ink-3);line-height:1.35}
+
+.sch-pipe{display:flex;flex-direction:column;gap:6px}
+.sch-xero{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--gold-light);border:1px solid rgba(255,190,11,.3);border-radius:10px;padding:10px 12px;margin-bottom:6px}
+.sch-xero span{display:flex;flex-direction:column}.sch-xero small{font-size:11px;color:var(--ink-3)}
+.sch-sec-h{font-size:10px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);padding:12px 2px 6px;display:flex;align-items:center;gap:8px}
+.sch-sec-h::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--c)}
+.sch-sec-h em{font-style:normal;color:var(--ink-4)}
+.sch-card{background:var(--bg-2);border:1px solid var(--border);border-left:3px solid var(--c);border-radius:10px;padding:11px 12px;margin-bottom:8px;cursor:pointer;transition:border-color .15s,transform .1s}
+.sch-card:hover{border-color:var(--border-2);border-left-color:var(--c)}
+.sch-card:active{transform:scale(.995)}
+.sch-card.placing{outline:2px solid var(--amber)}
+.sch-card-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.sch-card-top b{font-size:14px;font-weight:600;display:flex;align-items:center;gap:7px;min-width:0}
+.sch-card-sub{max-width:100%;font-size:12px;color:var(--ink-3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sch-meta{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:8px;font-size:11.5px;color:var(--ink-3)}
+.sch-meta .trunc{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sch-chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+.sch-chips:empty{display:none}
+.sch-chip{font-size:10.5px;font-weight:600;padding:3px 8px;border-radius:20px;background:var(--bg-3);color:var(--ink-3);line-height:1.3}
+.sch-chip.bad{background:rgba(255,0,110,.16);color:#ff6aa8}
+.sch-chip.warn{background:rgba(255,190,11,.14);color:var(--amber)}
+.sch-card-act{display:flex;gap:6px;margin-top:10px}.sch-card-act .sch-btn{flex:1;min-height:34px;font-size:12px}
+.sch-st{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:3px 8px;border-radius:20px;color:var(--c);background:color-mix(in srgb,var(--c) 15%,transparent);white-space:nowrap;flex:none}
+.sch-pd{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none;margin-right:6px;background:var(--ink-4)}
+.sch-pd.p1{background:var(--pink)}.sch-pd.p3{background:transparent;border:1.5px solid var(--ink-4)}
+
+.sch-cal{margin-bottom:16px}
+.sch-cal-h{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.sch-cal-h h2{font-size:15px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--ink);flex:1;text-align:center;min-width:140px}
+.sch-nav{display:flex;gap:6px}
+.sch-seg{display:inline-flex;background:var(--bg-3);border:1px solid var(--border-2);border-radius:9px;padding:2px}
+.sch-seg button{font:inherit;font-size:12px;font-weight:600;color:var(--ink-3);background:none;border:none;border-radius:7px;padding:0 14px;min-height:32px;cursor:pointer}
+.sch-seg button.on{background:var(--amber);color:#000}
+.sch-seg.wide{display:flex;margin-bottom:10px}.sch-seg.wide button{flex:1;padding:0 4px}
+.sch-grid{display:grid;gap:1px;background:var(--border)}
+.sch-grid.week{grid-template-columns:repeat(7,minmax(0,1fr))}
+.sch-grid.month{grid-template-columns:repeat(7,minmax(0,1fr))}
+.sch-dow{display:grid;grid-template-columns:repeat(7,1fr);background:var(--bg-2);border-bottom:1px solid var(--border)}
+.sch-dow span{font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-4);text-align:center;padding:8px 0}
+.sch-day{background:var(--bg-2);min-height:150px;padding:8px 6px;display:flex;flex-direction:column;gap:6px;cursor:pointer;transition:background .12s}
+.sch-grid.month .sch-day{min-height:96px}
+.sch-day:hover{background:var(--bg-3)}
+.sch-day.off{background:#0b0b0b}
+.sch-day.dim{opacity:.38}
+.sch-day.today .sch-dn{background:var(--amber);color:#000;border-radius:5px;padding:1px 6px}
+.sch-day.sel{box-shadow:inset 0 0 0 2px var(--amber)}
+.sch-day.over,.sch-day.placeable:hover{background:rgba(255,190,11,.12);box-shadow:inset 0 0 0 2px var(--amber)}
+.sch-day-h{display:flex;justify-content:space-between;align-items:center;gap:4px}
+.sch-dn{font-size:11.5px;font-weight:600;color:var(--ink-2)}
+.sch-wx{font-size:10.5px;color:var(--ink-3)}.sch-wx.rain{color:var(--blue)}
+.sch-load{height:3px;background:var(--bg-3);border-radius:2px;overflow:hidden}
+.sch-load i{display:block;height:100%;background:var(--sage);border-radius:2px}
+.sch-load.over i{background:var(--pink)}
+.sch-evs{display:flex;flex-direction:column;gap:4px;min-height:0}
+.sch-ev{background:var(--c);border-radius:6px;padding:5px 7px;cursor:grab;display:flex;flex-direction:column;gap:1px;font-size:11.5px;line-height:1.25;min-width:0}
+.sch-ev b{display:flex;align-items:center;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sch-ev b .sch-pd{background:currentColor;opacity:.7;border-color:currentColor}
+.sch-ev span{font-size:10.5px;opacity:.85}
+.sch-ev.bad{box-shadow:0 0 0 2px var(--pink)}
+.sch-ev.done{opacity:.45}
+.sch-grid.month .sch-ev span{display:none}.sch-grid.month .sch-ev{padding:3px 6px}
+
+.sch-plan{display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--bg-3);border-left:3px solid var(--c);border-radius:8px;cursor:pointer;margin-bottom:6px}
+.sch-plan time{font-size:12px;font-variant-numeric:tabular-nums;color:var(--ink-2);width:92px;flex:none}
+.sch-plan>span:not(.sch-st){flex:1;min-width:0;display:flex;flex-direction:column}.sch-plan small{font-size:11px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sch-trav{font-size:11px;color:var(--ink-4);padding:2px 0 8px 14px}
+
+/* sheet */
+.sch-sheet{display:flex;flex-direction:column;gap:2px}
+.sch-lbl{font-size:10px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-4);margin:18px 0 8px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+.sch-pills{display:flex;gap:6px;flex-wrap:wrap}
+.sch-pill{font:inherit;font-size:12px;font-weight:600;min-height:36px;padding:0 13px;border-radius:20px;border:1px solid var(--border-2);background:transparent;color:var(--ink-3);cursor:pointer}
+.sch-pill.on{background:var(--c);border-color:var(--c);color:#000}
+.sch-issues{display:flex;flex-direction:column;gap:5px;margin-top:12px}
+.sch-iss{font-size:12.5px;padding:8px 11px;border-radius:8px;background:var(--bg-3);line-height:1.35}
+.sch-iss.bad{background:rgba(255,0,110,.13);color:#ff8fbd}.sch-iss.warn{background:rgba(255,190,11,.1);color:var(--gold-2)}
+.sch-f{display:flex;flex-direction:column;gap:5px;margin-bottom:10px;min-width:0;flex:1}
+.sch-f>span{font-size:11px;color:var(--ink-3);font-weight:600}
+.sch-in{font:inherit;font-size:16px;width:100%;min-height:42px;padding:8px 11px;background:var(--bg-1);border:1px solid var(--border-2);border-radius:8px;color:var(--ink-1);color-scheme:dark;resize:vertical}
+.sch-in:focus{border-color:var(--amber);outline:none}
+.sch-move{background:var(--bg-3);border-radius:10px;padding:12px;margin-bottom:12px}
+.sch-move-main,.sch-row3{display:flex;gap:10px;flex-wrap:wrap}
+.sch-move-main .sch-f{min-width:96px}.sch-move-main .sch-f:first-child{flex:2;min-width:150px}
+.sch-row3 .sch-f{min-width:130px}.sch-row3 .sch-f.span2{flex:2}
+.sch-quick{display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 10px}
+.sch-con{display:flex;align-items:center;gap:12px;background:var(--bg-3);border-radius:10px;padding:10px 12px;margin-bottom:6px;flex-wrap:wrap}
+.sch-con.done{opacity:.5}
+.sch-con-main{flex:1;min-width:180px;display:flex;flex-direction:column;gap:2px}.sch-con-main small{font-size:11.5px;color:var(--ink-3)}
+.sch-chk{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-2);min-height:36px}
+.sch-chk input{width:20px;height:20px;accent-color:var(--amber)}
+.sch-addcon{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}.sch-addcon .sch-in{flex:1;min-width:120px}
+.sch-tl{margin:30px 44px 26px 44px}
+.sch-tl-bar{position:relative;height:6px;background:var(--bg-1);border-radius:3px}
+.sch-tl-bar i{position:absolute;top:0;height:100%;border-radius:3px}
+.sch-tl-bar u{position:absolute;top:-4px;width:2px;height:14px;background:var(--ink-3);text-decoration:none}
+.sch-tl-bar u s{position:absolute;top:16px;left:50%;transform:translateX(-50%);font-size:10px;color:var(--ink-3);white-space:nowrap;text-decoration:none}
+.sch-tl-bar u.o{background:var(--amber)}.sch-tl-bar u.e{background:var(--sage)}.sch-tl-bar u.st{background:var(--blue);top:-8px;height:22px}
+.sch-tl-bar u.o s,.sch-tl-bar u.st s{top:-18px}
+.sch-notify{background:var(--bg-3);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:10px}
+.sch-send{display:flex;gap:8px;flex-wrap:wrap}.sch-send .sch-btn{flex:1;min-width:90px}
+.sch-hint{font-size:11.5px;color:var(--ink-4);line-height:1.4}
+.sch-log{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--ink-3);padding:4px 0}
+.sch-foot{margin-top:18px;display:flex;justify-content:flex-end}
+.sch-pick{width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;text-align:left;color:var(--ink);background:var(--bg-3);border:1px solid var(--border);border-radius:10px;padding:11px 13px;margin-bottom:6px;min-height:52px}
+.sch-pick span{display:flex;flex-direction:column}.sch-pick small{font-size:11.5px;color:var(--ink-3)}.sch-pick i{font-style:normal;font-size:18px;color:var(--amber)}
+.sch-sql{margin-top:14px;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:11px;overflow:auto;max-height:220px;color:var(--ink-3)}
+#sch-snack{position:fixed;left:50%;bottom:92px;transform:translate(-50%,24px);opacity:0;pointer-events:none;z-index:3000;background:#1d1d1d;border:1px solid var(--border-2);border-radius:12px;padding:10px 12px 10px 16px;display:flex;align-items:center;gap:10px;font-size:13px;box-shadow:0 12px 40px rgba(0,0,0,.6);max-width:calc(100vw - 24px);transition:all .2s}
+#sch-snack.show{opacity:1;transform:translate(-50%,0);pointer-events:auto}
+#sch-snack button{font:inherit;font-weight:700;font-size:12.5px;background:none;border:none;color:var(--amber);padding:8px;cursor:pointer;white-space:nowrap}
+
+@media (max-width:900px){
+  .sch-layout{grid-template-columns:minmax(0,1fr)}
+  .sch-col-pipe{position:static;max-height:none;order:2}
+  .sch-col-cal{order:1}
+}
+@media (max-width:720px){
+  #page-schedule{padding:14px 12px}
+  .sch-grid.week{grid-template-columns:1fr}
+  .sch-grid.week .sch-day{min-height:0;flex-direction:row;flex-wrap:wrap;align-items:center;padding:10px 12px}
+  .sch-grid.week .sch-day-h{width:96px;flex-direction:column;align-items:flex-start;gap:2px}
+  .sch-grid.week .sch-load{width:100%;order:3}
+  .sch-grid.week .sch-evs{flex:1;min-width:140px}
+  .sch-grid.week .sch-day.off{display:none}
+  .sch-grid.month .sch-day{min-height:62px;padding:5px 3px}
+  .sch-grid.month .sch-ev b{font-size:9px}
+  .sch-attn{grid-template-columns:1fr}
+  .sch-cal-h h2{order:-1;flex-basis:100%}
+}
+@media (hover:none){.sch-ev{cursor:pointer}}
+
+
+/* ══ Polish layer (2026-11-01) — ergonomics + consistency across the whole Hub ══ */
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+button,.tab,.hub-pill-btn,select,input[type=checkbox]{-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+:focus-visible{outline:2px solid var(--amber);outline-offset:2px;border-radius:4px}
+.tab:focus-visible{outline-offset:-2px}
+.btn-refresh,.hub-pill-btn,.tab{transition:background .15s,color .15s,border-color .15s,transform .1s}
+.btn-refresh:active,.hub-pill-btn:active{transform:scale(.97)}
+.header{padding-top:max(14px,env(safe-area-inset-top));padding-left:max(20px,env(safe-area-inset-left));padding-right:max(20px,env(safe-area-inset-right))}
+#claude-bar{padding-bottom:max(10px,env(safe-area-inset-bottom));padding-left:max(14px,env(safe-area-inset-left));padding-right:max(14px,env(safe-area-inset-right))}
+#app{padding-bottom:calc(84px + env(safe-area-inset-bottom))}
+.tab{scroll-snap-align:start}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+@media (max-width:720px){
+  .header{padding:max(10px,env(safe-area-inset-top)) 12px 10px}
+  .header-meta{display:none}
+  .header-brand span{display:none}
+  .header-brand img{height:18px;width:auto}
+  .header>div:last-child{gap:6px!important}
+  .btn-refresh{padding:0 10px}
+  .btn-refresh{padding:0 12px;min-height:38px;font-size:12px;white-space:nowrap}
+  .tabs{scroll-snap-type:x proximity;padding:0 4px}
+  .tab{padding:0 14px;min-height:46px;display:flex;align-items:center;font-size:11.5px}
+  .page{padding:14px 12px}
+  .kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .section{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  input,select,textarea{font-size:16px}               /* stops iOS zooming into fields */
+  .hub-pill-btn,.ts-range-btn{min-height:38px}
+  /* modals become bottom sheets */
+  .modal-overlay{padding:0;align-items:flex-end}
+  .modal,.modal.modal-wide{max-width:none;width:100%;margin:0;border-radius:18px 18px 0 0;max-height:94vh;display:flex;flex-direction:column;animation:sheetIn .22s ease}
+  .modal-head{border-radius:18px 18px 0 0;padding:14px 16px;position:sticky;top:0;background:var(--bg-2);z-index:2}
+  .modal-body{overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:max(20px,env(safe-area-inset-bottom))}
+  #sch-snack{bottom:calc(92px + env(safe-area-inset-bottom))}
+}
+@media (max-width:720px){.hide-sm{display:none}}
+@keyframes sheetIn{from{transform:translateY(40px);opacity:0}to{transform:none;opacity:1}}
 </style>
 </head>
 <body>
@@ -274,7 +476,7 @@ body{padding-bottom:62px}
     <div class="header-meta" id="header-meta"></div>
     <button id="xero-btn" class="btn-refresh">⚡ Connect Xero</button>
     <button id="xero-sync-btn" class="btn-refresh" style="display:none" onclick="syncFromXero()">⬇ Sync Xero</button>
-    <button class="btn-refresh" onclick="loadData()">↻ Refresh</button>
+    <button class="btn-refresh" onclick="loadData()" aria-label="Refresh data">↻<span class="hide-sm"> Refresh</span></button>
   </div>
 </div>
 
@@ -282,6 +484,7 @@ body{padding-bottom:62px}
   <div class="tab active" onclick="showTab('timesheet',this)">Timesheets</div>
   <div class="tab" onclick="showTab('pnl',this)">P&amp;L</div>
   <div class="tab" onclick="showTab('projects',this)">Projects</div>
+  <div class="tab" onclick="showTab('schedule',this)">Schedule <span id="sch-count" style="display:none;background:var(--amber);color:#000;border-radius:10px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:4px"></span></div>
   <div class="tab" onclick="showTab('quotes',this)">Quotes & Pricing</div>
   <div class="tab" onclick="showTab('transactions',this)">Transactions</div>
   <div class="tab" onclick="showTab('receipts',this)">Scan Receipt</div>
@@ -293,6 +496,7 @@ body{padding-bottom:62px}
 <div class="page active" id="page-timesheet"></div>
 <div class="page" id="page-pnl"></div>
 <div class="page" id="page-projects"></div>
+<div class="page" id="page-schedule"></div>
 <div class="page" id="page-quotes"></div>
 <div class="page" id="page-transactions"></div>
 <div class="page" id="page-receipts"></div>
@@ -385,7 +589,7 @@ async function hubWrite(table, id, fields) {
 // ── Data load — live from Supabase ────────────────────────────────────────────
 async function loadData() {
   try {
-    const [timesheets, expenses, projects, xeroRows, invoiceItems, quoteItems, shoppingLists] = await Promise.all([
+    const [timesheets, expenses, projects, xeroRows, invoiceItems, quoteItems, shoppingLists, bookings] = await Promise.all([
       sbGet('/rest/v1/timesheets?select=*&order=date.asc,id.asc'),
       sbGet('/rest/v1/expense_log?select=*&order=date.asc,id.asc'),
       sbGet('/rest/v1/projects?select=*&order=id.asc'),
@@ -398,7 +602,10 @@ async function loadData() {
       sbGet('/rest/v1/quote_items?select=id,quote_number,contact,contact_id,line_amount,status,date,expiry_date,description,item,project').catch(() => []),
       // shopping_lists (added 2026-09-18) — same "table might not exist yet"
       // guard until supabase_shopping_list_and_baseline.sql has been run.
-      sbGet('/rest/v1/shopping_lists?select=*&order=created_at.desc').catch(() => [])
+      sbGet('/rest/v1/shopping_lists?select=*&order=created_at.desc').catch(() => []),
+      // bookings (Schedule tab, 2026-11-01) — null = table not created yet
+      // (supabase_bookings.sql not run); the tab then shows a one-tap setup card.
+      sbGet('/rest/v1/bookings?select=*&order=created_at.desc').catch(() => null)
     ]);
 
     const xero = {};
@@ -411,6 +618,7 @@ async function loadData() {
       invoice_items:        invoiceItems,
       quote_items:          quoteItems,
       shopping_lists:       shoppingLists,
+      bookings,
       kpis:                 xero.kpis                 || {},
       monthly:              xero.monthly              || { labels:[], periods:[], revenue:[], materials:[], wages_owner:[] },
       open_invoices:        xero.open_invoices        || [],
@@ -700,6 +908,7 @@ function showTab(name, el) {
   if (name === 'receipts') renderReceipts();
   if (name === 'action') renderForAction();
   if (name === 'shopping') renderShopping();
+  if (name === 'schedule') renderSchedule();
   if (name === 'projects' && D) renderProjects(D.kpis);
 }
 
@@ -904,6 +1113,868 @@ async function shopNewList() {
   } catch (e) { claudeToast('Could not create list: ' + e.message, 'error'); }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// SCHEDULE — pipeline of approved quotes → calendar of tentative/confirmed jobs
+// (added 2026-11-01; table = bookings, see supabase_bookings.sql)
+//
+// Flow: a quote is approved (Xero ACCEPTED, or "Add job" here) → booking
+// 'approved' (needs a date) → drag / tap-to-place → 'tentative' → 'confirmed'.
+// Constraints (plumber ready 15/11, delivery lead times, client away…) push the
+// earliest sensible start and raise warnings; weather flags outdoor days;
+// "Notify client" drafts the message into the Comms Hub (never auto-sent),
+// or opens SMS / email prefilled. Everything writes through hubWrite.
+// ═══════════════════════════════════════════════════════════════════════════
+const SCH_SQL = `CREATE TABLE IF NOT EXISTS bookings (
+  id TEXT PRIMARY KEY, project TEXT DEFAULT '', title TEXT DEFAULT '', quote_number TEXT DEFAULT '',
+  approval_source TEXT DEFAULT 'hub', approved_at DATE, status TEXT DEFAULT 'approved',
+  client_name TEXT DEFAULT '', client_phone TEXT DEFAULT '', client_email TEXT DEFAULT '',
+  site_address TEXT DEFAULT '', lat NUMERIC(9,6), lng NUMERIC(9,6), env TEXT DEFAULT 'indoor',
+  priority INT DEFAULT 2, hours NUMERIC(7,2), hours_per_day NUMERIC(4,2) DEFAULT 8,
+  start_date DATE, start_time TEXT DEFAULT '07:00', end_date DATE, window_days INT DEFAULT 0,
+  constraints JSONB NOT NULL DEFAULT '[]', notify_log JSONB NOT NULL DEFAULT '[]', notified_start DATE,
+  notes TEXT DEFAULT '', created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW());
+GRANT SELECT ON bookings TO anon;
+GRANT ALL ON bookings TO service_role;
+ALTER TABLE bookings DISABLE ROW LEVEL SECURITY;`;
+
+const SCH_STATUS = {
+  approved:    { label: 'Needs a date', color: '#FFBE0B' },
+  tentative:   { label: 'Tentative',    color: '#3A86FF' },
+  confirmed:   { label: 'Confirmed',    color: '#05C46B' },
+  in_progress: { label: 'In progress',  color: '#8338EC' },
+  done:        { label: 'Done',         color: '#707070' },
+  cancelled:   { label: 'Cancelled',    color: '#707070' }
+};
+const SCH_ACTIVE = ['tentative', 'confirmed', 'in_progress'];          // statuses that occupy capacity
+const SCH_PRIO = { 1: 'High', 2: 'Normal', 3: 'Low' };
+const SCH_CON_TYPES = { trade: 'Other trade', delivery: 'Delivery', client: 'Client', other: 'Other' };
+const SCH_HOME = { lat: -33.7969, lng: 151.2878 };                      // Manly — weather + travel fallback
+
+let SCH = { view: 'week', anchor: null, selDay: null, placing: null, showDone: false,
+            weather: null, weatherTried: false, msg: null, openId: null };
+try { SCH.view = localStorage.getItem('sch_view') || 'week'; } catch (e) {}
+
+// ── Settings (per-device, localStorage) ─────────────────────────────────────
+function schSettings() {
+  let s = {};
+  try { s = JSON.parse(localStorage.getItem('sch_settings') || '{}'); } catch (e) {}
+  return { commsUrl: '', commsKey: '', window: 0, capacity: 8, ...s };
+}
+function schStoreSettings(o) {
+  try { localStorage.setItem('sch_settings', JSON.stringify({ ...schSettings(), ...o })); } catch (e) {}
+}
+
+// ── Date helpers (all local-time, YYYY-MM-DD strings) ───────────────────────
+const pad2 = n => String(n).padStart(2, '0');
+function ymd(d) { return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
+function pd(s) { const [y, m, d] = String(s).slice(0, 10).split('-').map(Number); return new Date(y, m - 1, d, 12); }
+function addD(s, n) { const d = pd(s); d.setDate(d.getDate() + n); return ymd(d); }
+function isWork(s) { const w = pd(s).getDay(); return w >= 1 && w <= 5; }
+function nextWork(s, dir = 1) { let x = s, i = 0; while (!isWork(x) && i++ < 10) x = addD(x, dir); return x; }
+function mondayOf(s) { const d = pd(s); const w = (d.getDay() + 6) % 7; d.setDate(d.getDate() - w); return ymd(d); }
+function todayStr() { return ymd(new Date()); }
+function schHomeMonday() { const t = todayStr(); return mondayOf(isWork(t) ? t : nextWork(t)); }
+function diffDays(a, b) { return Math.round((pd(b) - pd(a)) / 86400000); }
+function fmtDay(s, o) { return s ? pd(s).toLocaleDateString('en-AU', o || { weekday: 'short', day: 'numeric', month: 'short' }) : '—'; }
+function fmtShort(s) { return s ? pd(s).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : '—'; }
+function fmtHM(mins) { const h = Math.floor(mins / 60) % 24, m = Math.round(mins % 60); return h + ':' + pad2(m); }
+function hmToMin(t) { const [h, m] = String(t || '07:00').split(':').map(Number); return (h || 0) * 60 + (m || 0); }
+function hrsText(h) { return (Math.round(h * 10) / 10) + 'h'; }
+
+// ── Booking maths ───────────────────────────────────────────────────────────
+function schAll() { return Array.isArray(D && D.bookings) ? D.bookings : []; }
+function schGet(id) { return schAll().find(b => b.id === id); }
+function schCap() { return Number(schSettings().capacity) || 8; }
+
+// Working days a booking occupies, with hours per day: [{d, h}]
+function schSpan(b) {
+  if (!b.start_date) return [];
+  const hpd = Number(b.hours_per_day) || 8;
+  const hrs = Number(b.hours) || hpd;
+  const n = Math.max(1, Math.ceil(hrs / hpd - 1e-9));
+  const out = [];
+  let d = nextWork(b.start_date);
+  for (let i = 0; i < n; i++) {
+    out.push({ d, h: i < n - 1 ? hpd : Math.round((hrs - (n - 1) * hpd) * 100) / 100 });
+    d = nextWork(addD(d, 1));
+  }
+  return out;
+}
+function schEndDate(b) { const s = schSpan(b); return s.length ? s[s.length - 1].d : null; }
+
+function schDayEntries(d, includeDone) {
+  const out = [];
+  schAll().forEach(b => {
+    if (b.status === 'cancelled') return;
+    if (b.status === 'done' && !includeDone) return;
+    if (!b.start_date) return;
+    const hit = schSpan(b).find(x => x.d === d);
+    if (hit) out.push({ b, h: hit.h });
+  });
+  return out;
+}
+function schDayLoad(d, exceptId) {
+  return schDayEntries(d).filter(e => SCH_ACTIVE.includes(e.b.status) && e.b.id !== exceptId).reduce((s, e) => s + e.h, 0);
+}
+
+// Parse "10 days", "3 weeks", "2-3 weeks", "6 wks" → days (upper bound)
+function schLeadDays(txt) {
+  const m = String(txt || '').toLowerCase().match(/(\d+)(?:\s*[-–to]+\s*(\d+))?\s*(day|d\b|week|wk|month)/);
+  if (!m) { const n = parseInt(txt, 10); return isNaN(n) ? 0 : n; }
+  const n = Number(m[2] || m[1]);
+  return /week|wk/.test(m[3]) ? n * 7 : /month/.test(m[3]) ? n * 30 : n;
+}
+
+// Special-order items on the project's open shopping list(s) that carry a lead time
+function schDeliveries(b) {
+  const out = [];
+  const key = (b.project || '').toLowerCase();
+  if (!key) return out;
+  (D.shopping_lists || []).forEach(l => {
+    if (l.status === 'done' || (l.project || '').toLowerCase() !== key) return;
+    (Array.isArray(l.items) ? l.items : []).forEach((it, idx) => {
+      if (!it || !it.special || it.checked) return;
+      const lead = schLeadDays(it.lead_time);
+      if (!lead && !it.eta) return;
+      const today = todayStr();
+      const eta = it.eta || addD(today, lead);
+      const orderBy = b.start_date ? addD(b.start_date, -lead) : null;
+      out.push({ listId: l.id, idx, item: it, lead, ordered: !!it.ordered, eta, orderBy,
+                 late: !it.ordered && !!orderBy && today > orderBy,
+                 arrivesAfterStart: !!b.start_date && eta > b.start_date });
+    });
+  });
+  return out;
+}
+
+// Everything that has to be true before the job can start: manual constraints + deliveries
+function schBlockers(b) {
+  const out = [];
+  (Array.isArray(b.constraints) ? b.constraints : []).forEach(c => {
+    if (c.done) return;
+    out.push({ key: c.id, type: c.type, label: c.label, ready: c.ready_date || null, confirmed: !!c.confirmed, manual: true });
+  });
+  schDeliveries(b).forEach(d => out.push({
+    key: 'dl-' + d.listId + '-' + d.idx, type: 'delivery', label: (d.item.name || 'Special order') + (d.ordered ? ' (ordered)' : ' (not ordered)'),
+    ready: d.eta, confirmed: d.ordered, manual: false, delivery: d
+  }));
+  return out;
+}
+function schEarliest(b) {
+  const dates = schBlockers(b).map(x => x.ready).filter(Boolean).sort();
+  return dates.length ? nextWork(addD(dates[dates.length - 1], 1)) : null;
+}
+
+// Free-text description of the window the client is told
+function schDateText(b, forDate) {
+  const s = forDate || b.start_date;
+  if (!s) return 'a date to be confirmed';
+  const w = Number(b.window_days) || 0;
+  if (!w) return fmtDay(s, { weekday: 'long', day: 'numeric', month: 'long' });
+  const e = nextWork(addD(s, w));
+  return 'between ' + fmtDay(s, { weekday: 'long', day: 'numeric' }) + ' and ' + fmtDay(e, { weekday: 'long', day: 'numeric', month: 'long' });
+}
+
+function schWx(d) {
+  const w = SCH.weather && SCH.weather[d];
+  if (!w) return null;
+  return { ...w, rain: w.pop >= 60 || w.mm >= 5, wind: w.wind >= 45 };
+}
+
+// All problems with a booking, worst first: {level:'bad'|'warn'|'info', text}
+function schIssues(b) {
+  const out = [];
+  if (['done', 'cancelled'].includes(b.status)) return out;
+  const today = todayStr();
+  const blockers = schBlockers(b);
+  if (b.start_date) {
+    blockers.forEach(x => {
+      if (x.ready && b.start_date <= x.ready) out.push({ level: 'bad', text: 'Starts before ' + x.label + ' is ready (' + fmtShort(x.ready) + ')' });
+      else if (!x.confirmed && x.manual) out.push({ level: 'warn', text: 'Confirm ' + x.label + (x.ready ? ' (due ' + fmtShort(x.ready) + ')' : '') });
+    });
+    schDeliveries(b).forEach(d => { if (d.late || (d.arrivesAfterStart && !d.ordered)) out.push({ level: 'bad', text: 'Order ' + (d.item.name || 'special item') + ' by ' + fmtShort(d.orderBy) + (d.late ? ' — already late' : '') }); });
+    schSpan(b).forEach(x => {
+      const load = schDayLoad(x.d);
+      if (SCH_ACTIVE.includes(b.status) && load > schCap() + 0.01) out.push({ level: 'bad', text: 'Overbooked ' + fmtDay(x.d) + ' (' + hrsText(load) + ')' });
+      const w = schWx(x.d);
+      if (w && w.rain && b.env !== 'indoor') out.push({ level: 'warn', text: 'Rain ' + fmtDay(x.d) + ' (' + w.pop + '%) on an outdoor job' });
+    });
+    if (['tentative', 'confirmed'].includes(b.status) && b.notified_start !== b.start_date)
+      out.push({ level: 'warn', text: b.notified_start ? 'Client not told about the new date' : 'Client not told yet' });
+    if (b.start_date < today && ['tentative', 'confirmed'].includes(b.status)) out.push({ level: 'warn', text: 'Date has passed — mark in progress/done' });
+  } else {
+    const e = schEarliest(b);
+    if (e) out.push({ level: 'info', text: 'Earliest start ' + fmtDay(e) });
+  }
+  if (!b.hours) out.push({ level: 'info', text: 'Hours not set' });
+  if (!b.site_address) out.push({ level: 'info', text: 'No site address' });
+  const rank = { bad: 0, warn: 1, info: 2 };
+  return out.sort((a, c) => rank[a.level] - rank[c.level]);
+}
+
+// Next date the whole job fits: ≥ earliest start, within capacity, avoiding forecast rain for outdoor work
+function schSuggest(b) {
+  const today = todayStr();
+  let d = nextWork(addD(today, 1));
+  const e = schEarliest(b);
+  if (e && e > d) d = e;
+  const hpd = Number(b.hours_per_day) || 8;
+  for (let i = 0; i < 180; i++) {
+    const probe = { ...b, start_date: d };
+    const ok = schSpan(probe).every(x => {
+      const free = schCap() - schDayLoad(x.d, b.id);
+      const w = schWx(x.d);
+      return free + 0.01 >= Math.min(x.h, hpd) && !(w && w.rain && b.env !== 'indoor');
+    });
+    if (ok) return d;
+    d = nextWork(addD(d, 1));
+  }
+  return d;
+}
+
+// Straight-line distance → rough drive minutes between two jobs
+function schTravelMin(a, b) {
+  if (a.lat == null || b.lat == null || a.lng == null || b.lng == null) return null;
+  const R = 6371, rad = x => x * Math.PI / 180;
+  const dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  const km = 2 * R * Math.asin(Math.sqrt(h)) * 1.35;
+  return Math.max(5, Math.round((km / 35 * 60 + 5) / 5) * 5);
+}
+
+// Ordered plan for a day: start/end clock times with travel gaps
+function schDayPlan(d) {
+  const es = schDayEntries(d, true).sort((a, c) => (a.b.priority - c.b.priority) || String(a.b.start_time).localeCompare(String(c.b.start_time)));
+  let t = null, prev = null;
+  return es.map(e => {
+    const travel = prev ? schTravelMin(prev, e.b) : null;
+    let start = hmToMin(e.b.start_time);
+    if (t != null) start = Math.max(start, t + (travel || 0));
+    const end = start + e.h * 60;
+    t = end; prev = e.b;
+    return { b: e.b, h: e.h, start, end, travel };
+  });
+}
+
+// ── Persistence ─────────────────────────────────────────────────────────────
+async function schSave(id, fields, quiet) {
+  const b = schGet(id);
+  if (!b) return null;
+  const before = {};
+  Object.keys(fields).forEach(k => before[k] = b[k]);
+  const merged = { ...b, ...fields };
+  if (['start_date', 'hours', 'hours_per_day'].some(k => k in fields)) fields.end_date = merged.start_date ? schEndDate(merged) : null;
+  Object.assign(b, fields);                                              // optimistic
+  try {
+    const row = await hubWrite('bookings', id, fields);
+    Object.assign(b, row);
+    return { before };
+  } catch (e) {
+    Object.assign(b, before);
+    claudeToast('Could not save: ' + e.message, 'error');
+    schRender();
+    return null;
+  } finally {
+    if (!quiet) schRender();
+  }
+}
+
+function schSnack(msg, actions) {
+  let el = document.getElementById('sch-snack');
+  if (!el) { el = document.createElement('div'); el.id = 'sch-snack'; document.body.appendChild(el); }
+  el.innerHTML = '<span>' + attrEsc(msg) + '</span>' + (actions || []).map((a, i) => '<button data-i="' + i + '">' + attrEsc(a.label) + '</button>').join('');
+  el.querySelectorAll('button').forEach(btn => btn.onclick = () => { el.classList.remove('show'); actions[btn.dataset.i].run(); });
+  el.classList.add('show');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove('show'), 7000);
+}
+
+// ── Moving / placing ────────────────────────────────────────────────────────
+async function schMove(id, to, label) {
+  const b = schGet(id);
+  if (!b || !to) return;
+  const day = nextWork(to);
+  const fields = { start_date: day };
+  if (b.status === 'approved') fields.status = 'tentative';
+  const res = await schSave(id, fields);
+  if (!res) return;
+  const problems = schIssues(b).filter(i => i.level === 'bad');
+  const told = b.notified_start && b.notified_start !== day;
+  const actions = [{ label: 'Undo', run: () => schSave(id, res.before) }];
+  if (told || ['tentative', 'confirmed'].includes(b.status)) actions.push({ label: 'Tell client', run: () => schOpen(id, 'notify') });
+  schSnack((label || 'Moved to ') + fmtDay(day) + (problems.length ? ' — ⚠ ' + problems[0].text : ''), actions);
+}
+function schDrag(ev, id) { ev.dataTransfer.setData('text/plain', id); ev.dataTransfer.effectAllowed = 'move'; }
+function schDrop(ev, d) {
+  ev.preventDefault();
+  ev.currentTarget.classList.remove('over');
+  const id = ev.dataTransfer.getData('text/plain');
+  if (id && schGet(id)) schMove(id, d);
+}
+function schDayClick(d) {
+  if (SCH.placing) { const id = SCH.placing; SCH.placing = null; schMove(id, d, 'Placed on '); return; }
+  SCH.selDay = SCH.selDay === d ? null : d;
+  schRender();
+}
+function schPlace(id) { SCH.placing = id; closeModal(); schRender(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+
+async function schSetStatus(id, status) {
+  const b = schGet(id);
+  const patch = { status };
+  if (status === 'approved') patch.start_date = null;
+  const res = await schSave(id, patch);
+  if (res) { schSnack(SCH_STATUS[status].label, [{ label: 'Undo', run: () => schSave(id, res.before) }]); if (SCH.openId === id) schOpen(id); }
+}
+
+// ── Weather (Open-Meteo, free, no key) ──────────────────────────────────────
+async function schLoadWeather() {
+  if (SCH.weatherTried) return;
+  SCH.weatherTried = true;
+  try {
+    const u = 'https://api.open-meteo.com/v1/forecast?latitude=' + SCH_HOME.lat + '&longitude=' + SCH_HOME.lng +
+      '&daily=precipitation_probability_max,precipitation_sum,wind_speed_10m_max,temperature_2m_max&timezone=Australia%2FSydney&forecast_days=16';
+    const j = await (await fetch(u)).json();
+    const w = {};
+    j.daily.time.forEach((t, i) => w[t] = { pop: j.daily.precipitation_probability_max[i] || 0, mm: j.daily.precipitation_sum[i] || 0, wind: j.daily.wind_speed_10m_max[i] || 0, max: j.daily.temperature_2m_max[i] });
+    SCH.weather = w;
+    if (document.getElementById('page-schedule').classList.contains('active')) schRender();
+  } catch (e) { SCH.weather = null; }
+}
+
+// ── Geocoding (OpenStreetMap Nominatim, free) for travel-time estimates ─────
+async function schGeocode(id) {
+  const b = schGet(id);
+  if (!b || !b.site_address) return;
+  try {
+    const q = encodeURIComponent(b.site_address + (/NSW|Australia/i.test(b.site_address) ? '' : ', NSW, Australia'));
+    const r = await (await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=au&q=' + q)).json();
+    if (r[0]) await schSave(id, { lat: Number(r[0].lat), lng: Number(r[0].lon) }, true);
+    else claudeToast('Address not found on the map — travel time unavailable', 'error');
+  } catch (e) {}
+}
+
+// ── Contacts → prefill client details ───────────────────────────────────────
+async function schContactFor(name) {
+  if (!name) return null;
+  const tries = [name, name.split(/[\s-]+/)[0]].filter(t => t && t.length >= 3);
+  for (const t of tries) {
+    try {
+      const rows = await sbGet('/rest/v1/contacts?select=name,email,phone,address_line1,city,region,postal_code&name=ilike.*' + encodeURIComponent(t) + '*&limit=2');
+      if (rows.length === 1) return rows[0];
+    } catch (e) { return null; }
+  }
+  return null;
+}
+async function schFillFromContact(id) {
+  const b = schGet(id);
+  const c = await schContactFor(b.client_name || b.project);
+  if (!c) { claudeToast('No single matching Xero contact found', 'error'); return; }
+  const addr = [c.address_line1, c.city, c.region, c.postal_code].filter(Boolean).join(', ');
+  await schSave(id, {
+    client_phone: b.client_phone || c.phone || '', client_email: b.client_email || c.email || '',
+    site_address: b.site_address || addr || ''
+  });
+  if (!b.lat) schGeocode(id);
+  if (SCH.openId === id) schOpen(id);
+}
+
+// ── Pipeline candidates: quotes accepted in Xero that aren't scheduled yet ──
+function schCandidates() {
+  const have = new Set(schAll().filter(b => b.status !== 'cancelled').flatMap(b => [b.quote_number, (b.project || '').toLowerCase()]).filter(Boolean));
+  const cutoff = addD(todayStr(), -150);
+  const byQuote = {};
+  (D.quote_items || []).forEach(q => {
+    if (!q.quote_number) return;
+    (byQuote[q.quote_number] = byQuote[q.quote_number] || []).push(q);
+  });
+  const out = [];
+  Object.keys(byQuote).forEach(qn => {
+    const lines = byQuote[qn];
+    const st = (lines[0].status || '').toUpperCase();
+    if (!['ACCEPTED', 'SENT'].includes(st)) return;
+    if ((lines[0].date || '') < cutoff) return;
+    if (have.has(qn)) return;
+    const proj = lines.map(l => l.project).find(Boolean) || '';
+    if (proj) {
+      if (have.has(proj.toLowerCase())) return;
+      const p = (D.projects || []).find(x => (x.name || '').toLowerCase() === proj.toLowerCase());
+      if (p && ['Finished', 'Paid', 'Inactive'].includes(p.status)) return;
+    }
+    const total = lines.reduce((s, l) => s + (Number(l.line_amount) || 0), 0);
+    const labourHrs = lines.filter(l => /\b(labou?r|hours?|hrs?)\b/i.test((l.item || '') + ' ' + (l.description || ''))).reduce((s, l) => s + (Number(l.qty) || 0), 0);
+    out.push({ quote_number: qn, status: st, contact: lines[0].contact || '', date: lines[0].date, project: proj, total, labourHrs, lines });
+  });
+  return out.sort((a, c) => (c.status === 'ACCEPTED') - (a.status === 'ACCEPTED') || String(c.date).localeCompare(String(a.date)));
+}
+
+async function schCreate(fields) {
+  const r = await fetch('/.netlify/functions/hub-write', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ table: 'bookings', insert: true, fields })
+  });
+  const out = await r.json().catch(() => ({}));
+  if (!r.ok || !out.ok) throw new Error(out.error || 'insert failed');
+  D.bookings = [out.row, ...schAll()];
+  return out.row;
+}
+
+async function schAddFromQuote(qn, open) {
+  const c = schCandidates().find(x => x.quote_number === qn);
+  if (!c) return null;
+  const proj = (D.projects || []).find(p => (p.name || '').toLowerCase() === (c.project || c.contact || '').toLowerCase());
+  const b = await schCreate({
+    project: c.project || (proj && proj.name) || c.contact, title: proj && proj.baseline_scope || '', quote_number: qn,
+    approval_source: c.status === 'ACCEPTED' ? 'xero' : 'hub', approved_at: todayStr(), status: 'approved', client_name: c.contact,
+    hours: (proj && Number(proj.baseline_labour_hours)) || c.labourHrs || null
+  });
+  schFillFromContact(b.id);
+  if (open) { schRender(); schOpen(b.id); }
+  return b;
+}
+async function schAddAllAccepted() {
+  const list = schCandidates().filter(c => c.status === 'ACCEPTED');
+  for (const c of list) { try { await schAddFromQuote(c.quote_number, false); } catch (e) { claudeToast('Could not add ' + c.quote_number + ': ' + e.message, 'error'); } }
+  schRender();
+  claudeToast('✓ Added ' + list.length + ' approved quote' + (list.length === 1 ? '' : 's') + ' to the pipeline');
+}
+async function schAddFromProject(name) {
+  const p = (D.projects || []).find(x => x.name === name);
+  if (!p) return;
+  const b = await schCreate({
+    project: p.name, title: p.baseline_scope || '', approval_source: 'hub', approved_at: todayStr(), status: 'approved',
+    client_name: p.name, hours: Number(p.baseline_labour_hours) || null
+  });
+  schFillFromContact(b.id);
+  closeModal(); schRender(); schOpen(b.id);
+}
+async function schAddBlank() {
+  const name = (document.getElementById('sch-new-name').value || '').trim();
+  if (!name) { claudeToast('Give the job a name', 'error'); return; }
+  const b = await schCreate({ project: name, approval_source: 'hub', approved_at: todayStr(), status: 'approved', client_name: name });
+  schFillFromContact(b.id);
+  closeModal(); schRender(); schOpen(b.id);
+}
+
+function schAddModal() {
+  const cands = schCandidates();
+  const taken = new Set(schAll().filter(b => b.status !== 'cancelled').map(b => (b.project || '').toLowerCase()));
+  const projs = (D.projects || []).filter(p => ['Quoted', 'Active'].includes(p.status) && !taken.has((p.name || '').toLowerCase()));
+  const row = (t, sub, act) => '<button class="sch-pick" onclick="' + act + '"><span><b>' + attrEsc(t) + '</b><small>' + attrEsc(sub) + '</small></span><i>＋</i></button>';
+  openModal('Add a job to the pipeline', `
+    <div class="sch-lbl">Quotes from Xero</div>
+    ${cands.length ? cands.map(c => row(c.contact + ' · ' + c.quote_number, (c.status === 'ACCEPTED' ? 'Accepted in Xero' : 'Sent — approve here') + ' · ' + fmt(c.total) + (c.labourHrs ? ' · ' + c.labourHrs + 'h labour' : ''), "schAddFromQuote('" + attrEsc(c.quote_number) + "',true);closeModal()")).join('') : '<div class="sch-empty">No unscheduled quotes in the last 5 months.</div>'}
+    <div class="sch-lbl">Projects</div>
+    ${projs.length ? projs.map(p => row(p.name, p.status + (p.baseline_labour_hours ? ' · ' + p.baseline_labour_hours + 'h baseline' : ''), "schAddFromProject('" + attrEsc(p.name).replace(/'/g, "\\'") + "')")).join('') : '<div class="sch-empty">Every active project is already scheduled.</div>'}
+    <div class="sch-lbl">Something new</div>
+    <div style="display:flex;gap:8px"><input id="sch-new-name" class="sch-in" placeholder="Client – suburb (e.g. Sam – Manly)" style="flex:1"><button class="sch-btn pri" onclick="schAddBlank()">Add</button></div>`);
+}
+
+// ═══ RENDER ═════════════════════════════════════════════════════════════════
+function schStatusChip(b) { const s = SCH_STATUS[b.status] || SCH_STATUS.approved; return '<span class="sch-st" style="--c:' + s.color + '">' + s.label + '</span>'; }
+function schEnvIcon(e) { return e === 'outdoor' ? '☀︎' : e === 'both' ? '◐' : '⌂'; }
+function schPrioDot(p) { return '<span class="sch-pd p' + (p || 2) + '" title="' + (SCH_PRIO[p] || 'Normal') + ' priority"></span>'; }
+function schIssueChips(b, max) {
+  const is = schIssues(b).filter(i => i.level !== 'info');
+  return is.slice(0, max || 3).map(i => '<span class="sch-chip ' + i.level + '">' + attrEsc(i.text) + '</span>').join('') + (is.length > (max || 3) ? '<span class="sch-chip">+' + (is.length - (max || 3)) + '</span>' : '');
+}
+
+function schCard(b) {
+  const earliest = !b.start_date ? schEarliest(b) : null;
+  const sugg = !b.start_date ? schSuggest(b) : null;
+  return `<div class="sch-card${SCH.placing === b.id ? ' placing' : ''}" draggable="true" ondragstart="schDrag(event,'${b.id}')" onclick="schOpen('${b.id}')" style="--c:${(SCH_STATUS[b.status] || SCH_STATUS.approved).color}">
+    <div class="sch-card-top"><b>${schPrioDot(b.priority)}${attrEsc(b.project || b.title || b.id)}</b>${schStatusChip(b)}</div>
+    <div class="sch-card-sub">${attrEsc(b.title || b.client_name || '')}</div>
+    <div class="sch-meta"><span>${schEnvIcon(b.env)} ${b.env || 'indoor'}</span><span>${b.hours ? hrsText(Number(b.hours)) : 'hours?'}</span>${b.start_date ? '<span>' + fmtDay(b.start_date) + '</span>' : ''}${b.site_address ? '<span class="trunc">' + attrEsc(b.site_address) + '</span>' : ''}</div>
+    <div class="sch-chips">${schIssueChips(b, 2)}</div>
+    ${!b.start_date ? `<div class="sch-card-act"><button class="sch-btn" onclick="event.stopPropagation();schMove('${b.id}','${sugg}','Tentatively booked ')">Suggest ${fmtShort(sugg)}</button><button class="sch-btn" onclick="event.stopPropagation();schPlace('${b.id}')">Pick a day</button></div>` : ''}
+  </div>`;
+}
+
+function schChip(b, d, h) {
+  const c = (SCH_STATUS[b.status] || SCH_STATUS.approved).color;
+  const bad = schIssues(b).some(i => i.level === 'bad');
+  const w = schWx(d);
+  const rainy = w && w.rain && b.env !== 'indoor';
+  return `<div class="sch-ev${b.status === 'done' ? ' done' : ''}${bad ? ' bad' : ''}" draggable="true" ondragstart="schDrag(event,'${b.id}')" onclick="event.stopPropagation();schOpen('${b.id}')" style="--c:${c};color:${textOn(c)}">
+    <b>${schPrioDot(b.priority)}${attrEsc(b.project || b.id)}</b><span>${hrsText(h)} · ${schEnvIcon(b.env)}${rainy ? ' 🌧' : ''}${bad ? ' ⚠' : ''}</span></div>`;
+}
+
+function schWxBadge(d) {
+  const w = schWx(d);
+  if (!w) return '';
+  const ic = w.rain ? '🌧' : w.pop >= 30 ? '⛅' : '☀';
+  return '<span class="sch-wx' + (w.rain ? ' rain' : '') + '" title="' + w.pop + '% rain · ' + Math.round(w.mm) + 'mm · wind ' + Math.round(w.wind) + 'km/h">' + ic + ' ' + Math.round(w.max) + '°</span>';
+}
+
+function schDayCell(d, month, curMonth) {
+  const es = schDayEntries(d, true);
+  const load = schDayLoad(d), cap = schCap();
+  const work = isWork(d);
+  const pct = Math.min(100, load / cap * 100);
+  const cls = 'sch-day' + (d === todayStr() ? ' today' : '') + (!work ? ' off' : '') + (month && pd(d).getMonth() !== curMonth ? ' dim' : '') + (SCH.selDay === d ? ' sel' : '') + (SCH.placing ? ' placeable' : '');
+  return `<div class="${cls}" onclick="schDayClick('${d}')" ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="schDrop(event,'${d}')">
+    <div class="sch-day-h"><span class="sch-dn">${month ? pd(d).getDate() : fmtDay(d)}</span>${!month ? schWxBadge(d) : ''}</div>
+    ${work ? `<div class="sch-load${load > cap + .01 ? ' over' : ''}" title="${hrsText(load)} of ${hrsText(cap)}"><i style="width:${pct}%"></i></div>` : ''}
+    <div class="sch-evs">${es.map(e => schChip(e.b, d, e.h)).join('')}</div>
+  </div>`;
+}
+
+function schCalendar() {
+  const a = SCH.anchor;
+  let head, body;
+  if (SCH.view === 'week') {
+    const days = Array.from({ length: 7 }, (_, i) => addD(a, i));
+    head = fmtShort(days[0]) + ' – ' + fmtDay(days[6], { day: 'numeric', month: 'short', year: 'numeric' });
+    body = '<div class="sch-grid week">' + days.map(d => schDayCell(d, false)).join('') + '</div>';
+  } else {
+    const first = pd(a); first.setDate(1);
+    const start = mondayOf(ymd(first));
+    const cur = first.getMonth();
+    const days = Array.from({ length: 42 }, (_, i) => addD(start, i));
+    head = first.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' });
+    body = '<div class="sch-dow">' + ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(x => '<span>' + x + '</span>').join('') + '</div><div class="sch-grid month">' + days.map(d => schDayCell(d, true, cur)).join('') + '</div>';
+  }
+  return `<div class="section sch-cal">
+    <div class="sch-cal-h">
+      <div class="sch-nav"><button class="sch-ic" onclick="schNav(-1)" aria-label="Previous">‹</button><button class="sch-btn" onclick="schToday()">Today</button><button class="sch-ic" onclick="schNav(1)" aria-label="Next">›</button></div>
+      <h2>${head}</h2>
+      <div class="sch-seg"><button class="${SCH.view === 'week' ? 'on' : ''}" onclick="schView('week')">Week</button><button class="${SCH.view === 'month' ? 'on' : ''}" onclick="schView('month')">Month</button></div>
+    </div>${body}</div>`;
+}
+function schNav(n) {
+  if (SCH.view === 'week') SCH.anchor = addD(SCH.anchor, 7 * n);
+  else { const d = pd(SCH.anchor); d.setMonth(d.getMonth() + n, 1); SCH.anchor = ymd(d); }
+  schRender();
+}
+function schToday() { SCH.anchor = SCH.view === 'week' ? schHomeMonday() : todayStr(); schRender(); }
+function schView(v) {
+  SCH.view = v;
+  SCH.anchor = v === 'week' ? mondayOf(SCH.anchor || schHomeMonday()) : (SCH.anchor || todayStr());
+  try { localStorage.setItem('sch_view', v); } catch (e) {}
+  schRender();
+}
+
+function schDayPlanPanel() {
+  const d = SCH.selDay;
+  if (!d) return '';
+  const plan = schDayPlan(d);
+  const w = schWx(d);
+  const rows = plan.map((p, i) => (p.travel ? '<div class="sch-trav">🚗 about ' + p.travel + ' min drive</div>' : '') +
+    `<div class="sch-plan" onclick="schOpen('${p.b.id}')" style="--c:${(SCH_STATUS[p.b.status] || SCH_STATUS.approved).color}"><time>${fmtHM(p.start)}–${fmtHM(p.end)}</time><span><b>${attrEsc(p.b.project)}</b><small>${attrEsc(p.b.site_address || 'no address')}</small></span>${schStatusChip(p.b)}</div>`).join('');
+  const load = schDayLoad(d), cap = schCap();
+  return `<div class="section"><div class="section-head"><h2>${fmtDay(d, { weekday: 'long', day: 'numeric', month: 'long' })}</h2><span class="sch-sub">${hrsText(load)} of ${hrsText(cap)}${w ? ' · ' + w.pop + '% rain · wind ' + Math.round(w.wind) + ' km/h' : ''}</span></div>
+    <div class="section-body">${rows || '<div class="sch-empty">Nothing booked. Drag a job here or tap “Pick a day” on a card.</div>'}</div></div>`;
+}
+
+function schAttention() {
+  const items = [];
+  const today = todayStr();
+  schAll().forEach(b => {
+    if (['done', 'cancelled'].includes(b.status)) return;
+    const nm = b.project || b.id;
+    schBlockers(b).forEach(x => {
+      if (x.manual && !x.confirmed && x.ready && x.ready <= addD(today, 3))
+        items.push({ rank: 1, id: b.id, icon: '✓', t: 'Check: ' + x.label, s: nm + ' · due ' + fmtShort(x.ready) + ' — confirm it’s done, then lock the date' });
+    });
+    schDeliveries(b).forEach(d => { if (d.late || (d.arrivesAfterStart && !d.ordered)) items.push({ rank: 0, id: b.id, icon: '📦', t: 'Order ' + (d.item.name || 'special item') + (d.late ? ' now' : ''), s: nm + ' · ' + (d.item.lead_time || d.lead + ' days') + ' lead time' + (b.start_date ? ' — order by ' + fmtShort(d.orderBy) : '') }); });
+    if (['tentative', 'confirmed'].includes(b.status) && b.start_date && b.notified_start !== b.start_date) items.push({ rank: 2, id: b.id, icon: '✉', t: 'Tell ' + (b.client_name || nm) + ' about ' + fmtDay(b.start_date), s: b.notified_start ? 'Told ' + fmtShort(b.notified_start) + ' before' : 'Not told yet', notify: true });
+    if (SCH_ACTIVE.includes(b.status)) schSpan(b).forEach(x => { if (schDayLoad(x.d) > schCap() + .01 && !items.find(i => i.key === 'o' + x.d)) items.push({ rank: 0, id: b.id, key: 'o' + x.d, icon: '⚠', t: 'Overbooked ' + fmtDay(x.d), s: hrsText(schDayLoad(x.d)) + ' booked of ' + hrsText(schCap()) }); });
+    if (b.start_date && b.env !== 'indoor' && SCH_ACTIVE.includes(b.status)) {
+      const bad = schSpan(b).find(x => { const w = schWx(x.d); return w && w.rain; });
+      if (bad) {
+        const alt = schAll().find(o => o.id !== b.id && o.env === 'indoor' && SCH_ACTIVE.includes(o.status) && o.start_date && o.start_date > bad.d);
+        items.push({ rank: 1, id: b.id, icon: '🌧', t: 'Rain forecast ' + fmtDay(bad.d) + ' — ' + nm, s: 'Outdoor job' + (alt ? ' · swap with ' + (alt.project || alt.id) + ' (indoor)?' : ' · consider moving it') });
+      }
+    }
+  });
+  const needDate = schAll().filter(b => b.status === 'approved').length;
+  if (needDate) items.push({ rank: 3, id: null, icon: '📅', t: needDate + ' approved job' + (needDate > 1 ? 's' : '') + ' need a date', s: 'In the pipeline below' });
+  items.sort((a, c) => a.rank - c.rank);
+  if (!items.length) return '';
+  return `<div class="sch-attn">${items.slice(0, 6).map(i => `<button class="sch-att r${i.rank}" onclick="${i.id ? `schOpen('${i.id}'${i.notify ? ",'notify'" : ''})` : ''}"><i>${i.icon}</i><span><b>${attrEsc(i.t)}</b><small>${attrEsc(i.s)}</small></span></button>`).join('')}${items.length > 6 ? '<div class="sch-sub" style="padding:6px 4px">+' + (items.length - 6) + ' more</div>' : ''}</div>`;
+}
+
+function schPipeline() {
+  const all = schAll();
+  const needs = all.filter(b => b.status === 'approved').sort((a, c) => a.priority - c.priority);
+  const tent = all.filter(b => b.status === 'tentative').sort((a, c) => String(a.start_date).localeCompare(String(c.start_date)));
+  const conf = all.filter(b => ['confirmed', 'in_progress'].includes(b.status)).sort((a, c) => String(a.start_date).localeCompare(String(c.start_date)));
+  const done = all.filter(b => ['done', 'cancelled'].includes(b.status));
+  const cands = schCandidates();
+  const acc = cands.filter(c => c.status === 'ACCEPTED');
+  const sec = (title, list, color) => list.length ? `<div class="sch-sec"><div class="sch-sec-h" style="--c:${color}">${title} <em>${list.length}</em></div>${list.map(schCard).join('')}</div>` : '';
+  return `<div class="sch-pipe">
+    ${acc.length ? `<div class="sch-xero"><span><b>${acc.length} approved in Xero</b><small>not in the schedule yet</small></span><button class="sch-btn pri" onclick="schAddAllAccepted()">Add ${acc.length > 1 ? 'all' : ''}</button></div>` : ''}
+    ${sec('Needs a date', needs, '#FFBE0B')}${sec('Tentative', tent, '#3A86FF')}${sec('Confirmed', conf, '#05C46B')}
+    ${!all.filter(b => !['done', 'cancelled'].includes(b.status)).length ? '<div class="sch-empty big">No jobs in the pipeline.<br>Approve a quote in Xero, or tap <b>＋ Add job</b>.</div>' : ''}
+    ${done.length ? `<button class="sch-link" onclick="SCH.showDone=!SCH.showDone;schRender()">${SCH.showDone ? 'Hide' : 'Show'} done / cancelled (${done.length})</button>${SCH.showDone ? done.map(schCard).join('') : ''}` : ''}
+  </div>`;
+}
+
+function schHeader() {
+  return `<div class="sch-top"><div><h1>Schedule</h1><span class="sch-sub">Pipeline &amp; bookings</span></div>
+    <div class="sch-top-act"><button class="sch-ic" onclick="schSettingsModal()" aria-label="Settings">⚙︎</button><button class="sch-btn pri" onclick="schAddModal()">＋ Add job</button></div></div>`;
+}
+
+function schSetupCard() {
+  return `<div class="section"><div class="section-body" style="padding:24px;max-width:640px;margin:0 auto">
+    <h2 style="font-size:18px;margin-bottom:8px">One-time setup</h2>
+    <p style="color:var(--ink-3);line-height:1.5;margin-bottom:14px">The Schedule needs a <code>bookings</code> table in Supabase. Copy the SQL, open the Supabase SQL editor, paste, and press Run. Then come back and tap “Check again”.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="sch-btn pri" onclick="navigator.clipboard.writeText(SCH_SQL).then(()=>claudeToast('SQL copied'))">Copy SQL</button><a class="sch-btn" target="_blank" rel="noopener" href="https://supabase.com/dashboard/project/nwpzjqblhywclqharggu/sql/new">Open SQL editor</a><button class="sch-btn" onclick="loadData()">Check again</button></div>
+    <pre class="sch-sql">${attrEsc(SCH_SQL)}</pre></div></div>`;
+}
+
+function schRender() {
+  const page = document.getElementById('page-schedule');
+  if (!page) return;
+  if (!SCH.anchor) SCH.anchor = SCH.view === 'week' ? schHomeMonday() : todayStr();
+  schLoadWeather();
+  if (D && D.bookings === null) { page.innerHTML = schHeader().replace(/<div class="sch-top-act">[\s\S]*<\/div><\/div>$/, '</div>') + schSetupCard(); return; }
+  const banner = SCH.placing ? `<div class="sch-banner">Tap a day to place <b>${attrEsc((schGet(SCH.placing) || {}).project || '')}</b><button onclick="SCH.placing=null;schRender()">Cancel</button></div>` : '';
+  page.innerHTML = schHeader() + banner + schAttention() + `<div class="sch-layout"><div class="sch-col-pipe">${schPipeline()}</div><div class="sch-col-cal">${schCalendar()}${schDayPlanPanel()}</div></div>`;
+}
+
+// ═══ BOOKING SHEET ══════════════════════════════════════════════════════════
+const SCH_NUM = { hours: 1, hours_per_day: 1, priority: 1, window_days: 1 };
+async function schSet(id, field, val) {
+  if (field in SCH_NUM) val = val === '' ? null : Number(val);
+  if (val === '') val = field === 'start_date' ? null : val;
+  const b = schGet(id);
+  const patch = { [field]: val };
+  if (field === 'start_date' && val) {
+    patch.start_date = nextWork(val);
+    if (b.status === 'approved') patch.status = 'tentative';
+  }
+  const res = await schSave(id, patch, true);
+  if (field === 'site_address' && val) { await schGeocode(id); }
+  if (res && field === 'start_date') {
+    const bad = schIssues(b).find(i => i.level === 'bad');
+    if (bad) claudeToast('⚠ ' + bad.text, 'error');
+  }
+  schRender();
+  if (SCH.openId === id) schOpen(id, SCH.msg && SCH.msg.id === id ? 'notify' : undefined, true);
+}
+
+function schTimeline(b, d) {
+  const today = todayStr();
+  const pts = [today, d.eta, b.start_date, d.orderBy].filter(Boolean).sort();
+  const lo = pts[0], hi = addD(pts[pts.length - 1], 2), span = Math.max(1, diffDays(lo, hi));
+  const pos = x => Math.max(0, Math.min(100, diffDays(lo, x) / span * 100));
+  const ok = !d.arrivesAfterStart;
+  return `<div class="sch-tl"><div class="sch-tl-bar"><i style="left:${pos(d.ordered ? today : (d.orderBy && d.orderBy > today ? d.orderBy : today))}%;width:${Math.max(2, pos(d.eta) - pos(d.ordered ? today : (d.orderBy && d.orderBy > today ? d.orderBy : today)))}%;background:${ok ? 'var(--sage)' : 'var(--pink)'}"></i>
+    <u style="left:${pos(today)}%"><s>Today</s></u>${d.orderBy ? `<u class="o" style="left:${pos(d.orderBy)}%"><s>Order by ${fmtShort(d.orderBy)}</s></u>` : ''}<u class="e" style="left:${pos(d.eta)}%"><s>Arrives ${fmtShort(d.eta)}</s></u>${b.start_date ? `<u class="st" style="left:${pos(b.start_date)}%"><s>Start ${fmtShort(b.start_date)}</s></u>` : ''}</div></div>`;
+}
+
+function schConsEditor(b) {
+  const cs = Array.isArray(b.constraints) ? b.constraints : [];
+  const row = c => `<div class="sch-con${c.done ? ' done' : ''}">
+    <div class="sch-con-main"><b>${attrEsc(c.label || 'Constraint')}</b><small>${SCH_CON_TYPES[c.type] || 'Other'}${c.ready_date ? ' · ready after ' + fmtDay(c.ready_date) : ''}</small></div>
+    <label class="sch-chk"><input type="checkbox" ${c.confirmed ? 'checked' : ''} onchange="schConToggle('${b.id}','${c.id}','confirmed')"> Confirmed</label>
+    <label class="sch-chk"><input type="checkbox" ${c.done ? 'checked' : ''} onchange="schConToggle('${b.id}','${c.id}','done')"> Done</label>
+    <button class="sch-ic sm" onclick="schConDel('${b.id}','${c.id}')" aria-label="Remove">✕</button></div>`;
+  const dl = schDeliveries(b).map(d => `<div class="sch-con del"><div class="sch-con-main"><b>📦 ${attrEsc(d.item.name || 'Special order')}</b><small>${attrEsc(d.item.supplier || '')} · lead ${attrEsc(d.item.lead_time || d.lead + ' days')} · ${d.ordered ? 'ordered, arrives ' + fmtShort(d.eta) : 'not ordered yet'}</small>${schTimeline(b, d)}</div>
+    <button class="sch-btn ${d.ordered ? '' : 'pri'}" onclick="schMarkOrdered('${d.listId}',${d.idx},${!d.ordered})">${d.ordered ? 'Un-order' : 'Mark ordered'}</button></div>`).join('');
+  return cs.map(row).join('') + dl + `<div class="sch-addcon">
+    <select id="sch-ct" class="sch-in">${Object.entries(SCH_CON_TYPES).map(([k, v]) => '<option value="' + k + '">' + v + '</option>').join('')}</select>
+    <input id="sch-cl" class="sch-in" placeholder="e.g. Plumber finishes first" style="flex:2;min-width:160px">
+    <input id="sch-cd" type="date" class="sch-in" title="Ready after this date">
+    <button class="sch-btn pri" onclick="schConAdd('${b.id}')">Add</button></div>`;
+}
+async function schConAdd(id) {
+  const label = document.getElementById('sch-cl').value.trim();
+  if (!label) { claudeToast('Describe the constraint', 'error'); return; }
+  const b = schGet(id);
+  const c = { id: 'c' + Date.now().toString(36), type: document.getElementById('sch-ct').value, label, ready_date: document.getElementById('sch-cd').value || null, confirmed: false, done: false };
+  await schSave(id, { constraints: [...(b.constraints || []), c] }, true);
+  const e = schEarliest(b);
+  if (e && b.start_date && b.start_date <= (c.ready_date || '')) schSnack('Job now starts before “' + label + '” is ready', [{ label: 'Move to ' + fmtShort(e), run: () => schMove(id, e) }]);
+  schRender(); schOpen(id, undefined, true);
+}
+async function schConToggle(id, cid, key) {
+  const b = schGet(id);
+  await schSave(id, { constraints: b.constraints.map(c => c.id === cid ? { ...c, [key]: !c[key] } : c) }, true);
+  const c = b.constraints.find(x => x.id === cid);
+  if (key === 'confirmed' && c.confirmed && ['approved', 'tentative'].includes(b.status)) schSnack('“' + c.label + '” confirmed ready', [{ label: 'Lock the date', run: () => schSetStatus(id, 'confirmed') }]);
+  schRender(); schOpen(id, undefined, true);
+}
+async function schConDel(id, cid) { const b = schGet(id); await schSave(id, { constraints: b.constraints.filter(c => c.id !== cid) }, true); schRender(); schOpen(id, undefined, true); }
+async function schMarkOrdered(listId, idx, ordered) {
+  const l = (D.shopping_lists || []).find(x => x.id === listId);
+  if (!l) return;
+  const items = l.items.map((it, i) => i !== idx ? it : { ...it, ordered, ordered_at: ordered ? todayStr() : null, eta: ordered ? addD(todayStr(), schLeadDays(it.lead_time)) : null });
+  try { const row = await hubWrite('shopping_lists', listId, { items }); l.items = row.items; } catch (e) { claudeToast('Could not save: ' + e.message, 'error'); return; }
+  schRender(); if (SCH.openId) schOpen(SCH.openId, undefined, true);
+}
+
+// ── Client messages ─────────────────────────────────────────────────────────
+function schFirst(b) { return String(b.client_name || b.project || '').split(/[\s\-–]+/)[0] || 'there'; }
+function schBuildMsg(b, kind, reason) {
+  const f = schFirst(b), job = b.title ? b.title.replace(/\.$/, '') : 'your job', date = schDateText(b);
+  const at = b.site_address ? ' at ' + b.site_address : '';
+  const blockers = schBlockers(b).filter(x => !x.confirmed).map(x => x.label.replace(/ \((not )?ordered\)/, ''));
+  const t = {
+    tentative: `Hi ${f}, it's Seb from Matiere. I've pencilled in ${date} for ${job}${at}.${blockers.length ? ' I\'ll lock it in once ' + blockers.slice(0, 2).join(' and ') + ' is sorted.' : ''} Does that work for you?`,
+    confirmed: `Hi ${f}, confirming ${date}${Number(b.window_days) ? '' : ' from about ' + (b.start_time || '7:00')} for ${job}${at}. Let me know if anything changes your end.`,
+    moved: `Hi ${f}, a quick update: ${job} has moved${b.notified_start ? ' from ' + fmtDay(b.notified_start, { weekday: 'long', day: 'numeric', month: 'long' }) : ''} to ${date}${reason ? ' — ' + reason : ''}. Sorry for the shuffle, let me know if that's a problem.`,
+    window: `Hi ${f}, we're aiming to start ${job} ${date}. I'll lock in the exact day as soon as I can and keep you posted.`
+  };
+  return t[kind] || t.tentative;
+}
+function schDefaultKind(b) {
+  if (b.notified_start && b.notified_start !== b.start_date) return 'moved';
+  if (b.status === 'confirmed') return 'confirmed';
+  return Number(b.window_days) > 0 ? 'window' : 'tentative';
+}
+function schMsgSet(id, key, val) {
+  const b = schGet(id);
+  SCH.msg = { ...SCH.msg, [key]: val };
+  if (key !== 'text') SCH.msg.text = schBuildMsg(b, SCH.msg.kind, SCH.msg.reason);
+  schOpen(id, 'notify', true);
+}
+async function schLogNotify(id, channel, note) {
+  const b = schGet(id);
+  const entry = { at: new Date().toISOString(), kind: SCH.msg.kind, channel, text: SCH.msg.text, start_date: b.start_date, note: note || '' };
+  await schSave(id, { notify_log: [entry, ...(b.notify_log || [])], notified_start: b.start_date }, true);
+  schRender(); schOpen(id, 'notify', true);
+}
+async function schSendComms(id) {
+  const b = schGet(id), s = schSettings();
+  if (!s.commsUrl || !s.commsKey) { schSettingsModal(); claudeToast('Set up the Comms Hub link first', 'error'); return; }
+  try {
+    const r = await fetch(s.commsUrl.replace(/\/$/, '') + '/api/schedule/draft', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-hub-schedule': s.commsKey },
+      body: JSON.stringify({ phone: b.client_phone || undefined, email: b.client_email || undefined, name: b.client_name || undefined, text: SCH.msg.text })
+    });
+    const out = await r.json().catch(() => ({}));
+    if (r.status === 404) { claudeToast('No conversation with this client in the Comms Hub — use SMS or email instead', 'error'); return; }
+    if (!r.ok) throw new Error(out.error || 'HTTP ' + r.status);
+    await schLogNotify(id, 'comms-hub-draft', 'Draft left in Comms Hub (' + out.channel + ')');
+    schSnack('Draft is waiting in the Comms Hub — review and tap Send there', [{ label: 'Open', run: () => window.open(s.commsUrl, '_blank') }]);
+  } catch (e) {
+    claudeToast('Comms Hub not reachable (' + e.message + '). Is Tailscale on? Use SMS or email instead.', 'error');
+  }
+}
+function schSendSms(id) {
+  const b = schGet(id);
+  if (!b.client_phone) { claudeToast('Add the client’s mobile number first', 'error'); return; }
+  const sep = /iPhone|iPad|Macintosh/.test(navigator.userAgent) ? '&' : '?';
+  schLogNotify(id, 'sms', 'Opened in Messages');
+  location.href = 'sms:' + b.client_phone.replace(/\s/g, '') + sep + 'body=' + encodeURIComponent(SCH.msg.text);
+}
+function schSendEmail(id) {
+  const b = schGet(id);
+  if (!b.client_email) { claudeToast('Add the client’s email first', 'error'); return; }
+  const subj = { moved: 'Update: new date for ' + (b.project || 'your job'), confirmed: 'Confirmed: ' + (b.project || 'your job') }[SCH.msg.kind] || 'Proposed date for ' + (b.project || 'your job');
+  schLogNotify(id, 'email', 'Opened in Mail');
+  location.href = 'mailto:' + b.client_email + '?subject=' + encodeURIComponent(subj) + '&body=' + encodeURIComponent(SCH.msg.text);
+}
+function schCopyMsg(id) { navigator.clipboard.writeText(SCH.msg.text).then(() => { claudeToast('Message copied'); schLogNotify(id, 'copied', 'Copied'); }); }
+
+function schNotifyPanel(b) {
+  if (!SCH.msg || SCH.msg.id !== b.id) { const k = schDefaultKind(b); SCH.msg = { id: b.id, kind: k, reason: '', text: schBuildMsg(b, k, '') }; }
+  const m = SCH.msg;
+  const log = (b.notify_log || []).slice(0, 5).map(l => `<div class="sch-log"><b>${new Date(l.at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })} · ${attrEsc(l.kind)}</b><span>${attrEsc(l.note || l.channel)}</span></div>`).join('');
+  return `<div class="sch-notify">
+    <div class="sch-seg wide">${[['tentative', 'Proposed'], ['confirmed', 'Confirmed'], ['moved', 'Date moved'], ['window', 'Window']].map(([k, v]) => `<button class="${m.kind === k ? 'on' : ''}" onclick="schMsgSet('${b.id}','kind','${k}')">${v}</button>`).join('')}</div>
+    ${m.kind === 'moved' ? `<input class="sch-in" placeholder="Reason (optional) e.g. the plumber ran over" value="${attrEsc(m.reason)}" onchange="schMsgSet('${b.id}','reason',this.value)">` : ''}
+    <textarea class="sch-in" rows="5" onchange="SCH.msg.text=this.value" oninput="SCH.msg.text=this.value">${attrEsc(m.text)}</textarea>
+    <div class="sch-send">
+      <button class="sch-btn pri" onclick="schSendComms('${b.id}')">Draft in Comms Hub</button>
+      <button class="sch-btn" onclick="schSendSms('${b.id}')">SMS</button>
+      <button class="sch-btn" onclick="schSendEmail('${b.id}')">Email</button>
+      <button class="sch-btn" onclick="schCopyMsg('${b.id}')">Copy</button></div>
+    <div class="sch-hint">Nothing is sent from here. The Comms Hub holds it as a draft for you to review.</div>${log ? '<div class="sch-lbl">Sent / drafted</div>' + log : ''}</div>`;
+}
+
+function schOpen(id, focus, keepScroll) {
+  const b = schGet(id);
+  if (!b) return;
+  SCH.openId = id;
+  const ov = document.getElementById('modal-overlay');
+  const top = ov.scrollTop;
+  const st = SCH_STATUS[b.status] || SCH_STATUS.approved;
+  const fld = (label, inner, cls) => `<label class="sch-f ${cls || ''}"><span>${label}</span>${inner}</label>`;
+  const inp = (field, type, extra) => `<input class="sch-in" type="${type}" value="${attrEsc(b[field] == null ? '' : String(b[field]).slice(0, 10 * (type === 'date' ? 1 : 100)))}" onchange="schSet('${id}','${field}',this.value)" ${extra || ''}>`;
+  const sel = (field, opts) => `<select class="sch-in" onchange="schSet('${id}','${field}',this.value)">${opts.map(([v, l]) => `<option value="${v}" ${String(b[field]) === String(v) ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+  const issues = schIssues(b);
+  const e = schEarliest(b), sg = schSuggest(b), span = schSpan(b);
+  const maps = b.site_address ? 'https://maps.apple.com/?q=' + encodeURIComponent(b.site_address) : '';
+  openModal(attrEsc(b.project || b.id), `
+    <div class="sch-sheet">
+      <div class="sch-pills">${Object.entries(SCH_STATUS).filter(([k]) => k !== 'cancelled').map(([k, v]) => `<button class="sch-pill${b.status === k ? ' on' : ''}" style="--c:${v.color}" onclick="schSetStatus('${id}','${k}')">${v.label}</button>`).join('')}</div>
+      ${issues.length ? `<div class="sch-issues">${issues.map(i => `<div class="sch-iss ${i.level}">${i.level === 'bad' ? '⛔' : i.level === 'warn' ? '⚠️' : 'ℹ︎'} ${attrEsc(i.text)}</div>`).join('')}</div>` : ''}
+
+      <div class="sch-lbl">When</div>
+      <div class="sch-move">
+        <div class="sch-move-main">${fld('Start', inp('start_date', 'date'))}${fld('Time', inp('start_time', 'time'))}${fld('Hours', inp('hours', 'number', 'step="0.5" min="0" inputmode="decimal"'))}</div>
+        <div class="sch-quick">
+          <button class="sch-btn" onclick="schMove('${id}',addD('${b.start_date || todayStr()}',-1))">−1 day</button>
+          <button class="sch-btn" onclick="schMove('${id}',addD('${b.start_date || todayStr()}',1))">+1 day</button>
+          <button class="sch-btn" onclick="schMove('${id}',addD('${b.start_date || todayStr()}',7))">+1 week</button>
+          <button class="sch-btn" onclick="schPlace('${id}')">Pick on calendar</button>
+          <button class="sch-btn pri" onclick="schMove('${id}','${sg}','Suggested: ')">Next free: ${fmtShort(sg)}</button>
+          ${e ? `<button class="sch-btn" onclick="schMove('${id}','${e}','Earliest possible: ')">Earliest: ${fmtShort(e)}</button>` : ''}
+        </div>
+        <div class="sch-sub">${span.length ? 'Runs ' + fmtDay(span[0].d) + (span.length > 1 ? ' → ' + fmtDay(span[span.length - 1].d) + ' (' + span.length + ' days)' : '') : 'No date yet'}</div>
+      </div>
+      <div class="sch-row3">${fld('Hours / day', inp('hours_per_day', 'number', 'step="0.5" min="1" max="12" inputmode="decimal"'))}${fld('Priority', sel('priority', [[1, 'High'], [2, 'Normal'], [3, 'Low']]))}${fld('Setting', sel('env', [['indoor', 'Indoor'], ['outdoor', 'Outdoor'], ['both', 'Both']]))}</div>
+      <div class="sch-row3">${fld('Client window', sel('window_days', [[0, 'Exact date'], [2, '2-day window'], [3, '3-day window']]), 'span2')}</div>
+
+      <div class="sch-lbl">Site &amp; client</div>
+      ${fld('Address', inp('site_address', 'text', 'placeholder="Street, suburb"'))}
+      <div class="sch-sub" style="margin:-4px 0 10px">${b.lat != null ? '📍 located (travel times on)' : b.site_address ? 'Not located yet' : ''} ${maps ? '· <a href="' + maps + '" target="_blank" rel="noopener">Open in Maps</a>' : ''}</div>
+      <div class="sch-row3">${fld('Client', inp('client_name', 'text'))}${fld('Mobile', inp('client_phone', 'tel', 'inputmode="tel"'))}${fld('Email', inp('client_email', 'email', 'inputmode="email"'))}</div>
+      <button class="sch-link" onclick="schFillFromContact('${id}')">Fill from Xero contact</button>
+
+      <div class="sch-lbl">Constraints &amp; deliveries</div>
+      ${schConsEditor(b)}
+
+      <div class="sch-lbl" id="sch-notify-anchor">Tell the client</div>
+      ${schNotifyPanel(b)}
+
+      <div class="sch-lbl">Job</div>
+      ${fld('Description', inp('title', 'text', 'placeholder="What the job is"'))}
+      ${fld('Notes', `<textarea class="sch-in" rows="2" onchange="schSet('${id}','notes',this.value)">${attrEsc(b.notes || '')}</textarea>`)}
+      <div class="sch-sub">${b.quote_number ? 'Quote ' + attrEsc(b.quote_number) + ' · ' : ''}Approved ${fmtShort(b.approved_at)} via ${b.approval_source === 'xero' ? 'Xero' : 'the Hub'} · ${b.id}</div>
+      <div class="sch-foot"><button class="sch-btn danger" onclick="schCancel('${id}')">Cancel this job</button></div>
+    </div>`, true);
+  document.getElementById('modal-title').textContent = b.project || b.id;
+  if (keepScroll) ov.scrollTop = top;
+  else if (focus === 'notify') { const a = document.getElementById('sch-notify-anchor'); if (a) a.scrollIntoView({ block: 'start' }); }
+}
+async function schCancel(id) { await schSetStatus(id, 'cancelled'); closeModal(); }
+
+function schSettingsModal() {
+  const s = schSettings();
+  openModal('Schedule settings', `<div class="sch-sheet">
+    <div class="sch-lbl">Comms Hub (client drafts)</div>
+    <label class="sch-f"><span>Address (your https Tailscale link)</span><input id="sch-s-url" class="sch-in" placeholder="https://your-mac.tailnet.ts.net" value="${attrEsc(s.commsUrl)}"></label>
+    <label class="sch-f"><span>Schedule key (run <code>npm run schedule:key</code> in comms-hub)</span><input id="sch-s-key" class="sch-in" type="password" autocomplete="off" value="${attrEsc(s.commsKey)}"></label>
+    <div class="sch-lbl">Working day</div>
+    <label class="sch-f"><span>Productive hours per day</span><input id="sch-s-cap" class="sch-in" type="number" step="0.5" min="1" max="14" value="${s.capacity}"></label>
+    <div class="sch-send"><button class="sch-btn pri" onclick="schSaveSettings()">Save</button><button class="sch-btn" onclick="schTestComms()">Test Comms Hub link</button></div>
+    <div class="sch-hint">Stored on this device only. The key can only leave a pending draft, nothing else, and nothing is ever sent automatically.</div></div>`);
+}
+function schSaveSettings() {
+  schStoreSettings({ commsUrl: document.getElementById('sch-s-url').value.trim(), commsKey: document.getElementById('sch-s-key').value.trim(), capacity: Number(document.getElementById('sch-s-cap').value) || 8 });
+  closeModal(); schRender(); claudeToast('Settings saved');
+}
+async function schTestComms() {
+  schSaveSettings.call && schStoreSettings({ commsUrl: document.getElementById('sch-s-url').value.trim(), commsKey: document.getElementById('sch-s-key').value.trim() });
+  const s = schSettings();
+  try {
+    const r = await fetch(s.commsUrl.replace(/\/$/, '') + '/api/schedule/ping', { headers: { 'x-hub-schedule': s.commsKey } });
+    claudeToast(r.ok ? '✓ Comms Hub reachable' : 'Reached it, but the key was refused (' + r.status + ')', r.ok ? 'success' : 'error');
+  } catch (e) { claudeToast('Cannot reach it — is Tailscale on and the address right?', 'error'); }
+}
+
+function schBadge() {
+  const n = schAll().filter(b => b.status === 'approved').length;
+  const el = document.getElementById('sch-count');
+  if (el) { el.textContent = n; el.style.display = n ? 'inline' : 'none'; }
+}
+function renderSchedule() { schBadge(); schRender(); }
+
 function kpi(label, value, sub, style='') {
   return `<div class="kpi ${style}">
     <div class="kpi-label">${label}</div>
@@ -938,6 +2009,7 @@ function renderAll() {
   renderTimesheet();   // Timesheets is the default landing tab
   renderProjects(k);
   renderForAction();   // pre-populates the For Action tab + count badge on load
+  schBadge();          // Schedule tab: count of approved jobs still needing a date
 }
 
 // ── Projects ──────────────────────────────────────────────────────────────────
