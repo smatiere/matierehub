@@ -196,6 +196,21 @@ async function createShoppingList({ job_name, client_name, materials }) {
   return rows[0];
 }
 
+// 2026-11-01 — an approved quote also lands in the Schedule pipeline (bookings)
+// as 'approved' (needs a date). Hours come from labour_hours; special-order
+// items with a lead_time are picked up by the Schedule tab from the shopping
+// list. Swallows errors upstream so a missing bookings table never blocks a quote.
+async function createBooking({ job_name, client_name, quote_number, labour_hours, title }) {
+  if (!job_name) return null;
+  const id = await nextId('bookings', 'BK');
+  const rows = await sbPost('bookings', {
+    id, project: job_name, title: title || '', quote_number: quote_number || '', approval_source: 'xero',
+    approved_at: new Date().toISOString().slice(0, 10), status: 'approved',
+    client_name: client_name || '', hours: labour_hours != null ? labour_hours : null
+  });
+  return rows[0];
+}
+
 // ── Tool implementations ──────────────────────────────────────────────────
 async function toolFindContact({ query }) {
   const accessToken = await getAccessToken();
@@ -289,10 +304,16 @@ async function toolCreateQuote(args) {
     createShoppingList({ job_name: job_name || contact_name || q.Contact?.Name, client_name: contact_name || q.Contact?.Name, materials: materialsForList }).catch(e => ({ error: e.message }))
   ]);
 
+  const booking = await createBooking({
+    job_name: job_name || contact_name || q.Contact?.Name,
+    client_name: contact_name || q.Contact?.Name,
+    quote_number: q.QuoteNumber, labour_hours, title: summary || title
+  }).catch(e => ({ error: e.message }));
+
   return {
     QuoteNumber: q.QuoteNumber, QuoteID: q.QuoteID, Status: q.Status,
     SubTotal: q.SubTotal, Total: q.Total,
-    job_baseline: baseline, shopping_list: shoppingList
+    job_baseline: baseline, shopping_list: shoppingList, booking
   };
 }
 

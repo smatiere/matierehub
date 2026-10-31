@@ -41,7 +41,11 @@ const WRITABLE = {
                        'baseline_scope', 'baseline_price', 'baseline_labour_hours', 'baseline_materials_estimate', 'baseline_set_at'],
   // 2026-09-18 — shopping list feature: tick items off (items JSONB, whole array
   // rewritten per PATCH) and mark a list done, from the Hub or from the phone.
-  shopping_lists:    ['items', 'status', 'title', 'project']
+  shopping_lists:    ['items', 'status', 'title', 'project'],
+  // 2026-11-01 — Schedule tab (supabase_bookings.sql): dates, status, constraints, client message log.
+  bookings:          ['project','title','quote_number','approval_source','approved_at','status','client_name','client_phone','client_email',
+                     'site_address','lat','lng','env','priority','hours','hours_per_day','start_date','start_time','end_date',
+                     'window_days','constraints','notify_log','notified_start','notes']
 };
 
 // ── Insert allow-list: { table: [columns the HUB may set when CREATING a row] }
@@ -53,7 +57,11 @@ const CREATABLE = {
   // 2026-09-18 — shopping lists are usually created by the Xero MCP connector
   // (create_quote) but the Hub can also start one by hand from the new tab.
   // Row id is generated server-side (SL-### sequence) — never from the client.
-  shopping_lists: ['project', 'title', 'items', 'status']
+  shopping_lists: ['project', 'title', 'items', 'status'],
+  // Row id (BK-###) is generated server-side.
+  bookings:       ['project','title','quote_number','approval_source','approved_at','status','client_name','client_phone','client_email',
+                     'site_address','lat','lng','env','priority','hours','hours_per_day','start_date','start_time','end_date',
+                     'window_days','constraints','notify_log','notified_start','notes']
 };
 
 async function sbPatch(table, query, body) {
@@ -105,6 +113,16 @@ async function nextProjectId() {
     .filter(n => !isNaN(n));
   const next = nums.length ? Math.max(...nums) + 1 : 1;
   return `PR-${String(next).padStart(3, '0')}`;
+}
+
+// Generate the next BK-### booking id (same pattern as the others).
+async function nextBookingId() {
+  const rows = await sbGet('bookings', '?select=id');
+  const nums = rows
+    .map(r => parseInt(String(r.id || '').replace(/^BK-/, ''), 10))
+    .filter(n => !isNaN(n));
+  const next = nums.length ? Math.max(...nums) + 1 : 1;
+  return `BK-${String(next).padStart(3, '0')}`;
 }
 
 // Generate the next SL-### shopping list id by scanning existing ids (same
@@ -164,6 +182,10 @@ exports.handler = async (event) => {
         row.status = row.status || 'Active';
         if (row.quoted == null) row.quoted = 0;
         if (!row.notes) row.notes = `Created ${new Date().toISOString().slice(0, 10)} via HUB`;
+      }
+      if (table === 'bookings') {
+        row.id     = await nextBookingId();
+        row.status = row.status || 'approved';
       }
       if (table === 'shopping_lists') {
         row.id     = await nextShoppingListId();
