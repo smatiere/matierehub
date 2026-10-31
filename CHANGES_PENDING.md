@@ -2,6 +2,43 @@
 
 **Purpose:** accumulate many edits locally, deploy ONCE. Editing files is free; only a push to `main` triggers a Netlify build (= credits). See CLAUDE.md → "Deploying changes" for the full workflow.
 
+## Feature — 2026-11-01 (Schedule tab: pipeline + bookings calendar)
+
+Seb asked for a pipeline / future-bookings tool: approved quotes (Xero or direct in the Hub)
+flow into a calendar with hours, address, priority, constraints (e.g. plumber first, ready 15/11),
+indoor/outdoor, special-order lead times, easy re-shuffling, and client messages when a date
+slides or is confirmed. Optional client "window" policy (2–3 days).
+
+- **New table `bookings`** — `supabase_bookings.sql` (RUN ONCE in the Supabase SQL editor; until
+  then the tab shows a copy-SQL setup card). Statuses approved → tentative → confirmed →
+  in_progress → done / cancelled. `constraints` and `notify_log` are JSONB; `notified_start`
+  tracks which date the client was last told (drives the "client not told" warnings).
+- **`netlify/functions/hub-write.js`** — `bookings` added to `WRITABLE` + `CREATABLE`; ids `BK-###`
+  generated server-side (`nextBookingId`).
+- **`netlify/functions/xero-mcp.js`** — `create_quote` now also inserts an `approved` booking
+  (hours = `labour_hours`), errors swallowed so a missing table never blocks a quote.
+- **`index.html`** — new **Schedule** tab (JS block starting `SCHEDULE — pipeline…`, `sch*` functions,
+  `SCH` state, CSS `.sch-*`). Pipeline column (needs a date / tentative / confirmed, "approved in
+  Xero" banner → one-tap add), week + month calendar, drag-and-drop (desktop) or "Pick a day"
+  tap-to-place (touch), suggest-next-free-day, capacity bars (8 h/day, editable), overbooking +
+  constraint + rain + late-order warnings, delivery lead-time timeline (reads
+  `shopping_lists.items[].lead_time`, "Mark ordered" writes `ordered/eta`), Open-Meteo weather,
+  OSM geocoding → travel-time gaps in the day plan, per-job client window, Notify panel
+  (templates: proposed / confirmed / date moved / window → Comms Hub draft, SMS, email, copy;
+  every notification logged). Snackbar with Undo after every move.
+- **Hub-wide polish** (CSS only): safe-area insets, bottom-sheet modals + 16px inputs + 46px tabs on
+  phones, compact header, focus rings, reduced-motion.
+- **Comms Hub link** — new `POST /api/schedule/draft` in `~/Developer/comms-hub` (own key, CORS for
+  the Hub origin only, DRAFT ONLY — hard rule 3). Hub's Schedule ⚙ settings take the Tailscale https
+  address + key (`npm run schedule:key` in comms-hub).
+- Tested: 25 behavioural checks in headless Chrome against mocked Supabase (all pass), comms-hub
+  suite 253/253.
+
+**To go fully live (Seb):** (1) run `supabase_bookings.sql` once; (2) in comms-hub: `npm test`,
+commit, `npm run service -- restart`, `npm run schedule:key`, paste address + key into Schedule ⚙.
+
+---
+
 ## Fix + feature — 2026-09-24b (Shopping List: filters, priority items, collapse — not yet deployed)
 
 Root cause of the Shopping List tab showing nothing at all (SL-002 → SL-005) was fixed

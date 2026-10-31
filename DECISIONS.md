@@ -100,3 +100,13 @@ Why things are built the way they are. Read before suggesting alternatives.
 - Invoice fuzzy-matching (`projAutoMatchInvoices`) is read-only/display-only until "+ convert to explicit link" is clicked; quotes have no fuzzy-match at all, only the manual search-and-link box.
 
 **Rule going forward:** any future feature that can guess a project for a quote/invoice line (the in-progress quote-assistant, the Xero MCP connector, a smarter parser, etc.) must render the guess as a suggestion in the Project card for Seb to confirm — never write `project` directly as a side effect of creation/sync/parsing.
+
+
+## 2026-11-01 — Schedule tab: client messages are drafts, via the Comms Hub
+
+Client date notices (proposed / confirmed / moved) go to the Comms Hub as a **pending draft**, never sent
+by MatiereHub. Reason: Comms Hub hard rule 3 (nothing involving dates or scheduling is ever auto-sent) and it
+has no public endpoints (Tailscale only), so the call is made from Seb's browser, not a Netlify function. A
+dedicated key (`x-hub-schedule`) scoped to `/api/schedule/*` + CORS for `https://matierehub2.netlify.app` only —
+it can leave a draft and nothing else. SMS/mail prefilled links are the fallback when off Tailscale.
+Also decided: sole operator, 8 productive h/day Mon–Fri (editable); window policy off by default (per-job 2–3 days).

@@ -73,12 +73,13 @@ These are **single sources of truth** — change them in one place and the new l
 
 ## Tabs (front-end `showTab` pages)
 
-Timesheets · P&L · **Projects** · Quotes & Pricing · Transactions · Scan Receipt · Expenses · **Shopping List** · For Action
+Timesheets · P&L · **Projects** · **Schedule** · Quotes & Pricing · Transactions · Scan Receipt · Expenses · **Shopping List** · For Action
 
 (Overview, Cash & Invoices, Profitability, Materials and Activity Log were removed 2026-06-21 — see CHANGES_PENDING.md "Shipped" log. Scan Receipt, added the same week, hosts the Materials catalog as a sub-view.)
 
 - **Timesheets** — calendar + treemap, a **Period Summary** section (plain-text digest + KPI tiles: Total Hours, Billable, Non-Billable, Quote/Invoice Linked — reflects whatever period/player is selected above), and the Timesheet Log table with its own Project filter + notes/project search (scoped to the table only, doesn't affect the calendar/treemap/summary).
 - **Projects** — 9-column sortable/filterable table (ID, Project, Contact, Est.Value, Invoiced, Labour, Expenses, Profitability, Adj rate); default filter = Active status. Row click opens a detail modal: clickable status pills (Active/Finished/Paid/Inactive, colour-coded), multi-select line-item-level linking to both **quotes** (`quote_items`) and **invoices** (`invoice_items`), a manual Est.Value field plus an independent manual Revenue field for when no quote/invoice exists yet. Columns dropped from the trimmed table (Players, Quote No./Item/Description, Start/End/Span, Dilution) resurface in this detail modal rather than being discarded. A "Non-Billable" KPI tile opens a separate **wide** modal (`openModal(title, body, wide=true)`) — category selector (All/None/specific non-billable category), period presets (2w/30d/3m/6m/1y/36m/custom), KPI tiles, by-category table, and an hours-over-time Chart.js bar chart toggling week/month/year.
+- **Schedule** (added 2026-11-01) — pipeline of approved quotes → calendar. `bookings` table (see `supabase_bookings.sql`); one row per job: status (approved → tentative → confirmed → in_progress → done/cancelled), hours, site address, indoor/outdoor, priority, constraints JSONB (`[{id,type,label,ready_date,confirmed,done}]` — e.g. "plumber ready 15/11"), client window (`window_days`), `notify_log` + `notified_start` (what the client was last told). Created automatically by `xero-mcp.js` `create_quote`, from Xero quotes ACCEPTED (banner → one-tap add), or via "＋ Add job". All edits via hubWrite. Special-order lead times come from `shopping_lists.items[].lead_time` (parsed by `schLeadDays`); "Mark ordered" writes `ordered`/`eta` onto that item. Weather = Open-Meteo (free, no key), geocoding = OSM Nominatim (free) for drive-time estimates. **Client messages never auto-send**: "Draft in Comms Hub" POSTs to the Comms Hub's `/api/schedule/draft` (Tailscale https URL + key stored per-device in localStorage `sch_settings`), or opens SMS/mail prefilled. Capacity default 8 h/day Mon–Fri.
 - **Transactions** — bank_transactions browser; date chips, type/contact (Smart Suggest)/account filters; inline-editable Project (Smart Suggest) + Notes (→ hub-write).
 - **Scan Receipt** — drop/upload a receipt (image/PDF) + optional note → editable preview table (nothing hits the DB until Save) + a Materials catalog sub-view (dedupes `expense_log` by supplier+description, copy-to-clipboard quote-ready lines).
 - **Expenses** — review/edit what's been parsed into `expense_log`; date chips + project + category filters; inline-editable Description, Category (Smart Suggest from `category_list` ∪ used categories), Project (Smart Suggest), Notes (→ hub-write).
@@ -128,6 +129,11 @@ contacts           { id, name, first_name, last_name, email, address_line1, city
                      postal_code, country, phone, abn, is_customer, is_supplier,
                      categories (TEXT[]), rating (0–10), note, updated_at, created_at }
                    ← synced from Xero via xero-sync.js?scope=contacts; categories/rating/note are HUB-only
+bookings           { id (BK-###), project, title, quote_number, approval_source, approved_at, status,
+                     client_name/phone/email, site_address, lat, lng, env, priority, hours, hours_per_day,
+                     start_date, start_time, end_date, window_days, constraints (JSONB), notify_log (JSONB),
+                     notified_start, notes, created_at, updated_at }
+                   ← added 2026-11-01 (supabase_bookings.sql) — the Schedule tab's data
 category_list      { name (PK), created_at }
                    ← lookup table for valid contact categories; managed via HUB
 bank_transactions  { id, date, type, contact, contact_id, account_code, account_name,
