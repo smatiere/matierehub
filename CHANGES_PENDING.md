@@ -346,3 +346,9 @@ Files: `index.html`, `netlify/functions/hub-write.js` (new), `CLAUDE.md`. Verifi
 - New "Performance" tab: operating margin per day (sales − expenses per job, spread over every hour worked on it, summed per day/week/month).
 - Month calendar with $ per day, green at/above 8h × nominal rate ($800), red below; tap a day to list its jobs, tap a job to open its card.
 - Bar chart (daily/weekly/monthly, 2–8 weeks, 8–26 weeks, 6–24 months) with benchmark line and trend line.
+
+## 2026-11-05 — Performance tab v2
+- Orange for $700–$800 days; ★ public holidays (NSW, to 2027); 🌴 leave (Holidays / Sick days / Carer days) never counted against you.
+- Non-billable time (Admin, Wasted Time…) now counts as hours earning $0; every past weekday is clickable (even "no hours").
+- Chart redesigned (gradient bars, smooth 7-day trend line, benchmark line, tooltip); same pill selectors as other tabs (2w/4w/3m/6m/1y/All + Day/Week/Month).
+- New sections: Jobs to watch (doing well / needs attention), and a rule-based "What the numbers say" by type of work, for a chosen period (this month, last month, 3m, 6m, 12m, all time, or any month).

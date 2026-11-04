@@ -457,21 +457,46 @@ button,.tab,.hub-pill-btn,select,input[type=checkbox]{-webkit-tap-highlight-colo
 }
 
 /* Performance tab */
-.pf-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;padding:0 10px}
+.pf-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px;padding:0 12px}
 .pf-head{padding-top:4px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-4);text-align:center}
-.pf-cell{min-height:64px;border-radius:8px;background:var(--bg-2);border:1px solid transparent;padding:4px 5px;display:flex;flex-direction:column;gap:1px;min-width:0;overflow:hidden}
+.pf-cell{min-height:68px;border-radius:10px;background:var(--bg-2);border:1px solid transparent;padding:5px 6px;display:flex;flex-direction:column;gap:1px;min-width:0;overflow:hidden;transition:border-color .15s,transform .15s}
 .pf-blank{background:transparent}
 .pf-cell[onclick]{cursor:pointer}
-.pf-cell[onclick]:hover{border-color:var(--ink-4)}
+.pf-cell[onclick]:hover{border-color:var(--ink-4);transform:translateY(-1px)}
+.pf-top{display:flex;justify-content:space-between;align-items:center}
 .pf-n{font-size:10px;color:var(--ink-4)}
-.pf-v{font-size:13px;font-weight:700;line-height:1.1}
+.pf-sym{font-size:11px;line-height:1;color:var(--amber)}
+.pf-v{font-size:14px;font-weight:700;line-height:1.15;font-variant-numeric:tabular-nums}
 .pf-h{font-size:9px;color:var(--ink-4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.pf-ok{background:color-mix(in srgb,var(--sage) 22%,transparent);border-color:color-mix(in srgb,var(--sage) 55%,transparent)}
-.pf-low{background:color-mix(in srgb,var(--pink) 20%,transparent);border-color:color-mix(in srgb,var(--pink) 50%,transparent)}
+.pf-ok{background:color-mix(in srgb,#34D399 20%,transparent);border-color:color-mix(in srgb,#34D399 55%,transparent)}
+.pf-near{background:color-mix(in srgb,#FFA94D 22%,transparent);border-color:color-mix(in srgb,#FFA94D 60%,transparent)}
+.pf-low{background:color-mix(in srgb,#FF5D73 20%,transparent);border-color:color-mix(in srgb,#FF5D73 55%,transparent)}
+.pf-leave{background:repeating-linear-gradient(45deg,var(--bg-2),var(--bg-2) 6px,var(--bg-1) 6px,var(--bg-1) 12px)}
+.pf-holiday{background:color-mix(in srgb,var(--amber) 9%,var(--bg-2));border-color:color-mix(in srgb,var(--amber) 30%,transparent)}
+.pf-none{background:var(--bg-1);border:1px dashed var(--border)}
+.pf-empty{background:transparent}
+.pf-today{box-shadow:0 0 0 1.5px var(--amber) inset}
 .pf-today .pf-n{color:var(--amber);font-weight:800}
-.pf-legend{padding:10px 14px 14px;font-size:11px;color:var(--ink-4);display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px}
-.pf-legend i{display:inline-block;width:12px;height:12px;border-radius:3px;border:1px solid}
-@media (max-width:700px){.pf-grid{padding:0 6px;gap:3px}.pf-cell{min-height:54px;padding:3px}.pf-v{font-size:11px}.pf-h{font-size:8px}}
+.pf-legend{padding:12px 14px 14px;font-size:11px;color:var(--ink-4);display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}
+.pf-legend i{display:inline-block;width:12px;height:12px;border-radius:3px;border:1px solid;margin-right:-4px}
+.pf-chartbox{height:340px;padding:6px 12px 0;position:relative}
+.pf-trend{font-size:12px;color:var(--ink-3);padding:6px 16px 14px;display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center}
+.pf-key i{display:inline-block;width:18px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle}
+.pf-two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;padding:4px 14px 10px}
+.pf-sub{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px}
+.pf-job{padding:10px 12px;background:var(--bg-2);border-radius:10px;margin-bottom:8px;cursor:pointer;border:1px solid transparent;transition:border-color .15s}
+.pf-job:hover{border-color:var(--ink-4)}
+.pf-job-top{display:flex;justify-content:space-between;gap:10px;font-size:13px}
+.pf-job-top strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.pf-job-sub{font-size:11px;color:var(--ink-4);margin-top:5px;line-height:1.4}
+.pf-bar{height:5px;border-radius:3px;background:var(--bg-1);margin-top:7px;overflow:hidden}
+.pf-bar i{display:block;height:100%;border-radius:3px}
+.pf-card{background:var(--bg-2);border:1px solid;border-radius:12px;padding:12px 14px}
+.pf-card ul{margin:0;padding-left:18px;font-size:13px;line-height:1.55;color:var(--ink-2)}
+.pf-card li{margin-bottom:8px}
+.pf-empty-note{font-size:12px;color:var(--ink-4);padding:6px 2px}
+.pf-sel{padding:5px 10px;border:1px solid var(--border);border-radius:20px;background:var(--bg-2);color:var(--ink-3);font-size:11px;font-weight:600}
+@media (max-width:700px){.pf-grid{padding:0 6px;gap:3px}.pf-cell{min-height:56px;padding:3px 4px}.pf-v{font-size:11px}.pf-h{font-size:8px}.pf-two{grid-template-columns:1fr}.pf-chartbox{height:280px;padding:4px 4px 0}}
 </style>
 </head>
 <body>
@@ -2053,21 +2078,42 @@ function schBadge() {
 }
 function renderSchedule() { schBadge(); schRender(); }
 
-// ── Performance (2026-11-05) ─────────────────────────────────────────────────
-// Operating margin per day. For each billable job: what was sold (hand-linked
-// invoices + cash) minus its expenses is the pool that pays for labour AND profit.
-// That pool is spread across every hour worked on the job, so each timesheet entry
-// earns hours x (pool / total hours). Days are then summed into weeks and months.
-// Benchmark = 8 hours at the nominal rate (default $800/day). Jobs with no sales
-// yet earn nothing here (their hours show as "unbilled"). Non-billable jobs are left out.
-const PF = { month: null, view: 'day', span: { day: 14, week: 8, month: 6 } };
-const PF_SPANS = {
-  day:   [[14,'2 weeks'],[28,'4 weeks'],[56,'8 weeks']],
-  week:  [[8,'8 weeks'],[13,'13 weeks'],[26,'26 weeks']],
-  month: [[6,'6 months'],[12,'12 months'],[24,'24 months']],
-};
+// ── Performance (2026-11-05, v2) ─────────────────────────────────────────────
+// Operating margin per day. For each billable job: sales (hand-linked invoices +
+// cash) minus its expenses is the pool that pays for labour AND profit. It is
+// spread over every hour worked on the job, so each timesheet entry earns
+// hours x (pool / total hours). Non-billable time (Admin, Wasted Time...) is real
+// working time that earns $0, so it pulls the day, week and month down.
+// Holidays / Sick days / Carer days are leave: shown with a symbol and never
+// counted against you. Benchmark = 8 hours at the nominal rate ($800/day).
+const PF = { month: null, view: 'day', range: 28, win: 'm0' };
+const PF_RANGES = [[14,'2w'],[28,'4w'],[90,'3m'],[180,'6m'],[365,'1y'],[0,'All']];
+const PF_VIEWS = [['day','Day'],['week','Week'],['month','Month']];
+const PF_WINS = [['m0','This month'],['m1','Last month'],['q','3 months'],['s','6 months'],['y','12 months'],['all','All time']];
+const PF_HOL_NAMES = { NYD:"New Year's Day", AUD:'Australia Day', GFR:'Good Friday', ESA:'Easter Saturday', ESU:'Easter Sunday', EMO:'Easter Monday', ANZ:'Anzac Day', KBD:"King's Birthday", LAB:'Labour Day', CHR:'Christmas Day', BOX:'Boxing Day' };
+let PF_HOL_CACHE = null;   // built on first use: NSW_HOLIDAYS is declared further down the file
+function pfHol() {
+  return PF_HOL_CACHE || (PF_HOL_CACHE = Object.assign({}, NSW_HOLIDAYS, {
+    '2027-01-01':'NYD','2027-01-26':'AUD','2027-03-26':'GFR','2027-03-27':'ESA','2027-03-28':'ESU','2027-03-29':'EMO',
+    '2027-04-25':'ANZ','2027-06-14':'KBD','2027-10-04':'LAB','2027-12-27':'CHR','2027-12-28':'BOX' }));
+}
+const PF_LEAVE = /^(holidays?|sick days?|carer days?|leave|annual leave)$/i;
+const PF_TYPES = [
+  ['Decks & pergolas', /deck|pergola|veranda|decking|composite/],
+  ['Balustrades & stairs', /balustrad|baluster|handrail|stair/],
+  ['Fences & gates', /fenc|gate|screen/],
+  ['Cabinetry & built-ins', /cabinet|built-?in|wardrobe|shelv|desk|joinery|vanity|pantry|bed\b|partition|bench|cupboard/],
+  ['Doors, windows & trim', /door|window|architrave|sill|skirting|trim|frame/],
+  ['Roofs & outdoor structures', /roof|polycarbonate|awning|carport|post|shade/],
+  ['Repairs & maintenance', /repair|fix|replace|rot|maintenance|patch|make good/],
+];
 function pfRate() { return (D.kpis && D.kpis.sebRate_per_hour) || 100; }
 function pfBench() { return 8 * pfRate(); }
+function pfNear() { return pfBench() - 100; }          // orange from $700 up to the benchmark
+function pfHolName(date) { const c = pfHol()[date]; return c ? (PF_HOL_NAMES[c] || 'Public holiday') : ''; }
+function pfStatusClass(v, bench) { bench = bench || pfBench(); return v >= bench ? 'pf-ok' : v >= bench - 100 * (bench / pfBench()) ? 'pf-near' : 'pf-low'; }
+function pfColor(cls) { return cls === 'pf-ok' ? '#34D399' : cls === 'pf-near' ? '#FFA94D' : '#FF5D73'; }
+function pfShort(v) { const a = Math.abs(v); return (v < 0 ? '−' : '') + '$' + (a >= 1000 ? (a / 1000).toFixed(a % 1000 ? 1 : 0) + 'k' : Math.round(a)); }
 
 function pfCompute() {
   if (!PROJ_SORTED.length && D && D.kpis) renderProjects(D.kpis);
@@ -2076,31 +2122,46 @@ function pfCompute() {
     const sales = (p.linkedInvValue || 0) + (p.manualRev || 0);
     if (sales > 0 && p.hours > 0) perHour[p.name] = (sales - (p.expensesTotal || 0)) / p.hours;
   });
-  const billable = new Set(PROJ_SORTED.map(p => p.name));
-  const days = {};
+  const days = {}, entries = [];
   (D.timesheets || []).forEach(t => {
-    if (!t.date || !t.project || !billable.has(t.project)) return;
-    const h = Number(t.hours) || 0;
-    const d = days[t.date] || (days[t.date] = { value: 0, hours: 0, unbilled: 0, projects: {} });
-    const pr = d.projects[t.project] || (d.projects[t.project] = { h: 0, v: 0 });
-    d.hours += h; pr.h += h;
-    if (perHour[t.project] != null) { const v = h * perHour[t.project]; d.value += v; pr.v += v; }
-    else d.unbilled += h;
+    if (!t.date) return;
+    const h = Number(t.hours) || 0, name = (t.project || '').trim();
+    const d = days[t.date] || (days[t.date] = { value: 0, hours: 0, idle: 0, unbilled: 0, leave: 0, projects: {} });
+    const pr = d.projects[name || '(no job)'] || (d.projects[name || '(no job)'] = { h: 0, v: 0, kind: '' });
+    let kind, v = 0;
+    if (PF_LEAVE.test(name)) { kind = 'leave'; d.leave += h; }
+    else {
+      d.hours += h;
+      if (perHour[name] != null) { kind = 'sales'; v = h * perHour[name]; d.value += v; }
+      else if (isNonBillable(name) || !name) { kind = 'idle'; d.idle += h; }
+      else { kind = 'unbilled'; d.unbilled += h; }
+    }
+    pr.h += h; pr.v += v; pr.kind = kind;
+    entries.push({ date: t.date, project: name, h, v, kind });
   });
-  PF.days = days;
+  PF.days = days; PF.entries = entries;
   return days;
 }
+function pfIsWorkday(date) {
+  const w = pd(date).getDay(), x = (PF.days || {})[date];
+  if (x && x.hours > 0) return true;
+  return w > 0 && w < 6 && !pfHol()[date] && !(x && x.leave > 0);
+}
 
-function pfDayCell(date, d, bench, today) {
-  const n = Number(date.slice(8));
-  if (!d) return `<div class="pf-cell pf-empty${date === today ? ' pf-today' : ''}"><span class="pf-n">${n}</span></div>`;
-  const has = d.value !== 0 || d.hours === d.unbilled;
-  const cls = d.value >= bench ? 'pf-ok' : d.value > 0 || d.hours > 0 ? 'pf-low' : '';
-  return `<div class="pf-cell ${cls}${date === today ? ' pf-today' : ''}" onclick="pfDay('${date}')" role="button" tabindex="0">
-    <span class="pf-n">${n}</span>
-    <span class="pf-v">${d.value > 0 ? fmt(d.value) : (d.hours ? '$0' : '')}</span>
-    <span class="pf-h">${d.hours ? (+d.hours.toFixed(1)) + 'h' : ''}${d.unbilled ? ' ·unbilled' : ''}</span>
-  </div>`;
+function pfDayCell(date, bench, today) {
+  const d = (PF.days || {})[date], n = Number(date.slice(8)), hol = pfHolName(date);
+  const past = date <= today, tcls = date === today ? ' pf-today' : '';
+  const sym = hol ? '<span class="pf-sym" title="' + attrEsc(hol) + '">★</span>' : (d && d.leave && !d.hours ? '<span class="pf-sym" title="Leave">🌴</span>' : '');
+  if (d && d.hours > 0) {
+    const cls = pfStatusClass(d.value, bench);
+    const sub = (+d.hours.toFixed(1)) + 'h' + (d.idle ? ' · idle ' + (+d.idle.toFixed(1)) : '') + (d.unbilled ? ' · unbilled' : '');
+    return `<div class="pf-cell ${cls}${tcls}" onclick="pfDay('${date}')" role="button" tabindex="0"><span class="pf-top"><span class="pf-n">${n}</span>${sym}</span><span class="pf-v">${fmt(d.value)}</span><span class="pf-h">${sub}</span></div>`;
+  }
+  if (d && d.leave) return `<div class="pf-cell pf-leave${tcls}" onclick="pfDay('${date}')" role="button" tabindex="0"><span class="pf-top"><span class="pf-n">${n}</span>${sym}</span><span class="pf-h">leave</span></div>`;
+  if (hol) return `<div class="pf-cell pf-holiday${tcls}" onclick="pfDay('${date}')" role="button" tabindex="0"><span class="pf-top"><span class="pf-n">${n}</span>${sym}</span><span class="pf-h">${attrEsc(hol)}</span></div>`;
+  const w = pd(date).getDay();
+  if (past && w > 0 && w < 6) return `<div class="pf-cell pf-none${tcls}" onclick="pfDay('${date}')" role="button" tabindex="0"><span class="pf-top"><span class="pf-n">${n}</span></span><span class="pf-h">no hours</span></div>`;
+  return `<div class="pf-cell pf-empty${tcls}"><span class="pf-top"><span class="pf-n">${n}</span></span></div>`;
 }
 
 function pfMonthShift(n) {
@@ -2109,96 +2170,249 @@ function pfMonthShift(n) {
   PF.month = d.getFullYear() + '-' + pad2(d.getMonth() + 1);
   pfRender();
 }
+function pfSetRange(n) {
+  PF.range = n;
+  PF.view = n === 0 || n > 180 ? 'month' : n > 28 ? 'week' : 'day';
+  pfRender();
+}
 function pfSetView(v) { PF.view = v; pfRender(); }
-function pfSetSpan(n) { PF.span[PF.view] = n; pfRender(); }
+function pfSetWin(w) { PF.win = w; pfRender(); }
 
 function pfDay(date) {
-  const d = (PF.days || {})[date];
-  if (!d) return;
-  const bench = pfBench();
-  const rows = Object.keys(d.projects).sort((a, b) => d.projects[b].v - d.projects[a].v).map(name => {
-    const pr = d.projects[name], safe = name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-    return `<div onclick="closeModal();showProjectDetail('${safe}')" style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;background:var(--bg-2);border-radius:8px;margin-bottom:6px;cursor:pointer">
-      <span style="min-width:0"><strong style="display:block;overflow:hidden;text-overflow:ellipsis">${attrEsc(name)}</strong>
-        <span style="font-size:11px;color:var(--ink-4)">${+pr.h.toFixed(1)}h${pr.v ? ' · ' + fmt(pr.v / pr.h) + '/h' : ' · no sales yet'}</span></span>
-      <strong style="white-space:nowrap;color:${pr.v ? 'var(--ink-1)' : 'var(--ink-4)'}">${pr.v ? fmt(pr.v) : '—'} ›</strong>
-    </div>`;
-  }).join('');
-  const col = d.value >= bench ? 'var(--sage)' : 'var(--pink)';
+  const d = (PF.days || {})[date], bench = pfBench(), hol = pfHolName(date);
   const label = pd(date).toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
-  openModal(label, `
+  const note = (hol ? `<div style="margin-bottom:10px;color:var(--amber);font-weight:600">★ ${attrEsc(hol)} (NSW public holiday)</div>` : '');
+  if (!d) { openModal(label, note + `<div style="color:var(--ink-4);font-size:13px">No hours logged on this day. Log them from the bar at the bottom (for example "6h mark ${date}") and they will count here.</div>`); return; }
+  const rows = Object.keys(d.projects).sort((a, b) => d.projects[b].v - d.projects[a].v || d.projects[b].h - d.projects[a].h).map(name => {
+    const pr = d.projects[name], safe = name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const sub = pr.kind === 'leave' ? '🌴 leave · not counted against you'
+      : pr.kind === 'idle' ? `${+pr.h.toFixed(1)}h · non-billable, counted as $0`
+      : pr.kind === 'unbilled' ? `${+pr.h.toFixed(1)}h · no sales linked yet`
+      : `${+pr.h.toFixed(1)}h · ${fmt(pr.v / pr.h)}/h`;
+    return `<div onclick="closeModal();showProjectDetail('${safe}')" style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;background:var(--bg-2);border-radius:8px;margin-bottom:6px;cursor:pointer">
+      <span style="min-width:0"><strong style="display:block;overflow:hidden;text-overflow:ellipsis">${attrEsc(name)}</strong><span style="font-size:11px;color:var(--ink-4)">${sub}</span></span>
+      <strong style="white-space:nowrap;color:${pr.v ? 'var(--ink-1)' : 'var(--ink-4)'}">${pr.kind === 'leave' ? '' : (pr.v ? fmt(pr.v) : '$0')} ›</strong></div>`;
+  }).join('');
+  const col = pfColor(pfStatusClass(d.value, bench)), diff = d.value - bench;
+  openModal(label, note + (d.hours ? `
     <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px">
       ${kpi('Margin', fmt(d.value), '', '')}
-      ${kpi('Hours', +d.hours.toFixed(1) + 'h', '', '')}
-      <div class="kpi"><div class="kpi-label">vs benchmark</div><div class="kpi-value" style="color:${col}">${d.value >= bench ? '+' : '−'}${fmt(Math.abs(d.value - bench))}</div><div class="kpi-sub">${fmt(bench)} = 8h</div></div>
-    </div>
-    <div style="font-size:11px;color:var(--ink-4);margin-bottom:8px">Tap a job to open its card</div>${rows}`);
+      ${kpi('Hours', +d.hours.toFixed(1) + 'h', d.idle ? +d.idle.toFixed(1) + 'h earned nothing' : '', '')}
+      <div class="kpi"><div class="kpi-label">vs benchmark</div><div class="kpi-value" style="color:${col}">${diff >= 0 ? '+' : '−'}${fmt(Math.abs(diff))}</div><div class="kpi-sub">${fmt(bench)} = 8h</div></div>
+    </div>` : '') + `<div style="font-size:11px;color:var(--ink-4);margin-bottom:8px">Tap a job to open its card</div>${rows}`);
 }
 
-// Chart buckets for the chosen view and span, newest last.
-function pfBuckets() {
-  const days = PF.days || {}, bench = pfBench(), view = PF.view, n = PF.span[view];
-  const today = ymd(new Date());
-  const sum = (from, to) => { let v = 0, h = 0; for (let d = from; d <= to; d = addD(d, 1)) { const x = days[d]; if (x) { v += x.value; h += x.hours; } } return { v, h }; };
-  const weekdays = (from, to) => { let c = 0; for (let d = from; d <= to; d = addD(d, 1)) { const w = pd(d).getDay(); if (w > 0 && w < 6) c++; } return c; };
-  const out = [];
+// ── chart series ─────────────────────────────────────────────────────────────
+function pfSeries() {
+  const days = PF.days || {}, bench = pfBench(), view = PF.view, today = ymd(new Date());
+  const keys = Object.keys(days).sort();
+  const firstDay = keys[0] || today;
+  const span = PF.range === 0 ? Math.max(14, Math.round((pd(today) - pd(firstDay)) / 864e5) + 1) : PF.range;
+  const win = view === 'day' ? 7 : view === 'week' ? 4 : 3;
+  const sumRange = (a, b) => { let v = 0, h = 0, wd = 0; for (let d = a; d <= b; d = addD(d, 1)) { const x = days[d]; if (x) { v += x.value; h += x.hours; } if (pfIsWorkday(d)) wd++; } return { v, h, wd }; };
+  const all = [];
   if (view === 'day') {
-    for (let d = addD(today, -(n - 1)); d <= today; d = addD(d, 1)) {
-      const w = pd(d).getDay(), x = days[d];
-      if ((w === 0 || w === 6) && !x) continue;
-      out.push({ label: pd(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }), v: x ? x.value : 0, bench });
+    for (let d = addD(today, -(span - 1 + 14)); d <= today; d = addD(d, 1)) {
+      if (!pfIsWorkday(d)) continue;
+      const x = days[d];
+      all.push({ date: d, label: pd(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }), title: pd(d).toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' }), v: x ? x.value : 0, bench });
     }
   } else if (view === 'week') {
-    const mon = mondayOf(today);
+    const n = Math.ceil(span / 7) + win;
     for (let i = n - 1; i >= 0; i--) {
-      const a = addD(mon, -7 * i), s = sum(a, addD(a, 6));
-      out.push({ label: pd(a).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }), v: s.v, bench: bench * 5 });
+      const a = addD(mondayOf(today), -7 * i), s = sumRange(a, addD(a, 6));
+      all.push({ date: a, label: pd(a).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }), title: 'Week of ' + pd(a).toLocaleDateString('en-AU', { day: 'numeric', month: 'long' }), v: s.v, bench: bench * s.wd });
     }
   } else {
-    const now = new Date();
+    const n = Math.max(1, Math.ceil(span / 30.4)) + win, now = new Date();
     for (let i = n - 1; i >= 0; i--) {
-      const f = new Date(now.getFullYear(), now.getMonth() - i, 1), l = new Date(f.getFullYear(), f.getMonth() + 1, 0);
-      const s = sum(ymd(f), ymd(l));
-      out.push({ label: f.toLocaleDateString('en-AU', { month: 'short', year: '2-digit' }), v: s.v, bench: bench * weekdays(ymd(f), ymd(l)) });
+      const f = new Date(now.getFullYear(), now.getMonth() - i, 1), l = new Date(f.getFullYear(), f.getMonth() + 1, 0), s = sumRange(ymd(f), ymd(l));
+      all.push({ date: ymd(f), label: f.toLocaleDateString('en-AU', { month: 'short', year: '2-digit' }), title: f.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' }), v: s.v, bench: bench * s.wd });
     }
   }
-  return out;
+  // smooth trend: rolling mean over the previous `win` buckets (7 working days when daily)
+  all.forEach((b, i) => { const from = Math.max(0, i - win + 1), seg = all.slice(from, i + 1); b.trend = seg.reduce((a, x) => a + x.v, 0) / seg.length; });
+  let shown;
+  if (view === 'day') { const cut = addD(today, -(span - 1)); shown = all.filter(b => b.date >= cut); }
+  else { const keep = view === 'week' ? Math.ceil(span / 7) : Math.max(1, Math.ceil(span / 30.4)); shown = all.slice(-keep); }
+  return { shown, win };
 }
 
 function pfDrawChart() {
   const canvas = document.getElementById('pf-chart');
   if (!canvas) return;
   destroyChart('pf-chart');
-  const b = pfBuckets(), n = b.length;
-  // straight-line trend through the bars
-  let sx = 0, sy = 0, sxy = 0, sxx = 0;
-  b.forEach((x, i) => { sx += i; sy += x.v; sxy += i * x.v; sxx += i * i; });
-  const den = n * sxx - sx * sx, slope = den ? (n * sxy - sx * sy) / den : 0, icpt = (sy - slope * sx) / (n || 1);
-  const trend = b.map((_, i) => icpt + slope * i);
+  const { shown: b, win } = pfSeries(), n = b.length;
+  if (!n) return;
+  const first = b[0].trend, last = b[n - 1].trend, delta = last - first;
   const unit = { day: 'day', week: 'week', month: 'month' }[PF.view];
   const cap = document.getElementById('pf-trend');
-  if (cap) cap.innerHTML = n > 1
-    ? `Trend: <strong style="color:${slope >= 0 ? 'var(--sage)' : 'var(--pink)'}">${slope >= 0 ? '▲ +' : '▼ −'}${fmt(Math.abs(slope))}</strong> per ${unit} · average ${fmt(sy / n)} per ${unit}`
-    : '';
+  if (cap) cap.innerHTML = `<span class="pf-key"><i style="background:#9AA0A6"></i> ${win}-${unit} smooth trend</span> ${n > 1 ? `<strong style="color:${delta >= 0 ? '#34D399' : '#FF5D73'}">${delta >= 0 ? '▲ up' : '▼ down'} ${fmt(Math.abs(delta))}</strong> over this period · average ${fmt(b.reduce((a, x) => a + x.v, 0) / n)} per ${unit}` : ''}`;
+  const grad = (ctx, c) => {
+    const a = ctx.chart.chartArea; if (!a) return c;
+    const g = ctx.chart.ctx.createLinearGradient(0, a.bottom, 0, a.top);
+    g.addColorStop(0, c + '33'); g.addColorStop(1, c + 'EE'); return g;
+  };
   charts['pf-chart'] = new Chart(canvas.getContext('2d'), {
     data: {
       labels: b.map(x => x.label),
       datasets: [
-        { type: 'bar', label: 'Margin', data: b.map(x => Math.round(x.v)), borderRadius: 4,
-          backgroundColor: b.map(x => x.v >= x.bench ? '#3DDC84' : '#FF4D6D') },
-        { type: 'line', label: 'Benchmark', data: b.map(x => x.bench), borderColor: '#FFBE0B', borderWidth: 1.5, pointRadius: 0, stepped: true },
-        { type: 'line', label: 'Trend', data: trend.map(Math.round), borderColor: '#9AA0A6', borderDash: [6, 4], borderWidth: 2, pointRadius: 0 },
+        { type: 'bar', label: 'Margin', data: b.map(x => Math.round(x.v)), order: 3, borderRadius: { topLeft: 6, topRight: 6 }, borderSkipped: false, maxBarThickness: 34,
+          backgroundColor: ctx => { const x = b[ctx.dataIndex]; return grad(ctx, pfColor(pfStatusClass(x ? x.v : 0, x ? x.bench : pfBench()))); } },
+        { type: 'line', label: 'Benchmark', data: b.map(x => x.bench), order: 2, borderColor: '#FFBE0B', borderWidth: 1.25, borderDash: [5, 5], pointRadius: 0, stepped: true },
+        { type: 'line', label: 'Trend', data: b.map(x => Math.round(x.trend)), order: 1, borderColor: '#E8EAED', borderWidth: 2.5, tension: 0.45, cubicInterpolationMode: 'monotone', pointRadius: 0, pointHoverRadius: 5, pointHoverBackgroundColor: '#fff' },
       ],
     },
     options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { labels: { color: '#9AA0A6', boxWidth: 14 } }, tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${fmt(c.raw)}` } } },
+      responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      layout: { padding: { top: 6, right: 4 } },
+      animation: { duration: 500 },
+      plugins: {
+        legend: { align: 'start', labels: { color: '#9AA0A6', usePointStyle: true, pointStyle: 'rectRounded', boxWidth: 10, boxHeight: 10, font: { size: 11 } } },
+        tooltip: {
+          backgroundColor: 'rgba(20,20,20,.96)', borderColor: 'rgba(255,255,255,.12)', borderWidth: 1, padding: 12, cornerRadius: 10, displayColors: false,
+          titleColor: '#fff', bodyColor: '#C9CDD2', titleFont: { size: 12, weight: '700' }, bodyFont: { size: 12 },
+          callbacks: {
+            title: items => b[items[0].dataIndex].title,
+            label: c => c.dataset.label === 'Margin' ? `Margin  ${fmt(c.raw)}` : c.dataset.label === 'Trend' ? `${win}-${unit} trend  ${fmt(c.raw)}` : null,
+            afterBody: items => { const x = b[items[0].dataIndex], d = x.v - x.bench; return [`${d >= 0 ? '+' : '−'}${fmt(Math.abs(d))} vs benchmark ${fmt(x.bench)}`]; },
+          },
+        },
+      },
       scales: {
-        x: { ticks: CHART_TICK, grid: { display: false } },
-        y: { ticks: { ...CHART_TICK, callback: v => fmt(v) }, grid: { color: CHART_GRID } },
+        x: { ticks: { color: '#7B8087', font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 }, grid: { display: false }, border: { display: false } },
+        y: { ticks: { color: '#7B8087', font: { size: 10 }, callback: v => pfShort(v), maxTicksLimit: 6 }, grid: { color: 'rgba(255,255,255,.06)', drawTicks: false }, border: { display: false } },
       },
     },
   });
+}
+
+// ── analysis window, job highlights, smart reading ──────────────────────────
+function pfWindow() {
+  const today = ymd(new Date()), t = new Date(), w = PF.win;
+  const monthEnd = (y, m) => ymd(new Date(y, m + 1, 0));
+  if (w === 'm0') return { from: ymd(new Date(t.getFullYear(), t.getMonth(), 1)), to: today, label: t.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' }) };
+  if (w === 'm1') { const f = new Date(t.getFullYear(), t.getMonth() - 1, 1); return { from: ymd(f), to: monthEnd(f.getFullYear(), f.getMonth()), label: f.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' }) }; }
+  if (w === 'q') return { from: ymd(new Date(t.getFullYear(), t.getMonth() - 2, 1)), to: today, label: 'the last 3 months' };
+  if (w === 's') return { from: ymd(new Date(t.getFullYear(), t.getMonth() - 5, 1)), to: today, label: 'the last 6 months' };
+  if (w === 'y') return { from: ymd(new Date(t.getFullYear() - 1, t.getMonth() + 1, 1)), to: today, label: 'the last 12 months' };
+  if (/^ym:/.test(w)) { const [y, m] = w.slice(3).split('-').map(Number), f = new Date(y, m - 1, 1); return { from: ymd(f), to: monthEnd(y, m - 1), label: f.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' }) }; }
+  const keys = Object.keys(PF.days || {}).sort();
+  return { from: keys[0] || today, to: today, label: 'since the beginning' };
+}
+
+function pfScopeText(name) {
+  const def = (D.projects || []).find(p => p.name === name) || {};
+  const q = (D.quote_items || []).filter(x => (x.project || '').trim() === name).map(x => x.description || '').join(' ');
+  const i = (D.invoice_items || []).filter(x => (x.project || '').trim() === name).map(x => x.description || '').join(' ');
+  return { byName: name.toLowerCase(), byScope: (String(def.baseline_scope || '') + ' ' + q + ' ' + i).toLowerCase() };
+}
+function pfType(name) {
+  const s = pfScopeText(name);
+  for (const [t, re] of PF_TYPES) if (re.test(s.byName)) return t;
+  for (const [t, re] of PF_TYPES) if (re.test(s.byScope)) return t;
+  return 'Other work';
+}
+
+function pfAnalyse() {
+  const win = pfWindow(), rate = pfRate();
+  const jobs = {}; let idle = 0, idleBy = {}, unbilledH = 0, totalH = 0, totalV = 0;
+  (PF.entries || []).forEach(e => {
+    if (e.date < win.from || e.date > win.to || e.kind === 'leave') return;
+    totalH += e.h;
+    if (e.kind === 'idle') { idle += e.h; idleBy[e.project || '(no job)'] = (idleBy[e.project || '(no job)'] || 0) + e.h; return; }
+    const j = jobs[e.project] || (jobs[e.project] = { name: e.project, h: 0, v: 0, sales: false });
+    j.h += e.h; j.v += e.v; if (e.kind === 'sales') j.sales = true; else unbilledH += e.h;
+    totalV += e.v;
+  });
+  const P = {}; PROJ_SORTED.forEach(p => P[p.name] = p);
+  const list = Object.values(jobs).map(j => {
+    const p = P[j.name] || {}, def = (D.projects || []).find(x => x.name === j.name) || {};
+    const sales = (p.linkedInvValue || 0) + (p.manualRev || 0);
+    return Object.assign(j, { perH: j.h ? j.v / j.h : 0, status: def.status || p.status || '', sales$: sales, exp: p.expensesTotal || 0,
+      matShare: sales > 0 ? (p.expensesTotal || 0) / sales : null, type: pfType(j.name),
+      baseH: def.baseline_labour_hours != null ? Number(def.baseline_labour_hours) : null, allH: p.hours || 0 });
+  });
+  return { win, list, idle, idleBy, unbilledH, totalH, totalV, rate };
+}
+
+function pfJobRow(j, rate) {
+  const safe = j.name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  const pct = Math.max(0, Math.min(100, j.perH / (rate * 2) * 100));
+  const col = j.sales ? (j.perH >= rate ? '#34D399' : j.perH >= rate * 0.875 ? '#FFA94D' : '#FF5D73') : '#7B8087';
+  return `<div class="pf-job" onclick="showProjectDetail('${safe}')">
+    <div class="pf-job-top"><strong>${attrEsc(j.name)}</strong><span style="color:${col};font-weight:700">${j.sales ? fmt(j.perH) + '/h' : 'no sales yet'}</span></div>
+    <div class="pf-bar"><i style="width:${j.sales ? pct : 0}%;background:${col}"></i></div>
+    <div class="pf-job-sub">${+j.h.toFixed(1)}h · ${fmt(j.v)} margin${j.matShare != null ? ' · materials ' + Math.round(j.matShare * 100) + '% of sales' : ''} · ${j.type}</div></div>`;
+}
+
+function pfInsights(a) {
+  const { list, rate } = a, bill = list.filter(j => j.sales && j.h >= 1);
+  const avg = bill.reduce((s, j) => s + j.v, 0) / (bill.reduce((s, j) => s + j.h, 0) || 1);
+  const types = {};
+  bill.forEach(j => { const t = types[j.type] || (types[j.type] = { type: j.type, jobs: 0, h: 0, v: 0, sales: 0, exp: 0, over: [] }); t.jobs++; t.h += j.h; t.v += j.v; t.sales += j.sales$; t.exp += j.exp;
+    if (j.baseH && j.allH) t.over.push(j.allH / j.baseH - 1); });
+  const T = Object.values(types).map(t => Object.assign(t, { perH: t.v / t.h, mat: t.sales ? t.exp / t.sales : 0, size: t.sales / t.jobs, over: t.over.length ? t.over.reduce((s, x) => s + x, 0) / t.over.length : null }));
+  const ranked = T.filter(t => t.h >= 8).sort((x, y) => y.perH - x.perH);
+  const win = [], fix = [];
+  if (ranked.length) {
+    const b = ranked[0];
+    win.push(`<strong>${b.type}</strong> is your strongest work: ${fmt(b.perH)} an hour over ${b.jobs} job${b.jobs > 1 ? 's' : ''}${avg ? ` (${b.perH >= avg ? Math.round((b.perH / avg - 1) * 100) + '% above' : 'near'} your ${fmt(avg)} average)` : ''}. Quote more of it and protect its price.`);
+    if (ranked.length > 1) { const w = ranked[ranked.length - 1];
+      if (w.perH < rate) fix.push(`<strong>${w.type}</strong> earns only ${fmt(w.perH)} an hour over ${w.jobs} job${w.jobs > 1 ? 's' : ''}, under your ${fmt(rate)}/h nominal rate. Raise the price per hour on the next quote${w.mat > 0.35 ? ', and add margin on materials' : ''}.`);
+      else if (w.perH < avg * 0.85) fix.push(`<strong>${w.type}</strong> sits ${Math.round((1 - w.perH / avg) * 100)}% below your average (${fmt(w.perH)}/h). Worth pricing a little higher.`); }
+    ranked.filter(t => t.mat > 0.4 && t.perH < avg).forEach(t => fix.push(`<strong>${t.type}</strong>: materials are ${Math.round(t.mat * 100)}% of what you bill. Mark up supplies or ask for deposits to cover them.`));
+    ranked.filter(t => t.over != null && t.over > 0.15).forEach(t => fix.push(`<strong>${t.type}</strong> jobs run ${Math.round(t.over * 100)}% over the hours you quoted. Allow more labour time in these quotes.`));
+    ranked.filter(t => t.over != null && t.over < -0.1 && t.perH >= avg).slice(0, 1).forEach(t => win.push(`<strong>${t.type}</strong> comes in ${Math.round(-t.over * 100)}% under the hours you quoted, so your estimating is sharp here.`));
+  }
+  const small = bill.filter(j => j.sales$ && j.sales$ < 1500), big = bill.filter(j => j.sales$ >= 3000);
+  if (small.length >= 2 && big.length >= 2) {
+    const sp = small.reduce((s, j) => s + j.v, 0) / small.reduce((s, j) => s + j.h, 0), bp = big.reduce((s, j) => s + j.v, 0) / big.reduce((s, j) => s + j.h, 0);
+    if (sp < bp * 0.85) fix.push(`Small jobs (under $1,500) earn ${fmt(sp)}/h against ${fmt(bp)}/h on jobs over $3,000. Consider a call-out minimum.`);
+    else if (sp > bp * 1.15) win.push(`Small jobs (under $1,500) earn ${fmt(sp)}/h, more than big jobs at ${fmt(bp)}/h. They are worth keeping.`);
+  }
+  if (a.totalH && a.idle / a.totalH > 0.08) {
+    const top = Object.entries(a.idleBy).sort((x, y) => y[1] - x[1]).slice(0, 2).map(([k, v]) => `${k} ${+v.toFixed(1)}h`).join(', ');
+    fix.push(`${Math.round(a.idle / a.totalH * 100)}% of your hours (${+a.idle.toFixed(1)}h) earned nothing (${top}). At the benchmark that is about ${fmt(a.idle * rate)} of margin.`);
+  } else if (a.totalH && a.idle > 0) win.push(`Only ${Math.round(a.idle / a.totalH * 100)}% of your hours were non-billable. That is healthy.`);
+  if (a.unbilledH >= 4) fix.push(`${+a.unbilledH.toFixed(1)}h are on jobs with no sales linked yet. Link or raise the invoices so the margin shows.`);
+  return { win, fix, T: T.sort((x, y) => y.perH - x.perH), avg };
+}
+
+function pfAnalysisHtml() {
+  const a = pfAnalyse(), ins = pfInsights(a), rate = a.rate;
+  const withSales = a.list.filter(j => j.sales && j.h >= 4);
+  const high = withSales.filter(j => j.perH >= rate).sort((x, y) => y.perH - x.perH).slice(0, 5);
+  const low = a.list.filter(j => (j.sales && j.h >= 4 && j.perH < rate) || (!j.sales && j.h >= 2))
+    .sort((x, y) => (x.sales ? x.perH : -1) - (y.sales ? y.perH : -1)).slice(0, 5);
+  const months = [...new Set(Object.keys(PF.days || {}).map(d => d.slice(0, 7)))].sort().reverse();
+  const sel = `<select onchange="pfSetWin(this.value)" class="pf-sel" aria-label="Pick a month"><option value="">Pick a month…</option>${months.map(m => `<option value="ym:${m}"${PF.win === 'ym:' + m ? ' selected' : ''}>${new Date(+m.slice(0, 4), +m.slice(5) - 1, 1).toLocaleDateString('en-AU', { month: 'long', year: 'numeric' })}</option>`).join('')}</select>`;
+  const chips = PF_WINS.map(([v, l]) => `<span class="hub-pill-btn${PF.win === v ? ' active' : ''}" onclick="pfSetWin('${v}')">${l}</span>`).join('');
+  const list = (arr, empty) => arr.length ? arr.map(s => `<li>${s}</li>`).join('') : `<li style="color:var(--ink-4)">${empty}</li>`;
+  const tbl = ins.T.length ? `<div style="overflow-x:auto"><table style="font-size:12px"><thead><tr><th>Type of work</th><th style="text-align:right">Jobs</th><th style="text-align:right">Hours</th><th style="text-align:right">Margin/h</th><th style="text-align:right">Materials</th></tr></thead><tbody>${ins.T.map(t => `<tr><td>${t.type}</td><td class="amount">${t.jobs}</td><td class="amount">${+t.h.toFixed(0)}</td><td class="amount" style="color:${t.perH >= rate ? '#34D399' : t.perH >= rate * 0.875 ? '#FFA94D' : '#FF5D73'};font-weight:700">${fmt(t.perH)}</td><td class="amount">${Math.round(t.mat * 100)}%</td></tr>`).join('')}</tbody></table></div>` : '';
+  return `
+    <div class="section">
+      <div class="section-head" style="gap:10px;flex-wrap:wrap"><h2>Period for the sections below</h2>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${chips}${sel}</div></div>
+      <div style="padding:2px 14px 14px;font-size:12px;color:var(--ink-4)">Showing ${a.win.label}: ${+a.totalH.toFixed(0)}h worked, ${fmt(a.totalV)} margin.</div>
+    </div>
+    <div class="section">
+      <div class="section-head"><h2>Jobs to watch</h2><span class="chart-clickable-hint">margin per hour · benchmark ${fmt(rate)}/h · tap a job</span></div>
+      <div class="pf-two">
+        <div><div class="pf-sub" style="color:#34D399">▲ Doing well</div>${high.map(j => pfJobRow(j, rate)).join('') || '<div class="pf-empty-note">Not enough billed hours in this period.</div>'}</div>
+        <div><div class="pf-sub" style="color:#FF5D73">▼ Needs attention</div>${low.map(j => pfJobRow(j, rate)).join('') || '<div class="pf-empty-note">Nothing to flag.</div>'}
+          ${a.idle ? `<div class="pf-job" style="cursor:default"><div class="pf-job-top"><strong>Non-billable time</strong><span style="color:#FF5D73;font-weight:700">$0/h</span></div><div class="pf-job-sub">${+a.idle.toFixed(1)}h (${Object.entries(a.idleBy).sort((x, y) => y[1] - x[1]).map(([k, v]) => k + ' ' + +v.toFixed(1) + 'h').join(', ')}) · costs about ${fmt(a.idle * rate)} at the benchmark</div></div>` : ''}</div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-head"><h2>What the numbers say</h2><span class="chart-clickable-hint">read from job names and scope-of-work text</span></div>
+      <div class="pf-two" style="margin-bottom:6px">
+        <div class="pf-card" style="border-color:#34D39955"><div class="pf-sub" style="color:#34D399">Keep doing</div><ul>${list(ins.win, 'Not enough data in this period to call a winner.')}</ul></div>
+        <div class="pf-card" style="border-color:#FFA94D55"><div class="pf-sub" style="color:#FFA94D">Improve</div><ul>${list(ins.fix, 'Nothing stands out. Margins look steady.')}</ul></div>
+      </div>
+      ${tbl}
+      <div style="font-size:11px;color:var(--ink-4);padding:10px 14px 14px">Jobs are grouped by keywords in their name and quote text (for example deck, fence, cabinet). This is a rule-based reading, not a prediction. Types need at least 8 hours in the period to be ranked.</div>
+    </div>`;
 }
 
 function pfRender() {
@@ -2208,24 +2422,23 @@ function pfRender() {
   if (!PF.month) PF.month = today.slice(0, 7);
   const [y, m] = PF.month.split('-').map(Number);
   const first = new Date(y, m - 1, 1), count = new Date(y, m, 0).getDate(), lead = (first.getDay() + 6) % 7;
-  let total = 0, worked = 0, okDays = 0, hrs = 0;
-  let cells = '';
+  let total = 0, worked = 0, okDays = 0, hrs = 0, cells = '';
   for (let i = 0; i < lead; i++) cells += '<div class="pf-cell pf-blank"></div>';
   for (let d = 1; d <= count; d++) {
     const date = PF.month + '-' + pad2(d), x = days[date];
-    if (x) { total += x.value; hrs += x.hours; if (x.hours) worked++; if (x.value >= bench) okDays++; }
-    cells += pfDayCell(date, x, bench, today);
+    if (x && x.hours > 0) { total += x.value; hrs += x.hours; worked++; if (x.value >= bench) okDays++; }
+    cells += pfDayCell(date, bench, today);
   }
   const monthName = first.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' });
   const avg = worked ? total / worked : 0;
-  const pills = (items, cur, fn) => items.map(([v, l]) => `<span class="hub-pill-btn${v === cur ? ' active' : ''}" onclick="${fn}(${typeof v === 'string' ? `'${v}'` : v})">${l}</span>`).join('');
+  const pill = (arr, cur, fn) => arr.map(([v, l]) => `<span class="hub-pill-btn${v === cur ? ' active' : ''}" onclick="${fn}(${typeof v === 'string' ? `'${v}'` : v})">${l}</span>`).join('');
   page.innerHTML = `
     <div class="divider">Performance — Operating margin per day</div>
     <div class="kpi-grid">
       ${kpi(monthName, fmt(total), 'margin this month', 'highlight')}
-      ${kpi('Average per worked day', fmt(avg), worked + ' day' + (worked === 1 ? '' : 's') + ' worked', avg >= bench ? 'good' : 'warn')}
+      ${kpi('Average per worked day', fmt(avg), worked + ' day' + (worked === 1 ? '' : 's') + ' worked', worked ? (avg >= bench ? 'good' : 'warn') : '')}
       ${kpi('Days on benchmark', worked ? okDays + ' of ' + worked : '—', 'at or above ' + fmt(bench), '')}
-      ${kpi('Margin per hour', hrs ? fmt(total / hrs) : '—', 'nominal $' + pfRate() + '/h', hrs && total / hrs >= pfRate() ? 'good' : hrs ? 'warn' : '')}
+      ${kpi('Margin per hour', hrs ? fmt(total / hrs) : '—', 'nominal $' + pfRate() + '/h · idle time included', hrs && total / hrs >= pfRate() ? 'good' : hrs ? 'warn' : '')}
     </div>
     <div class="section">
       <div class="section-head" style="gap:10px;flex-wrap:wrap">
@@ -2234,19 +2447,20 @@ function pfRender() {
       </div>
       <div class="pf-grid pf-head"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div>
       <div class="pf-grid">${cells}</div>
-      <div class="pf-legend"><i class="pf-ok"></i> on or above ${fmt(bench)} (8h at $${pfRate()}) <i class="pf-low"></i> below · tap a day to see its jobs</div>
+      <div class="pf-legend"><i class="pf-ok"></i> ${fmt(bench)}+ <i class="pf-near"></i> ${fmt(pfNear())}–${fmt(bench)} <i class="pf-low"></i> below <span>★ public holiday</span> <span>🌴 leave</span> <span>tap any day for its jobs</span></div>
     </div>
     <div class="section">
       <div class="section-head" style="gap:10px;flex-wrap:wrap">
         <h2>Margin over time</h2>
-        <div style="display:flex;gap:6px;flex-wrap:wrap">${pills([['day','Daily'],['week','Weekly'],['month','Monthly']], PF.view, 'pfSetView')}</div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap">${pills(PF_SPANS[PF.view], PF.span[PF.view], 'pfSetSpan')}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${pill(PF_RANGES, PF.range, 'pfSetRange')}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${pill(PF_VIEWS, PF.view, 'pfSetView')}</div>
       </div>
-      <div style="height:300px;padding:6px 10px"><canvas id="pf-chart"></canvas></div>
-      <div id="pf-trend" style="font-size:12px;color:var(--ink-3);padding:4px 14px 12px"></div>
+      <div class="pf-chartbox"><canvas id="pf-chart"></canvas></div>
+      <div id="pf-trend" class="pf-trend"></div>
     </div>
+    ${pfAnalysisHtml()}
     <div style="font-size:11px;color:var(--ink-4);padding:0 4px 20px;line-height:1.5">
-      How it works: for each job, (sales − expenses) is the money left to pay labour and profit. It is spread over every hour worked on that job, so each hour carries the same value, then added up per day, week and month. Sales = linked invoices + cash. Jobs with no sales yet show their hours as unbilled. Non-billable work is left out.
+      How it works: for each job, (sales − expenses) is the money left to pay labour and profit. It is spread over every hour worked on that job, then added up per day, week and month. Sales = linked invoices + cash. Time on non-billable work (Admin, Wasted Time…) counts as hours earning $0. Holidays and sick days are leave and never count against you. Public holidays are NSW.
     </div>`;
   pfDrawChart();
 }
