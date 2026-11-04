@@ -225,7 +225,7 @@ async function sbUpsertContacts(rows, log) {
 //   first_name    ← c.FirstName
 //   last_name     ← c.LastName
 //   email         ← c.EmailAddress
-//   address_line1 ← c.Addresses → prefer AddressType=POBOX, fall back to STREET
+//   address_line1 ← c.Addresses → first slot with a street line (STREET, then POBOX)
 //   city          ← same address object → City
 //   region        ← same address object → Region
 //   postal_code   ← same address object → PostalCode
@@ -245,8 +245,14 @@ function transformContacts(contacts) {
 
     // Address: POBOX preferred, STREET as fallback
     const addrs   = c.Addresses || [];
-    const addr    = addrs.find(a => a.AddressType === 'POBOX')
+    // 2026-11-05: Xero returns both slots, often with one empty — take the first slot that
+    // actually has a street line (STREET first, then POBOX), else any slot with a city.
+    const hasLine = a => a && (a.AddressLine1 || '').trim();
+    const addr    = addrs.find(a => a.AddressType === 'STREET' && hasLine(a))
+                 || addrs.find(a => a.AddressType === 'POBOX' && hasLine(a))
+                 || addrs.find(a => hasLine(a))
                  || addrs.find(a => a.AddressType === 'STREET')
+                 || addrs.find(a => a.AddressType === 'POBOX')
                  || {};
 
     // Phone: DEFAULT preferred, MOBILE as fallback

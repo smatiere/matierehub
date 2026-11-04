@@ -361,3 +361,4 @@ Files: `index.html`, `netlify/functions/hub-write.js` (new), `CLAUDE.md`. Verifi
 - Schedule: jobs missing hours now take the quoted labour hours (project baseline, else labour lines on the quote); missing address/phone/email come from the Xero contact (matched via the quote's contact, then name). Runs on every load, saves to the booking; geocodes the new address.
 - Address also saved on the project (needs `supabase_projects_address.sql` run once; shown on the project card as 📍).
 - New quotes (xero-mcp create_quote) read the contact card and store address/phone/email on the booking and project from day one.
+- Contact sync fix: addresses were blank when Xero's first address slot was empty; now takes whichever slot has the street line. Fills in on the next daily contacts sync (or run scope=contacts).
