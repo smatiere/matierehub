@@ -682,9 +682,13 @@ async function autoLinkInvoicesFromQuotes() {
   });
   if (!Object.keys(quoteProjectMap).length) return 0;
 
+  // A link to a name that is no longer a real project (e.g. a job later split into
+  // several, "Dan - St Ives" -> "Dan - St Ives - post repairs") counts as unlinked,
+  // otherwise the invoice never reaches its real job and Paid is never detected.
+  const real = new Set((D.projects || []).map(x => x.name));
   const toLink = (D.invoice_items || []).filter(ii => {
-    const qn = (ii.quote_number || '').trim();
-    return qn && quoteProjectMap[qn] && !(ii.project || '').trim();
+    const qn = (ii.quote_number || '').trim(), cur = (ii.project || '').trim();
+    return qn && quoteProjectMap[qn] && (!cur || !real.has(cur));
   });
   if (!toLink.length) return 0;
 
