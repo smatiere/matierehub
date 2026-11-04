@@ -823,6 +823,16 @@ function projAutoMatchInvoices(name, def) {
                    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 }
 
+// Cash taken on a job. If the amount was typed into the note box instead of the
+// revenue box (a bare number), read it as the amount so it still counts.
+function projManualRev(def) {
+  if (!def) return 0;
+  const n = Number(def.manual_revenue) || 0;
+  if (n) return n;
+  const t = String(def.manual_revenue_note || '').trim().replace(/[$,\s]/g, '');
+  return /^\d+(\.\d+)?$/.test(t) ? Number(t) : 0;
+}
+
 function projHasHandLinks(name) {
   return (D.invoice_items || []).some(ii => (ii.project || '').trim() === name)
       || (D.quote_items || []).some(qi => (qi.project || '').trim() === name);
@@ -2217,6 +2227,7 @@ function renderProjects(k) {
     if (lp && pData[lp]) {                       // explicit link wins
       const p = pData[lp];
       p.invoicedValue += (ii.price_excl_gst || 0);
+      p.linkedInvValue = (p.linkedInvValue || 0) + (ii.price_excl_gst || 0);
       p.linkedCount = (p.linkedCount || 0) + 1;
       if (ii.quote_number) p.quoteNumbers.add(ii.quote_number);
       if (ii.contact && !p.invoiceContactName) p.invoiceContactName = ii.contact;
@@ -2250,7 +2261,7 @@ function renderProjects(k) {
   // Feature 3 — manual cash revenue per project (used when no Xero invoice exists).
   // Always additive, independent of quotes/invoices.
   Object.values(pData).forEach(p => {
-    p.manualRev = Number((definedMap[p.name] || {}).manual_revenue) || 0;
+    p.manualRev = projManualRev(definedMap[p.name]);
     p.invoicedValue += p.manualRev;
     // 2026-07-09 fix: take the LARGER of the linked-quote total and the manual
     // estimate, never just the linked-quote total on its own. A project can have
@@ -2260,7 +2271,10 @@ function renderProjects(k) {
     // Blindly trusting it as Est. Value silently wiped a real $39,450 manual
     // estimate down to $8,135 on a live project the first time this ran. Manual
     // Est. Value now acts as a floor; clear it to $0 if a linked quote should win.
-    p.estValue = p.linkedQuoteValue > 0 ? p.linkedQuoteValue : (p.quoted != null ? p.quoted : null);
+    // Value of a job: picked quote lines, else the manual estimate, else what was
+    // really billed (linked invoices + cash) when there was never a quote.
+    const billed = (p.linkedInvValue || 0) + p.manualRev;
+    p.estValue = p.linkedQuoteValue > 0 ? p.linkedQuoteValue : (p.quoted > 0 ? p.quoted : (billed > 0 ? billed : null));
     const dd = definedMap[p.name] || {};
     p.quotedLabour = dd.baseline_labour_hours != null ? Number(dd.baseline_labour_hours) * rate : null;
     p.quotedMaterials = dd.baseline_materials_estimate != null ? Number(dd.baseline_materials_estimate) : null;
@@ -2512,7 +2526,7 @@ function showProjectDetail(name) {
   const status = defined ? (defined.status || 'Active') : 'Active';
   const quoted = defined && defined.quoted != null ? defined.quoted : null;
   const safe = name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-  const manRev = defined ? (Number(defined.manual_revenue)||0) : 0;
+  const manRev = projManualRev(defined);
   const manRevNote = defined ? (defined.manual_revenue_note||'') : '';
   const inpS = 'padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:13px';
 
@@ -2543,7 +2557,8 @@ function showProjectDetail(name) {
   const linkedTotal = linked.reduce((a,ii)=>a+(Number(ii.price_excl_gst)||0),0);
 
   // Manual Est. Value is a floor, not just a fallback — see renderProjects() for why.
-  const estValue  = linkedQTotal > 0 ? linkedQTotal : (quoted != null ? quoted : null);
+  const billedVal = linkedTotal + manRev;
+  const estValue  = linkedQTotal > 0 ? linkedQTotal : (quoted > 0 ? quoted : (billedVal > 0 ? billedVal : null));
   const remaining = estValue != null ? estValue - laborValue - totalExpenses : null;
   const remPct    = estValue ? remaining / estValue * 100 : null;
   const qLab = defined && defined.baseline_labour_hours != null ? Number(defined.baseline_labour_hours) * rate : null;
