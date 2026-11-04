@@ -316,6 +316,9 @@ body{padding-bottom:62px}
 .sch-day:hover{background:var(--bg-3)}
 .sch-day.off{background:#0b0b0b}
 .sch-day.dim{opacity:.38}
+.sch-day.past{background:#070707;opacity:.35;pointer-events:none;min-height:0}
+.sch-day.past .sch-dn{color:var(--ink-4)}
+.sch-ev.ghost{background:transparent;border:1.5px dashed var(--c);color:var(--ink-1)!important}
 .sch-day.today .sch-dn{background:var(--amber);color:#000;border-radius:5px;padding:1px 6px}
 .sch-day.sel{box-shadow:inset 0 0 0 2px var(--amber)}
 .sch-day.over,.sch-day.placeable:hover{background:rgba(255,190,11,.12);box-shadow:inset 0 0 0 2px var(--amber)}
@@ -1308,7 +1311,7 @@ function isWork(s) { const w = pd(s).getDay(); return w >= 1 && w <= 5; }
 function nextWork(s, dir = 1) { let x = s, i = 0; while (!isWork(x) && i++ < 10) x = addD(x, dir); return x; }
 function mondayOf(s) { const d = pd(s); const w = (d.getDay() + 6) % 7; d.setDate(d.getDate() - w); return ymd(d); }
 function todayStr() { return ymd(new Date()); }
-function schHomeMonday() { const t = todayStr(); return mondayOf(isWork(t) ? t : nextWork(t)); }
+function schHomeMonday() { const t = todayStr(); return isWork(t) ? t : nextWork(t); }   // week view now starts on today (name kept for callers)
 function diffDays(a, b) { return Math.round((pd(b) - pd(a)) / 86400000); }
 function fmtDay(s, o) { return s ? pd(s).toLocaleDateString('en-AU', o || { weekday: 'short', day: 'numeric', month: 'short' }) : '—'; }
 function fmtShort(s) { return s ? pd(s).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }) : '—'; }
@@ -1644,6 +1647,9 @@ async function schGapFill() {
   SCH.filling = true;
   let n = 0;
   try {
+    // Quotes accepted in Xero land in the pipeline by themselves.
+    const won = schCandidates().filter(c => c.status === 'ACCEPTED');
+    for (const c of won) { try { await schAddFromQuote(c.quote_number, false); n++; } catch (e) {} }
     for (const b of D.bookings) {
       if (['done', 'cancelled'].includes(b.status)) continue;
       const patch = {};
@@ -1681,6 +1687,34 @@ async function schFillFromContact(id) {
   if (Object.keys(fields).length) await schSave(id, fields, true);
   if (!b.lat && b.site_address) schGeocode(id);
   if (SCH.openId === id) schOpen(id);
+}
+
+// Placeholders: won jobs with no date yet are laid out in the calendar from today
+// (priority first, then oldest), filling free capacity. Nothing is saved until you
+// drag one onto a day — then it becomes Tentative.
+function schPlaceholders() {
+  const out = {};
+  if (!Array.isArray(D && D.bookings)) return out;
+  const load = {};
+  const cap = schCap();
+  const used = d => (load[d] || 0) + schDayLoad(d);
+  const todo = schAll().filter(b => b.status === 'approved' && !b.start_date)
+    .sort((a, c) => (a.priority || 2) - (c.priority || 2) || String(a.approved_at || '').localeCompare(String(c.approved_at || '')));
+  for (const b of todo) {
+    let d = nextWork(todayStr());
+    const e = schEarliest(b);
+    if (e && e > d) d = e;
+    const hpd = Number(b.hours_per_day) || 8;
+    for (let i = 0; i < 200; i++) {
+      const span = schSpan({ ...b, start_date: d });
+      if (span.every(x => cap - used(x.d) + 0.01 >= Math.min(x.h, hpd))) {
+        span.forEach(x => { load[x.d] = (load[x.d] || 0) + x.h; (out[x.d] = out[x.d] || []).push({ b, h: x.h }); });
+        break;
+      }
+      d = nextWork(addD(d, 1));
+    }
+  }
+  return out;
 }
 
 // ── Pipeline candidates: quotes accepted in Xero that aren't scheduled yet ──
@@ -1795,13 +1829,13 @@ function schCard(b) {
   </div>`;
 }
 
-function schChip(b, d, h) {
+function schChip(b, d, h, ghost) {
   const c = (SCH_STATUS[b.status] || SCH_STATUS.approved).color;
   const bad = schIssues(b).some(i => i.level === 'bad');
   const w = schWx(d);
   const rainy = w && w.rain && b.env !== 'indoor';
-  return `<div class="sch-ev${b.status === 'done' ? ' done' : ''}${bad ? ' bad' : ''}" draggable="true" ondragstart="schDrag(event,'${b.id}')" onclick="event.stopPropagation();schOpen('${b.id}')" style="--c:${c};color:${textOn(c)}">
-    <b>${schPrioDot(b.priority)}${attrEsc(b.project || b.id)}</b><span>${hrsText(h)} · ${schEnvIcon(b.env)}${rainy ? ' 🌧' : ''}${bad ? ' ⚠' : ''}</span></div>`;
+  return `<div class="sch-ev${b.status === 'done' ? ' done' : ''}${bad ? ' bad' : ''}${ghost ? ' ghost' : ''}" draggable="true" ondragstart="schDrag(event,'${b.id}')" onclick="event.stopPropagation();schOpen('${b.id}')" style="--c:${c};color:${textOn(c)}">
+    <b>${schPrioDot(b.priority)}${attrEsc(b.project || b.id)}</b><span>${ghost ? 'Placeholder · ' : ''}${hrsText(h)} · ${schEnvIcon(b.env)}${rainy ? ' 🌧' : ''}${bad ? ' ⚠' : ''}</span></div>`;
 }
 
 function schWxBadge(d) {
@@ -1812,6 +1846,7 @@ function schWxBadge(d) {
 }
 
 function schDayCell(d, month, curMonth) {
+  if (d < todayStr()) return `<div class="sch-day past"><div class="sch-day-h"><span class="sch-dn">${month ? pd(d).getDate() : fmtDay(d)}</span></div></div>`;
   const es = schDayEntries(d, true);
   const load = schDayLoad(d), cap = schCap();
   const work = isWork(d);
@@ -1820,7 +1855,7 @@ function schDayCell(d, month, curMonth) {
   return `<div class="${cls}" onclick="schDayClick('${d}')" ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="schDrop(event,'${d}')">
     <div class="sch-day-h"><span class="sch-dn">${month ? pd(d).getDate() : fmtDay(d)}</span>${!month ? schWxBadge(d) : ''}</div>
     ${work ? `<div class="sch-load${load > cap + .01 ? ' over' : ''}" title="${hrsText(load)} of ${hrsText(cap)}"><i style="width:${pct}%"></i></div>` : ''}
-    <div class="sch-evs">${es.map(e => schChip(e.b, d, e.h)).join('')}</div>
+    <div class="sch-evs">${es.map(e => schChip(e.b, d, e.h)).join('')}${((SCH.ghost || {})[d] || []).map(e => schChip(e.b, d, e.h, true)).join('')}</div>
   </div>`;
 }
 
@@ -1849,12 +1884,15 @@ function schCalendar() {
 function schNav(n) {
   if (SCH.view === 'week') SCH.anchor = addD(SCH.anchor, 7 * n);
   else { const d = pd(SCH.anchor); d.setMonth(d.getMonth() + n, 1); SCH.anchor = ymd(d); }
+  const t = todayStr();
+  if (SCH.view === 'week' && SCH.anchor < t) SCH.anchor = schHomeMonday();          // no scrolling into the past
+  if (SCH.view === 'month' && SCH.anchor < t.slice(0, 8) + '01') SCH.anchor = t;
   schRender();
 }
 function schToday() { SCH.anchor = SCH.view === 'week' ? schHomeMonday() : todayStr(); schRender(); }
 function schView(v) {
   SCH.view = v;
-  SCH.anchor = v === 'week' ? mondayOf(SCH.anchor || schHomeMonday()) : (SCH.anchor || todayStr());
+  SCH.anchor = v === 'week' ? (!SCH.anchor || SCH.anchor < todayStr() ? schHomeMonday() : SCH.anchor) : (SCH.anchor || todayStr());
   try { localStorage.setItem('sch_view', v); } catch (e) {}
   schRender();
 }
@@ -1932,7 +1970,8 @@ function schSetupCard() {
 function schRender() {
   const page = document.getElementById('page-schedule');
   if (!page) return;
-  if (!SCH.anchor) SCH.anchor = SCH.view === 'week' ? schHomeMonday() : todayStr();
+  if (!SCH.anchor || (SCH.view === 'week' && SCH.anchor < todayStr())) SCH.anchor = SCH.view === 'week' ? schHomeMonday() : todayStr();
+  SCH.ghost = schPlaceholders();
   schLoadWeather();
   if (D && D.bookings === null) { page.innerHTML = schHeader().replace(/<div class="sch-top-act">[\s\S]*<\/div><\/div>$/, '</div>') + schSetupCard(); return; }
   const banner = SCH.placing ? `<div class="sch-banner">Tap a day to place <b>${attrEsc((schGet(SCH.placing) || {}).project || '')}</b><button onclick="SCH.placing=null;schRender()">Cancel</button></div>` : '';

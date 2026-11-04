@@ -362,3 +362,8 @@ Files: `index.html`, `netlify/functions/hub-write.js` (new), `CLAUDE.md`. Verifi
 - Address also saved on the project (needs `supabase_projects_address.sql` run once; shown on the project card as 📍).
 - New quotes (xero-mcp create_quote) read the contact card and store address/phone/email on the booking and project from day one.
 - Contact sync fix: addresses were blank when Xero's first address slot was empty; now takes whichever slot has the street line. Fills in on the next daily contacts sync (or run scope=contacts).
+
+## Batch — Schedule placeholders (2026-11-05)
+- Accepted Xero quotes are added to the Schedule automatically on load.
+- Calendar opens on today (week starts today), past days blanked and unreachable.
+- Won jobs with no date show in the calendar as dashed placeholders laid out from today (priority first, free capacity); drag one to a day to lock it in as Tentative. Pipeline list sits under the calendar on phone.
