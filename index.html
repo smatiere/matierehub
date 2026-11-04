@@ -2128,6 +2128,10 @@ function pfHol() {
     '2027-01-01':'NYD','2027-01-26':'AUD','2027-03-26':'GFR','2027-03-27':'ESA','2027-03-28':'ESU','2027-03-29':'EMO',
     '2027-04-25':'ANZ','2027-06-14':'KBD','2027-10-04':'LAB','2027-12-27':'CHR','2027-12-28':'BOX' }));
 }
+// Jobs left out of the Performance analysis (their sales and hours stay everywhere
+// else). Mark - Nth Balgowlah: time tracking only began when it was nearly finished,
+// so almost all its hours are missing and its margin per hour is meaningless.
+const PF_EXCLUDE = ['Mark - Nth Balgowlah'];
 const PF_LEAVE = /^(holidays?|sick days?|carer days?|leave|annual leave)$/i;
 const PF_TYPES = [
   ['Decks & pergolas', /deck|pergola|veranda|decking|composite/],
@@ -2157,6 +2161,7 @@ function pfCompute() {
   (D.timesheets || []).forEach(t => {
     if (!t.date) return;
     const h = Number(t.hours) || 0, name = (t.project || '').trim();
+    if (PF_EXCLUDE.includes(name)) return;
     const d = days[t.date] || (days[t.date] = { value: 0, hours: 0, idle: 0, unbilled: 0, leave: 0, projects: {} });
     const pr = d.projects[name || '(no job)'] || (d.projects[name || '(no job)'] = { h: 0, v: 0, kind: '' });
     let kind, v = 0;
@@ -2493,6 +2498,7 @@ function pfRender() {
     </div>
     ${pfAnalysisHtml()}
     <div style="font-size:11px;color:var(--ink-4);padding:0 4px 20px;line-height:1.5">
+      Left out of this page: ${PF_EXCLUDE.map(attrEsc).join(', ')} (time tracking started near the end of the job, so its hours are mostly missing). Its sales and hours are unchanged everywhere else.<br>
       How it works: for each job, (sales − expenses) is the money left to pay labour and profit. It is spread over every hour worked on that job, then added up per day, week and month. Sales = linked invoices + cash. Time on non-billable work (Admin, Wasted Time…) counts as hours earning $0. Holidays and sick days are leave and never count against you. Public holidays are NSW.
     </div>`;
   pfDrawChart();
