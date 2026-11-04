@@ -316,6 +316,8 @@ body{padding-bottom:62px}
 .sch-day:hover{background:var(--bg-3)}
 .sch-day.off{background:#0b0b0b}
 .sch-day.dim{opacity:.38}
+.sch-more{margin-top:14px;border-top:1px solid var(--border);padding-top:10px}
+.sch-more>summary{cursor:pointer;color:var(--ink-3);font-size:13px;padding:6px 0}
 .sch-day.past{background:#070707;opacity:.35;pointer-events:none;min-height:0}
 .sch-day.past .sch-dn{color:var(--ink-4)}
 .sch-ev.ghost{background:transparent;border:1.5px dashed var(--c);color:var(--ink-1)!important}
@@ -699,6 +701,8 @@ async function loadData() {
     const autoLinked = await cascadeLinkedQuotesAndInvoices();
     const autoPaid   = await autoUpdatePaidProjects();
     if (autoLinked) claudeToast(`✓ Auto-linked ${autoLinked} quote/invoice line${autoLinked>1?'s':''} via shared quote reference`, 'success');
+    const wl = await autoUpdateWonLost();
+    if (wl) claudeToast(`✓ ${wl} quote${wl>1?'s':''} moved to Won/Lost from Xero`, 'success');
     schGapFill();
     if (autoPaid)   claudeToast(`✓ ${autoPaid} project${autoPaid>1?'s':''} marked Paid — invoice(s) fully paid in Xero`, 'success');
 
@@ -853,7 +857,7 @@ async function autoUpdatePaidProjects() {
   let changed = 0;
   for (const proj of (D.projects || [])) {
     const status = proj.status || 'Active';
-    if (status === 'Paid' || status === 'Inactive') continue;
+    if (status === 'Paid' || status === 'Inactive' || status === 'Lost') continue;
     if (isNonBillable(proj.name)) continue;
     const linkedInvoices = (D.invoice_items || []).filter(ii => (ii.project || '').trim() === proj.name);
     if (!linkedInvoices.length) continue;
@@ -864,6 +868,34 @@ async function autoUpdatePaidProjects() {
       Object.assign(proj, row);
       changed++;
     } catch (e) { /* skip a single failure, keep going */ }
+  }
+  return changed;
+}
+
+// Won / Lost: a project still marked Quoted moves to Won when its Xero quote is ACCEPTED
+// (Xero approval feeds in via the quote sync), or to Lost when DECLINED. Matches by the
+// hand-linked quote lines, the Schedule booking, or same client + exact quoted amount.
+async function autoUpdateWonLost() {
+  const byQ = {};
+  (D.quote_items || []).forEach(q => { if (q.quote_number) (byQ[q.quote_number] = byQ[q.quote_number] || []).push(q); });
+  const low = x => String(x || '').toLowerCase().trim();
+  let changed = 0;
+  for (const proj of (D.projects || [])) {
+    if (proj.status !== 'Quoted') continue;
+    const nums = new Set();
+    Object.entries(byQ).forEach(([qn, ls]) => { if (ls.some(l => low(l.project) === low(proj.name))) nums.add(qn); });
+    (D.bookings || []).forEach(b => { if (b.quote_number && typeof schProjectOf === 'function' && (schProjectOf(b) || {}).id === proj.id) nums.add(b.quote_number); });
+    if (!nums.size && Number(proj.quoted) > 0) {
+      const first = low(proj.name).split(/[\s-]+/)[0];
+      Object.entries(byQ).forEach(([qn, ls]) => {
+        const tot = ls.reduce((t, l) => t + (Number(l.line_amount) || 0), 0);
+        if (low(ls[0].contact).split(/[\s-]+/)[0] === first && (Math.abs(tot - proj.quoted) < 1.5 || Math.abs(tot * 1.1 - proj.quoted) < 1.5)) nums.add(qn);
+      });
+    }
+    const sts = [...nums].map(n => String(byQ[n][0].status || '').toUpperCase());
+    const next = sts.includes('ACCEPTED') ? 'Won' : (sts.length && sts.every(x => x === 'DECLINED') ? 'Lost' : null);
+    if (!next) continue;
+    try { Object.assign(proj, await hubWrite('projects', proj.id, { status: next })); changed++; } catch (e) {}
   }
   return changed;
 }
@@ -1632,13 +1664,39 @@ async function schFindContact(b) {
 }
 function schAddrOf(c) { return c ? [c.address_line1, c.city, c.region || 'NSW', c.postal_code].filter(Boolean).join(', ') : ''; }
 
-// Hours quoted for the job: the project's baseline, else labour lines on the quote.
+// The project card a booking belongs to: the quote's hand-linked project, else the same-name
+// project, else a project whose name starts with the job's (e.g. "Amanda - Balgowlah" ->
+// "Amanda - Balgowlah front door"), picking by the quoted amount when several fit.
+function schProjectOf(b) {
+  const P = D.projects || [], low = x => String(x || '').toLowerCase().trim();
+  const byName = n => P.find(p => low(p.name) === low(n));
+  const hasH = p => Number(p.baseline_labour_hours) > 0;
+  const ql = (D.quote_items || []).filter(q => b.quote_number && q.quote_number === b.quote_number);
+  const linked = ql.map(q => q.project).find(x => x && byName(x));
+  if (linked) return byName(linked);
+  const ex = byName(b.project);
+  if (ex && hasH(ex)) return ex;
+  const total = ql.reduce((t, q) => t + (Number(q.line_amount) || 0), 0);
+  const close = p => total > 0 && Number(p.quoted) > 0 && (Math.abs(p.quoted - total) < 1.5 || Math.abs(p.quoted - total * 1.1) < 1.5);
+  const names = [b.project, b.client_name].map(low).filter(Boolean);
+  const pre = P.filter(p => p !== ex && hasH(p) && names.some(n => low(p.name).startsWith(n)));
+  if (pre.length === 1) return pre[0];
+  if (pre.length > 1) { const m = pre.filter(close); if (m.length === 1) return m[0]; }
+  const byAmt = P.filter(p => hasH(p) && close(p));
+  if (byAmt.length === 1) return byAmt[0];
+  return ex || null;
+}
 function schQuotedHours(b) {
-  const p = (D.projects || []).find(x => (x.name || '').toLowerCase() === (b.project || '').toLowerCase());
+  const p = schProjectOf(b);
   if (p && Number(p.baseline_labour_hours) > 0) return Number(p.baseline_labour_hours);
   const lines = (D.quote_items || []).filter(q => b.quote_number && q.quote_number === b.quote_number);
   const h = lines.filter(l => /\b(labou?r|hours?|hrs?)\b/i.test((l.item || '') + ' ' + (l.description || ''))).reduce((t, l) => t + (Number(l.qty) || 0), 0);
   return h > 0 ? h : null;
+}
+function schOpenProject(id) {
+  const b = schGet(id), p = b && schProjectOf(b);
+  if (!p) { claudeToast('No project card found for this job', 'error'); return; }
+  closeModal(); showProjectDetail(p.name);
 }
 
 // Fill missing hours and addresses on open bookings, and copy the address onto the project.
@@ -1653,6 +1711,7 @@ async function schGapFill() {
     for (const b of D.bookings) {
       if (['done', 'cancelled'].includes(b.status)) continue;
       const patch = {};
+      { const pr = schProjectOf(b); if (pr && pr.name !== b.project) patch.project = pr.name; }
       if (!Number(b.hours)) { const h = schQuotedHours(b); if (h) patch.hours = h; }
       if (!b.site_address || !b.client_phone || !b.client_email) {
         const c = await schFindContact(b);
@@ -1672,6 +1731,7 @@ async function schGapFill() {
       }
     }
   } finally { SCH.filling = false; }
+  autoUpdateWonLost().then(c => { if (c) claudeToast('✓ ' + c + ' quote' + (c > 1 ? 's' : '') + ' moved to Won/Lost from Xero'); });
   if (n) { claudeToast('✓ Schedule: filled hours/address on ' + n + ' job' + (n > 1 ? 's' : '')); schRender(); }
 }
 
@@ -1737,7 +1797,7 @@ function schCandidates() {
     if (proj) {
       if (have.has(proj.toLowerCase())) return;
       const p = (D.projects || []).find(x => (x.name || '').toLowerCase() === proj.toLowerCase());
-      if (p && ['Finished', 'Paid', 'Inactive'].includes(p.status)) return;
+      if (p && ['Finished', 'Paid', 'Inactive', 'Lost'].includes(p.status)) return;
     }
     const total = lines.reduce((s, l) => s + (Number(l.line_amount) || 0), 0);
     const labourHrs = lines.filter(l => /\b(labou?r|hours?|hrs?)\b/i.test((l.item || '') + ' ' + (l.description || ''))).reduce((s, l) => s + (Number(l.qty) || 0), 0);
@@ -1760,12 +1820,23 @@ async function schCreate(fields) {
 async function schAddFromQuote(qn, open) {
   const c = schCandidates().find(x => x.quote_number === qn);
   if (!c) return null;
+  SCH.adding = SCH.adding || new Set();
+  if (SCH.adding.has(qn)) return null;
+  SCH.adding.add(qn);
+  try {
+    const fresh = await sbGet('/rest/v1/bookings?select=id&status=neq.cancelled&quote_number=eq.' + encodeURIComponent(qn));
+    if (fresh.length) { D.bookings = await sbGet('/rest/v1/bookings?select=*&order=created_at.desc'); return null; }
+    return await schAddFromQuote2(c, qn, open);
+  } finally { SCH.adding.delete(qn); }
+}
+async function schAddFromQuote2(c, qn, open) {
   const proj = (D.projects || []).find(p => (p.name || '').toLowerCase() === (c.project || c.contact || '').toLowerCase());
   const b = await schCreate({
     project: c.project || (proj && proj.name) || c.contact, title: proj && proj.baseline_scope || '', quote_number: qn,
     approval_source: c.status === 'ACCEPTED' ? 'xero' : 'hub', approved_at: todayStr(), status: 'approved', client_name: c.contact,
     hours: (proj && Number(proj.baseline_labour_hours)) || c.labourHrs || null
   });
+  if (proj && proj.status === 'Quoted' && c.status === 'ACCEPTED') hubWrite('projects', proj.id, { status: 'Won' }).then(r => Object.assign(proj, r)).catch(() => {});
   schFillFromContact(b.id);
   if (open) { schRender(); schOpen(b.id); }
   return b;
@@ -1797,7 +1868,7 @@ async function schAddBlank() {
 function schAddModal() {
   const cands = schCandidates();
   const taken = new Set(schAll().filter(b => b.status !== 'cancelled').map(b => (b.project || '').toLowerCase()));
-  const projs = (D.projects || []).filter(p => ['Quoted', 'Active'].includes(p.status) && !taken.has((p.name || '').toLowerCase()));
+  const projs = (D.projects || []).filter(p => ['Quoted', 'Won', 'Active'].includes(p.status) && !taken.has((p.name || '').toLowerCase()));
   const row = (t, sub, act) => '<button class="sch-pick" onclick="' + act + '"><span><b>' + attrEsc(t) + '</b><small>' + attrEsc(sub) + '</small></span><i>＋</i></button>';
   openModal('Add a job to the pipeline', `
     <div class="sch-lbl">Quotes from Xero</div>
@@ -2145,6 +2216,7 @@ function schOpen(id, focus, keepScroll) {
   const maps = b.site_address ? 'https://maps.apple.com/?q=' + encodeURIComponent(b.site_address) : '';
   openModal(attrEsc(b.project || b.id), `
     <div class="sch-sheet">
+      <button class="sch-btn pri" style="width:100%;margin-bottom:10px" onclick="schOpenProject('${id}')">Open project card →</button>
       <div class="sch-pills">${Object.entries(SCH_STATUS).filter(([k]) => k !== 'cancelled').map(([k, v]) => `<button class="sch-pill${b.status === k ? ' on' : ''}" style="--c:${v.color}" onclick="schSetStatus('${id}','${k}')">${v.label}</button>`).join('')}</div>
       ${issues.length ? `<div class="sch-issues">${issues.map(i => `<div class="sch-iss ${i.level}">${i.level === 'bad' ? '⛔' : i.level === 'warn' ? '⚠️' : 'ℹ︎'} ${attrEsc(i.text)}</div>`).join('')}</div>` : ''}
 
@@ -2152,23 +2224,27 @@ function schOpen(id, focus, keepScroll) {
       <div class="sch-move">
         <div class="sch-move-main">${fld('Start', inp('start_date', 'date'))}${fld('Time', inp('start_time', 'time'))}${fld('Hours', inp('hours', 'number', 'step="0.5" min="0" inputmode="decimal"'))}</div>
         <div class="sch-quick">
-          <button class="sch-btn" onclick="schMove('${id}',addD('${b.start_date || todayStr()}',-1))">−1 day</button>
-          <button class="sch-btn" onclick="schMove('${id}',addD('${b.start_date || todayStr()}',1))">+1 day</button>
-          <button class="sch-btn" onclick="schMove('${id}',addD('${b.start_date || todayStr()}',7))">+1 week</button>
           <button class="sch-btn" onclick="schPlace('${id}')">Pick on calendar</button>
           <button class="sch-btn pri" onclick="schMove('${id}','${sg}','Suggested: ')">Next free: ${fmtShort(sg)}</button>
-          ${e ? `<button class="sch-btn" onclick="schMove('${id}','${e}','Earliest possible: ')">Earliest: ${fmtShort(e)}</button>` : ''}
+          <button class="sch-btn" onclick="schMove('${id}',addD('${b.start_date || todayStr()}',1))">+1 day</button>
+          <button class="sch-btn" onclick="schMove('${id}',addD('${b.start_date || todayStr()}',7))">+1 week</button>
         </div>
         <div class="sch-sub">${span.length ? 'Runs ' + fmtDay(span[0].d) + (span.length > 1 ? ' → ' + fmtDay(span[span.length - 1].d) + ' (' + span.length + ' days)' : '') : 'No date yet'}</div>
       </div>
-      <div class="sch-row3">${fld('Hours / day', inp('hours_per_day', 'number', 'step="0.5" min="1" max="12" inputmode="decimal"'))}${fld('Priority', sel('priority', [[1, 'High'], [2, 'Normal'], [3, 'Low']]))}${fld('Setting', sel('env', [['indoor', 'Indoor'], ['outdoor', 'Outdoor'], ['both', 'Both']]))}</div>
-      <div class="sch-row3">${fld('Client window', sel('window_days', [[0, 'Exact date'], [2, '2-day window'], [3, '3-day window']]), 'span2')}</div>
-
       <div class="sch-lbl">Site &amp; client</div>
       ${fld('Address', inp('site_address', 'text', 'placeholder="Street, suburb"'))}
       <div class="sch-sub" style="margin:-4px 0 10px">${b.lat != null ? '📍 located (travel times on)' : b.site_address ? 'Not located yet' : ''} ${maps ? '· <a href="' + maps + '" target="_blank" rel="noopener">Open in Maps</a>' : ''}</div>
       <div class="sch-row3">${fld('Client', inp('client_name', 'text'))}${fld('Mobile', inp('client_phone', 'tel', 'inputmode="tel"'))}${fld('Email', inp('client_email', 'email', 'inputmode="email"'))}</div>
       <button class="sch-link" onclick="schFillFromContact('${id}')">Fill from Xero contact</button>
+
+      <div class="sch-lbl">Note</div>
+      <textarea class="sch-in" rows="3" placeholder="Quick note, e.g. waiting on electrician, Tuesday next week" onchange="schNote('${id}',this.value)">${attrEsc(b.notes || '')}</textarea>
+      <div class="sch-sub">Type it your way — it's tidied up with exact dates.</div>
+
+      <details class="sch-more"${focus === 'notify' ? ' open' : ''}><summary>More details</summary>
+            <div class="sch-row3">${fld('Hours / day', inp('hours_per_day', 'number', 'step="0.5" min="1" max="12" inputmode="decimal"'))}${fld('Priority', sel('priority', [[1, 'High'], [2, 'Normal'], [3, 'Low']]))}${fld('Setting', sel('env', [['indoor', 'Indoor'], ['outdoor', 'Outdoor'], ['both', 'Both']]))}</div>
+      <div class="sch-row3">${fld('Client window', sel('window_days', [[0, 'Exact date'], [2, '2-day window'], [3, '3-day window']]), 'span2')}</div>
+
 
       <div class="sch-lbl">Constraints &amp; deliveries</div>
       ${schConsEditor(b)}
@@ -2178,13 +2254,30 @@ function schOpen(id, focus, keepScroll) {
 
       <div class="sch-lbl">Job</div>
       ${fld('Description', inp('title', 'text', 'placeholder="What the job is"'))}
-      ${fld('Notes', `<textarea class="sch-in" rows="2" onchange="schSet('${id}','notes',this.value)">${attrEsc(b.notes || '')}</textarea>`)}
+      </details>
       <div class="sch-sub">${b.quote_number ? 'Quote ' + attrEsc(b.quote_number) + ' · ' : ''}Approved ${fmtShort(b.approved_at)} via ${b.approval_source === 'xero' ? 'Xero' : 'the Hub'} · ${b.id}</div>
       <div class="sch-foot"><button class="sch-btn danger" onclick="schCancel('${id}')">Cancel this job</button></div>
     </div>`, true);
   document.getElementById('modal-title').textContent = b.project || b.id;
   if (keepScroll) ov.scrollTop = top;
   else if (focus === 'notify') { const a = document.getElementById('sch-notify-anchor'); if (a) a.scrollIntoView({ block: 'start' }); }
+}
+async function schNote(id, val) {
+  const b = schGet(id);
+  val = (val || '').trim();
+  if (!b || val === (b.notes || '')) return;
+  await schSave(id, { notes: val }, true);
+  if (!val) return;
+  claudeToast('Tidying your note…');
+  try {
+    const r = await fetch('/.netlify/functions/smart-note', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: val, today: todayStr(), job: b.project }) });
+    const out = await r.json().catch(() => ({}));
+    if (out.ok && out.note && out.note !== val) {
+      await schSave(id, { notes: out.note }, true);
+      schSnack('Note tidied with dates', [{ label: 'Undo', run: async () => { await schSave(id, { notes: val }, true); schOpen(id, undefined, true); } }]);
+    }
+  } catch (e) {}
+  if (SCH.openId === id) schOpen(id, undefined, true);
 }
 async function schCancel(id) { await schSetStatus(id, 'cancelled'); closeModal(); }
 
@@ -2684,15 +2777,15 @@ function renderAll() {
 let projSortCol      = null;
 let projSortDir      = 'asc';
 let projFilterText   = '';
-const PROJ_STATUS_ORDER = ['Active','Finished','Quoted','Paid','Inactive'];
-let projStatusSel    = new Set(['Active','Finished']);   // default: chase payments
+const PROJ_STATUS_ORDER = ['Active','Won','Finished','Quoted','Paid','Inactive','Lost'];
+let projStatusSel    = new Set(['Active','Won','Finished']);   // default: chase payments + jobs to schedule
 let PROJ_SORTED       = [];        // cached billable rows for projRenderRows() (avoids re-aggregating per keystroke)
 
 // 'Quoted' added 2026-09-18 — set automatically when a quote is approved via
 // the Xero MCP connector (job-status baseline feature); still hand-changeable
 // like any other status via the pills in showProjectDetail().
-const PROJECT_STATUSES   = ['Quoted','Active','Finished','Paid','Inactive'];
-const PROJ_STATUS_BADGE  = { Quoted:'badge-purple', Active:'badge-green', Finished:'badge-blue', Paid:'badge-amber', Inactive:'badge-gray' };
+const PROJECT_STATUSES   = ['Quoted','Won','Active','Finished','Paid','Inactive','Lost'];
+const PROJ_STATUS_BADGE  = { Won:'badge-green', Lost:'badge-red', Quoted:'badge-purple', Active:'badge-green', Finished:'badge-blue', Paid:'badge-amber', Inactive:'badge-gray' };
 
 function projStatusBadge(status) {
   const s = status || 'Active';

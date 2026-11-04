@@ -367,3 +367,10 @@ Files: `index.html`, `netlify/functions/hub-write.js` (new), `CLAUDE.md`. Verifi
 - Accepted Xero quotes are added to the Schedule automatically on load.
 - Calendar opens on today (week starts today), past days blanked and unreachable.
 - Won jobs with no date show in the calendar as dashed placeholders laid out from today (priority first, free capacity); drag one to a day to lock it in as Tentative. Pipeline list sits under the calendar on phone.
+
+## Batch — Schedule hours, project link, smart note, Won/Lost (2026-11-05)
+- Jobs find their real project card (quote link, name prefix, quoted amount) → hours come from the project's baseline hours; booking is re-pointed to the card's name.
+- Job sheet slimmed: project-card button, when, address/client, one smart note; everything else under "More details".
+- New `smart-note.js` function: quick note → tidy note with exact dates (Haiku).
+- Duplicate guard when auto-adding accepted quotes (checks the database first).
+- Project statuses Won and Lost; Quoted → Won when the Xero quote is ACCEPTED, → Lost when DECLINED. Filter default: Active, Won, Finished.
