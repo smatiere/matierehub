@@ -200,13 +200,14 @@ async function createShoppingList({ job_name, client_name, materials }) {
 // as 'approved' (needs a date). Hours come from labour_hours; special-order
 // items with a lead_time are picked up by the Schedule tab from the shopping
 // list. Swallows errors upstream so a missing bookings table never blocks a quote.
-async function createBooking({ job_name, client_name, quote_number, labour_hours, title }) {
+async function createBooking({ job_name, client_name, quote_number, labour_hours, title, site_address, client_phone, client_email }) {
   if (!job_name) return null;
   const id = await nextId('bookings', 'BK');
   const rows = await sbPost('bookings', {
     id, project: job_name, title: title || '', quote_number: quote_number || '', approval_source: 'xero',
     approved_at: new Date().toISOString().slice(0, 10), status: 'approved',
-    client_name: client_name || '', hours: labour_hours != null ? labour_hours : null
+    client_name: client_name || '', hours: labour_hours != null ? labour_hours : null,
+    site_address: site_address || '', client_phone: client_phone || '', client_email: client_email || ''
   });
   return rows[0];
 }
@@ -244,6 +245,21 @@ async function toolCreateContact({ name, email, phone, address_line1, city, post
   const res = await xeroCall('Contacts', 'POST', accessToken, tenantId, payload);
   const c = res.Contacts[0];
   return { ContactID: c.ContactID, Name: c.Name };
+}
+
+// 2026-11-05 — the client's address/phone/email as saved on the Xero contact card,
+// so a new quote's booking (and the project) get the site address straight away.
+async function contactDetails(accessToken, tenantId, contactId) {
+  try {
+    const res = await xeroCall(`Contacts/${contactId}`, 'GET', accessToken, tenantId);
+    const c = (res.Contacts || [])[0] || {};
+    const a = (c.Addresses || []).find(x => x.AddressType === 'STREET' && x.AddressLine1) || (c.Addresses || []).find(x => x.AddressLine1) || {};
+    const ph = (c.Phones || []).find(x => x.PhoneNumber && x.PhoneType === 'MOBILE') || (c.Phones || []).find(x => x.PhoneNumber) || {};
+    return {
+      address: [a.AddressLine1, a.City, a.Region || 'NSW', a.PostalCode].filter(Boolean).join(', '),
+      phone: [ph.PhoneAreaCode, ph.PhoneNumber].filter(Boolean).join(' ').trim(), email: c.EmailAddress || ''
+    };
+  } catch (e) { return {}; }
 }
 
 async function toolCreateQuote(args) {
@@ -304,11 +320,17 @@ async function toolCreateQuote(args) {
     createShoppingList({ job_name: job_name || contact_name || q.Contact?.Name, client_name: contact_name || q.Contact?.Name, materials: materialsForList }).catch(e => ({ error: e.message }))
   ]);
 
+  const cd = await contactDetails(accessToken, tenantId, contactRef);
   const booking = await createBooking({
     job_name: job_name || contact_name || q.Contact?.Name,
     client_name: contact_name || q.Contact?.Name,
-    quote_number: q.QuoteNumber, labour_hours, title: summary || title
+    quote_number: q.QuoteNumber, labour_hours, title: summary || title,
+    site_address: cd.address, client_phone: cd.phone, client_email: cd.email
   }).catch(e => ({ error: e.message }));
+  // Also keep the address on the project card (column added by supabase_projects_address.sql; ignored until it exists).
+  if (cd.address) {
+    sbPatch('projects', `?name=ilike.${encodeURIComponent(job_name || contact_name || q.Contact?.Name || '')}`, { site_address: cd.address }).catch(() => {});
+  }
 
   return {
     QuoteNumber: q.QuoteNumber, QuoteID: q.QuoteID, Status: q.Status,

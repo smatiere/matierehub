@@ -696,6 +696,7 @@ async function loadData() {
     const autoLinked = await cascadeLinkedQuotesAndInvoices();
     const autoPaid   = await autoUpdatePaidProjects();
     if (autoLinked) claudeToast(`✓ Auto-linked ${autoLinked} quote/invoice line${autoLinked>1?'s':''} via shared quote reference`, 'success');
+    schGapFill();
     if (autoPaid)   claudeToast(`✓ ${autoPaid} project${autoPaid>1?'s':''} marked Paid — invoice(s) fully paid in Xero`, 'success');
 
     document.getElementById('loading').style.display = 'none';
@@ -1599,16 +1600,86 @@ async function schContactFor(name) {
   }
   return null;
 }
+// Best Xero contact for a booking: the quote's own contact first, then exact
+// name, then "Name - Suburb" prefixes of the job name.
+async function schContactList() {
+  if (SCH.contacts) return SCH.contacts;
+  try { SCH.contacts = await sbGet('/rest/v1/contacts?select=id,name,email,phone,address_line1,city,region,postal_code&limit=1000'); }
+  catch (e) { SCH.contacts = []; }
+  return SCH.contacts;
+}
+async function schFindContact(b) {
+  const list = await schContactList();
+  const low = x => String(x || '').toLowerCase().trim();
+  const byId = id => list.find(c => c.id === id);
+  const qi = (D.quote_items || []).find(q => b.quote_number && q.quote_number === b.quote_number && q.contact_id);
+  if (qi && byId(qi.contact_id)) return byId(qi.contact_id);
+  const names = [b.client_name, b.project].map(low).filter(Boolean);
+  for (const n of names) { const c = list.find(c => low(c.name) === n); if (c) return c; }
+  const pre = list.filter(c => low(c.name).length >= 5 && names.some(n => n.startsWith(low(c.name))));
+  if (pre.length) return pre.sort((a, c) => c.name.length - a.name.length)[0];
+  const first = (names[0] || '').split(/[\s-]+/)[0];
+  if (first.length >= 3) {
+    const cand = list.filter(c => low(c.name).startsWith(first) && c.city && names.some(n => n.includes(low(c.city))));
+    if (cand.length === 1) return cand[0];
+    const only = list.filter(c => low(c.name).split(/[\s-]+/)[0] === first);
+    if (only.length === 1) return only[0];
+  }
+  return null;
+}
+function schAddrOf(c) { return c ? [c.address_line1, c.city, c.region || 'NSW', c.postal_code].filter(Boolean).join(', ') : ''; }
+
+// Hours quoted for the job: the project's baseline, else labour lines on the quote.
+function schQuotedHours(b) {
+  const p = (D.projects || []).find(x => (x.name || '').toLowerCase() === (b.project || '').toLowerCase());
+  if (p && Number(p.baseline_labour_hours) > 0) return Number(p.baseline_labour_hours);
+  const lines = (D.quote_items || []).filter(q => b.quote_number && q.quote_number === b.quote_number);
+  const h = lines.filter(l => /\b(labou?r|hours?|hrs?)\b/i.test((l.item || '') + ' ' + (l.description || ''))).reduce((t, l) => t + (Number(l.qty) || 0), 0);
+  return h > 0 ? h : null;
+}
+
+// Fill missing hours and addresses on open bookings, and copy the address onto the project.
+async function schGapFill() {
+  if (SCH.filling || !Array.isArray(D.bookings)) return;
+  SCH.filling = true;
+  let n = 0;
+  try {
+    for (const b of D.bookings) {
+      if (['done', 'cancelled'].includes(b.status)) continue;
+      const patch = {};
+      if (!Number(b.hours)) { const h = schQuotedHours(b); if (h) patch.hours = h; }
+      if (!b.site_address || !b.client_phone || !b.client_email) {
+        const c = await schFindContact(b);
+        if (c) {
+          if (!b.site_address && schAddrOf(c)) patch.site_address = schAddrOf(c);
+          if (!b.client_phone && c.phone) patch.client_phone = c.phone;
+          if (!b.client_email && c.email) patch.client_email = c.email;
+        }
+      }
+      if (Object.keys(patch).length) {
+        const ok = await schSave(b.id, patch, true);
+        if (ok) { n++; if (patch.site_address && !b.lat) schGeocode(b.id); }
+      }
+      const p = (D.projects || []).find(x => (x.name || '').toLowerCase() === (b.project || '').toLowerCase());
+      if (p && 'site_address' in p && !p.site_address && b.site_address) {
+        try { await hubWrite('projects', p.id, { site_address: b.site_address }); p.site_address = b.site_address; } catch (e) {}
+      }
+    }
+  } finally { SCH.filling = false; }
+  if (n) { claudeToast('✓ Schedule: filled hours/address on ' + n + ' job' + (n > 1 ? 's' : '')); schRender(); }
+}
+
 async function schFillFromContact(id) {
   const b = schGet(id);
-  const c = await schContactFor(b.client_name || b.project);
-  if (!c) { claudeToast('No single matching Xero contact found', 'error'); return; }
-  const addr = [c.address_line1, c.city, c.region, c.postal_code].filter(Boolean).join(', ');
-  await schSave(id, {
-    client_phone: b.client_phone || c.phone || '', client_email: b.client_email || c.email || '',
-    site_address: b.site_address || addr || ''
-  });
-  if (!b.lat) schGeocode(id);
+  const c = await schFindContact(b);
+  if (!c) { claudeToast('No matching Xero contact found', 'error'); return; }
+  const fields = {};
+  if (!b.client_phone && c.phone) fields.client_phone = c.phone;
+  if (!b.client_email && c.email) fields.client_email = c.email;
+  if (!b.site_address && schAddrOf(c)) fields.site_address = schAddrOf(c);
+  if (!Number(b.hours)) { const h = schQuotedHours(b); if (h) fields.hours = h; }
+  if (Object.keys(fields).length) await schSave(id, fields, true);
+  if (!b.lat && b.site_address) schGeocode(id);
   if (SCH.openId === id) schOpen(id);
 }
 
@@ -3098,6 +3169,7 @@ function showProjectDetail(name) {
     <div style="margin-bottom:16px">
       <div style="font-size:11px;color:var(--ink-4);margin-bottom:6px">Status — click to change</div>
       ${projStatusPills(name, status)}
+      ${defined && defined.site_address ? '<div style="font-size:12px;color:var(--ink-3);margin-top:8px">📍 '+attrEsc(defined.site_address)+'</div>' : ''}
     </div>
     <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:16px">
       ${kpi('Est. Value', estValue!=null?fmt(estValue):'TBD', linkedQ.length?linkedQ.length+' quote line'+(linkedQ.length>1?'s':'')+' picked':'','highlight')}

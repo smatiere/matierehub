@@ -38,7 +38,7 @@ const WRITABLE = {
   // set automatically by the Xero MCP connector's create_quote tool when a quote
   // is approved, but also editable here in case Seb wants to adjust by hand.
   projects:          ['manual_revenue', 'manual_revenue_note', 'quoted', 'status', 'notes', 'name', 'scope_of_work',
-                       'baseline_scope', 'baseline_price', 'baseline_labour_hours', 'baseline_materials_estimate', 'baseline_set_at'],
+                       'baseline_scope', 'baseline_price', 'baseline_labour_hours', 'baseline_materials_estimate', 'baseline_set_at', 'site_address'],
   // 2026-09-18 — shopping list feature: tick items off (items JSONB, whole array
   // rewritten per PATCH) and mark a list done, from the Hub or from the phone.
   shopping_lists:    ['items', 'status', 'title', 'project'],
