@@ -780,10 +780,41 @@ async function autoLinkQuotesFromInvoices() {
 // single pass of each is enough since it's a direct field copy, not recursive.
 // Call this after ANY link/bulk-link action and once on every data load.
 async function cascadeLinkedQuotesAndInvoices() {
+  const y = await autoLinkInvoicesByAmount();
   const z = await autoLinkQuotesFromBookings();
   const a = await autoLinkInvoicesFromQuotes();
   const b = await autoLinkQuotesFromInvoices();
-  return z + a + b;
+  return y + z + a + b;
+}
+
+// An invoice with no job whose client matches a job's client (first word of the
+// name) and whose total equals that job's quoted figure to the cent is, in practice,
+// that job's invoice. Link it only when exactly one job fits and the job has no
+// invoice yet; the quote lines then follow through the quote-number cascade.
+async function autoLinkInvoicesByAmount() {
+  const real = new Set((D.projects || []).map(x => x.name));
+  const hasInv = new Set((D.invoice_items || []).filter(ii => real.has((ii.project || '').trim())).map(ii => ii.project.trim()));
+  const groups = {};
+  (D.invoice_items || []).forEach(ii => {
+    const cur = (ii.project || '').trim();
+    if (cur && real.has(cur)) return;
+    if (['VOIDED', 'DELETED', 'DRAFT'].includes((ii.status || '').toUpperCase())) return;
+    (groups[ii.invoice_number] = groups[ii.invoice_number] || []).push(ii);
+  });
+  const first = t => String(t || '').trim().split(/[\s\-]+/)[0].toLowerCase();
+  const taken = new Set();
+  let linked = 0;
+  for (const num of Object.keys(groups)) {
+    const rows = groups[num], total = rows.reduce((a, r) => a + (Number(r.price_excl_gst) || 0), 0), who = first(rows[0].contact);
+    if (!who || total <= 0) continue;
+    const fits = (D.projects || []).filter(pr => !hasInv.has(pr.name) && !taken.has(pr.name) && Number(pr.quoted) > 0
+      && Math.abs(Number(pr.quoted) - total) < 0.011 && first(pr.name) === who);
+    if (fits.length !== 1) continue;
+    const proj = fits[0].name;
+    taken.add(proj);
+    for (const r of rows) { try { await hubWrite('invoice_items', r.id, { project: proj }); r.project = proj; linked++; } catch (e) { /* skip */ } }
+  }
+  return linked;
 }
 
 // Quotes made from Claude record the job and the Xero quote number together in
@@ -2086,7 +2117,7 @@ function renderSchedule() { schBadge(); schRender(); }
 // working time that earns $0, so it pulls the day, week and month down.
 // Holidays / Sick days / Carer days are leave: shown with a symbol and never
 // counted against you. Benchmark = 8 hours at the nominal rate ($800/day).
-const PF = { month: null, view: 'day', range: 28, win: 'm0' };
+const PF = { month: null, view: 'day', range: 28, win: 'm0', basis: 'invoiced' };
 const PF_RANGES = [[14,'2w'],[28,'4w'],[90,'3m'],[180,'6m'],[365,'1y'],[0,'All']];
 const PF_VIEWS = [['day','Day'],['week','Week'],['month','Month']];
 const PF_WINS = [['m0','This month'],['m1','Last month'],['q','3 months'],['s','6 months'],['y','12 months'],['all','All time']];
@@ -2119,7 +2150,7 @@ function pfCompute() {
   if (!PROJ_SORTED.length && D && D.kpis) renderProjects(D.kpis);
   const perHour = {};
   PROJ_SORTED.forEach(p => {
-    const sales = (p.linkedInvValue || 0) + (p.manualRev || 0);
+    const sales = (PF.basis === 'paid' ? (p.linkedPaidValue || 0) : (p.linkedInvValue || 0)) + (p.manualRev || 0);
     if (sales > 0 && p.hours > 0) perHour[p.name] = (sales - (p.expensesTotal || 0)) / p.hours;
   });
   const days = {}, entries = [];
@@ -2176,6 +2207,7 @@ function pfSetRange(n) {
   pfRender();
 }
 function pfSetView(v) { PF.view = v; pfRender(); }
+function pfSetBasis(b) { PF.basis = b; pfRender(); }
 function pfSetWin(w) { PF.win = w; pfRender(); }
 
 function pfDay(date) {
@@ -2328,7 +2360,7 @@ function pfAnalyse() {
   const P = {}; PROJ_SORTED.forEach(p => P[p.name] = p);
   const list = Object.values(jobs).map(j => {
     const p = P[j.name] || {}, def = (D.projects || []).find(x => x.name === j.name) || {};
-    const sales = (p.linkedInvValue || 0) + (p.manualRev || 0);
+    const sales = (PF.basis === 'paid' ? (p.linkedPaidValue || 0) : (p.linkedInvValue || 0)) + (p.manualRev || 0);
     return Object.assign(j, { perH: j.h ? j.v / j.h : 0, status: def.status || p.status || '', sales$: sales, exp: p.expensesTotal || 0,
       matShare: sales > 0 ? (p.expensesTotal || 0) / sales : null, type: pfType(j.name),
       baseH: def.baseline_labour_hours != null ? Number(def.baseline_labour_hours) : null, allH: p.hours || 0 });
@@ -2434,6 +2466,7 @@ function pfRender() {
   const pill = (arr, cur, fn) => arr.map(([v, l]) => `<span class="hub-pill-btn${v === cur ? ' active' : ''}" onclick="${fn}(${typeof v === 'string' ? `'${v}'` : v})">${l}</span>`).join('');
   page.innerHTML = `
     <div class="divider">Performance — Operating margin per day</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:-4px 0 12px"><span style="font-size:11px;color:var(--ink-4);margin-right:4px">Sales counted:</span>${pill([['invoiced','Invoiced'],['paid','Paid only']], PF.basis, 'pfSetBasis')}<span style="font-size:11px;color:var(--ink-4)">${PF.basis === 'paid' ? 'only money actually received' : 'everything invoiced, paid or not'}</span></div>
     <div class="kpi-grid">
       ${kpi(monthName, fmt(total), 'margin this month', 'highlight')}
       ${kpi('Average per worked day', fmt(avg), worked + ' day' + (worked === 1 ? '' : 's') + ' worked', worked ? (avg >= bench ? 'good' : 'warn') : '')}
@@ -2660,6 +2693,7 @@ function renderProjects(k) {
       const p = pData[lp];
       p.invoicedValue += (ii.price_excl_gst || 0);
       p.linkedInvValue = (p.linkedInvValue || 0) + (ii.price_excl_gst || 0);
+      p.linkedPaidValue = (p.linkedPaidValue || 0) + (Number(ii.paid) || 0);
       p.linkedCount = (p.linkedCount || 0) + 1;
       if (ii.quote_number) p.quoteNumbers.add(ii.quote_number);
       if (ii.contact && !p.invoiceContactName) p.invoiceContactName = ii.contact;

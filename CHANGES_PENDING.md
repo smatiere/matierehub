@@ -352,3 +352,7 @@ Files: `index.html`, `netlify/functions/hub-write.js` (new), `CLAUDE.md`. Verifi
 - Non-billable time (Admin, Wasted Time…) now counts as hours earning $0; every past weekday is clickable (even "no hours").
 - Chart redesigned (gradient bars, smooth 7-day trend line, benchmark line, tooltip); same pill selectors as other tabs (2w/4w/3m/6m/1y/All + Day/Week/Month).
 - New sections: Jobs to watch (doing well / needs attention), and a rule-based "What the numbers say" by type of work, for a chosen period (this month, last month, 3m, 6m, 12m, all time, or any month).
+
+## 2026-11-05 — Damien fence fix
+- Auto-link: an unlinked invoice whose client matches a job and whose total equals that job's quoted figure is linked to it (only if exactly one job fits).
+- Performance: "Sales counted: Invoiced | Paid only" switch (default Invoiced).
