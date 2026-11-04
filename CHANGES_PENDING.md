@@ -341,3 +341,8 @@ Files: `index.html`, `netlify/functions/hub-write.js` (new), `CLAUDE.md`. Verifi
 - Detail tiles: Labour and Expenses show actual / quoted with a coloured difference; Remaining shows $ and % of the job.
 - Project table: margin % chip beside the name; compact card rows on phones.
 - Status filter: tags (Active, Finished, Quoted, Paid, Inactive) plus All / None; default Active + Finished; list ordered by status.
+
+## 2026-11-05 — Performance tab
+- New "Performance" tab: operating margin per day (sales − expenses per job, spread over every hour worked on it, summed per day/week/month).
+- Month calendar with $ per day, green at/above 8h × nominal rate ($800), red below; tap a day to list its jobs, tap a job to open its card.
+- Bar chart (daily/weekly/monthly, 2–8 weeks, 8–26 weeks, 6–24 months) with benchmark line and trend line.

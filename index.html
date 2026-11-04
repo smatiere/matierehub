@@ -455,6 +455,23 @@ button,.tab,.hub-pill-btn,select,input[type=checkbox]{-webkit-tap-highlight-colo
   .proj-mini{display:flex;flex-wrap:wrap;gap:3px 12px;margin-top:5px;font-size:11px;color:var(--ink-2)}
   .proj-mini i{font-style:normal;color:var(--ink-4);margin-right:3px;font-size:10px;text-transform:uppercase;letter-spacing:.04em}
 }
+
+/* Performance tab */
+.pf-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;padding:0 10px}
+.pf-head{padding-top:4px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-4);text-align:center}
+.pf-cell{min-height:64px;border-radius:8px;background:var(--bg-2);border:1px solid transparent;padding:4px 5px;display:flex;flex-direction:column;gap:1px;min-width:0;overflow:hidden}
+.pf-blank{background:transparent}
+.pf-cell[onclick]{cursor:pointer}
+.pf-cell[onclick]:hover{border-color:var(--ink-4)}
+.pf-n{font-size:10px;color:var(--ink-4)}
+.pf-v{font-size:13px;font-weight:700;line-height:1.1}
+.pf-h{font-size:9px;color:var(--ink-4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pf-ok{background:color-mix(in srgb,var(--sage) 22%,transparent);border-color:color-mix(in srgb,var(--sage) 55%,transparent)}
+.pf-low{background:color-mix(in srgb,var(--pink) 20%,transparent);border-color:color-mix(in srgb,var(--pink) 50%,transparent)}
+.pf-today .pf-n{color:var(--amber);font-weight:800}
+.pf-legend{padding:10px 14px 14px;font-size:11px;color:var(--ink-4);display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px}
+.pf-legend i{display:inline-block;width:12px;height:12px;border-radius:3px;border:1px solid}
+@media (max-width:700px){.pf-grid{padding:0 6px;gap:3px}.pf-cell{min-height:54px;padding:3px}.pf-v{font-size:11px}.pf-h{font-size:8px}}
 </style>
 </head>
 <body>
@@ -501,6 +518,7 @@ button,.tab,.hub-pill-btn,select,input[type=checkbox]{-webkit-tap-highlight-colo
   <div class="tab" onclick="showTab('pnl',this)">P&amp;L</div>
   <div class="tab" onclick="showTab('projects',this)">Projects</div>
   <div class="tab" onclick="showTab('schedule',this)">Schedule <span id="sch-count" style="display:none;background:var(--amber);color:#000;border-radius:10px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:4px"></span></div>
+  <div class="tab" onclick="showTab('performance',this)">Performance</div>
   <div class="tab" onclick="showTab('quotes',this)">Quotes & Pricing</div>
   <div class="tab" onclick="showTab('transactions',this)">Transactions</div>
   <div class="tab" onclick="showTab('receipts',this)">Scan Receipt</div>
@@ -513,6 +531,7 @@ button,.tab,.hub-pill-btn,select,input[type=checkbox]{-webkit-tap-highlight-colo
 <div class="page" id="page-pnl"></div>
 <div class="page" id="page-projects"></div>
 <div class="page" id="page-schedule"></div>
+<div class="page" id="page-performance"></div>
 <div class="page" id="page-quotes"></div>
 <div class="page" id="page-transactions"></div>
 <div class="page" id="page-receipts"></div>
@@ -967,6 +986,7 @@ function showTab(name, el) {
   if (name === 'action') renderForAction();
   if (name === 'shopping') renderShopping();
   if (name === 'schedule') renderSchedule();
+  if (name === 'performance' && D) pfRender();
   if (name === 'projects' && D) renderProjects(D.kpis);
 }
 
@@ -2032,6 +2052,204 @@ function schBadge() {
   if (el) { el.textContent = n; el.style.display = n ? 'inline' : 'none'; }
 }
 function renderSchedule() { schBadge(); schRender(); }
+
+// ── Performance (2026-11-05) ─────────────────────────────────────────────────
+// Operating margin per day. For each billable job: what was sold (hand-linked
+// invoices + cash) minus its expenses is the pool that pays for labour AND profit.
+// That pool is spread across every hour worked on the job, so each timesheet entry
+// earns hours x (pool / total hours). Days are then summed into weeks and months.
+// Benchmark = 8 hours at the nominal rate (default $800/day). Jobs with no sales
+// yet earn nothing here (their hours show as "unbilled"). Non-billable jobs are left out.
+const PF = { month: null, view: 'day', span: { day: 14, week: 8, month: 6 } };
+const PF_SPANS = {
+  day:   [[14,'2 weeks'],[28,'4 weeks'],[56,'8 weeks']],
+  week:  [[8,'8 weeks'],[13,'13 weeks'],[26,'26 weeks']],
+  month: [[6,'6 months'],[12,'12 months'],[24,'24 months']],
+};
+function pfRate() { return (D.kpis && D.kpis.sebRate_per_hour) || 100; }
+function pfBench() { return 8 * pfRate(); }
+
+function pfCompute() {
+  if (!PROJ_SORTED.length && D && D.kpis) renderProjects(D.kpis);
+  const perHour = {};
+  PROJ_SORTED.forEach(p => {
+    const sales = (p.linkedInvValue || 0) + (p.manualRev || 0);
+    if (sales > 0 && p.hours > 0) perHour[p.name] = (sales - (p.expensesTotal || 0)) / p.hours;
+  });
+  const billable = new Set(PROJ_SORTED.map(p => p.name));
+  const days = {};
+  (D.timesheets || []).forEach(t => {
+    if (!t.date || !t.project || !billable.has(t.project)) return;
+    const h = Number(t.hours) || 0;
+    const d = days[t.date] || (days[t.date] = { value: 0, hours: 0, unbilled: 0, projects: {} });
+    const pr = d.projects[t.project] || (d.projects[t.project] = { h: 0, v: 0 });
+    d.hours += h; pr.h += h;
+    if (perHour[t.project] != null) { const v = h * perHour[t.project]; d.value += v; pr.v += v; }
+    else d.unbilled += h;
+  });
+  PF.days = days;
+  return days;
+}
+
+function pfDayCell(date, d, bench, today) {
+  const n = Number(date.slice(8));
+  if (!d) return `<div class="pf-cell pf-empty${date === today ? ' pf-today' : ''}"><span class="pf-n">${n}</span></div>`;
+  const has = d.value !== 0 || d.hours === d.unbilled;
+  const cls = d.value >= bench ? 'pf-ok' : d.value > 0 || d.hours > 0 ? 'pf-low' : '';
+  return `<div class="pf-cell ${cls}${date === today ? ' pf-today' : ''}" onclick="pfDay('${date}')" role="button" tabindex="0">
+    <span class="pf-n">${n}</span>
+    <span class="pf-v">${d.value > 0 ? fmt(d.value) : (d.hours ? '$0' : '')}</span>
+    <span class="pf-h">${d.hours ? (+d.hours.toFixed(1)) + 'h' : ''}${d.unbilled ? ' ·unbilled' : ''}</span>
+  </div>`;
+}
+
+function pfMonthShift(n) {
+  const [y, m] = PF.month.split('-').map(Number);
+  const d = new Date(y, m - 1 + n, 1);
+  PF.month = d.getFullYear() + '-' + pad2(d.getMonth() + 1);
+  pfRender();
+}
+function pfSetView(v) { PF.view = v; pfRender(); }
+function pfSetSpan(n) { PF.span[PF.view] = n; pfRender(); }
+
+function pfDay(date) {
+  const d = (PF.days || {})[date];
+  if (!d) return;
+  const bench = pfBench();
+  const rows = Object.keys(d.projects).sort((a, b) => d.projects[b].v - d.projects[a].v).map(name => {
+    const pr = d.projects[name], safe = name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    return `<div onclick="closeModal();showProjectDetail('${safe}')" style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;background:var(--bg-2);border-radius:8px;margin-bottom:6px;cursor:pointer">
+      <span style="min-width:0"><strong style="display:block;overflow:hidden;text-overflow:ellipsis">${attrEsc(name)}</strong>
+        <span style="font-size:11px;color:var(--ink-4)">${+pr.h.toFixed(1)}h${pr.v ? ' · ' + fmt(pr.v / pr.h) + '/h' : ' · no sales yet'}</span></span>
+      <strong style="white-space:nowrap;color:${pr.v ? 'var(--ink-1)' : 'var(--ink-4)'}">${pr.v ? fmt(pr.v) : '—'} ›</strong>
+    </div>`;
+  }).join('');
+  const col = d.value >= bench ? 'var(--sage)' : 'var(--pink)';
+  const label = pd(date).toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
+  openModal(label, `
+    <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px">
+      ${kpi('Margin', fmt(d.value), '', '')}
+      ${kpi('Hours', +d.hours.toFixed(1) + 'h', '', '')}
+      <div class="kpi"><div class="kpi-label">vs benchmark</div><div class="kpi-value" style="color:${col}">${d.value >= bench ? '+' : '−'}${fmt(Math.abs(d.value - bench))}</div><div class="kpi-sub">${fmt(bench)} = 8h</div></div>
+    </div>
+    <div style="font-size:11px;color:var(--ink-4);margin-bottom:8px">Tap a job to open its card</div>${rows}`);
+}
+
+// Chart buckets for the chosen view and span, newest last.
+function pfBuckets() {
+  const days = PF.days || {}, bench = pfBench(), view = PF.view, n = PF.span[view];
+  const today = ymd(new Date());
+  const sum = (from, to) => { let v = 0, h = 0; for (let d = from; d <= to; d = addD(d, 1)) { const x = days[d]; if (x) { v += x.value; h += x.hours; } } return { v, h }; };
+  const weekdays = (from, to) => { let c = 0; for (let d = from; d <= to; d = addD(d, 1)) { const w = pd(d).getDay(); if (w > 0 && w < 6) c++; } return c; };
+  const out = [];
+  if (view === 'day') {
+    for (let d = addD(today, -(n - 1)); d <= today; d = addD(d, 1)) {
+      const w = pd(d).getDay(), x = days[d];
+      if ((w === 0 || w === 6) && !x) continue;
+      out.push({ label: pd(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }), v: x ? x.value : 0, bench });
+    }
+  } else if (view === 'week') {
+    const mon = mondayOf(today);
+    for (let i = n - 1; i >= 0; i--) {
+      const a = addD(mon, -7 * i), s = sum(a, addD(a, 6));
+      out.push({ label: pd(a).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }), v: s.v, bench: bench * 5 });
+    }
+  } else {
+    const now = new Date();
+    for (let i = n - 1; i >= 0; i--) {
+      const f = new Date(now.getFullYear(), now.getMonth() - i, 1), l = new Date(f.getFullYear(), f.getMonth() + 1, 0);
+      const s = sum(ymd(f), ymd(l));
+      out.push({ label: f.toLocaleDateString('en-AU', { month: 'short', year: '2-digit' }), v: s.v, bench: bench * weekdays(ymd(f), ymd(l)) });
+    }
+  }
+  return out;
+}
+
+function pfDrawChart() {
+  const canvas = document.getElementById('pf-chart');
+  if (!canvas) return;
+  destroyChart('pf-chart');
+  const b = pfBuckets(), n = b.length;
+  // straight-line trend through the bars
+  let sx = 0, sy = 0, sxy = 0, sxx = 0;
+  b.forEach((x, i) => { sx += i; sy += x.v; sxy += i * x.v; sxx += i * i; });
+  const den = n * sxx - sx * sx, slope = den ? (n * sxy - sx * sy) / den : 0, icpt = (sy - slope * sx) / (n || 1);
+  const trend = b.map((_, i) => icpt + slope * i);
+  const unit = { day: 'day', week: 'week', month: 'month' }[PF.view];
+  const cap = document.getElementById('pf-trend');
+  if (cap) cap.innerHTML = n > 1
+    ? `Trend: <strong style="color:${slope >= 0 ? 'var(--sage)' : 'var(--pink)'}">${slope >= 0 ? '▲ +' : '▼ −'}${fmt(Math.abs(slope))}</strong> per ${unit} · average ${fmt(sy / n)} per ${unit}`
+    : '';
+  charts['pf-chart'] = new Chart(canvas.getContext('2d'), {
+    data: {
+      labels: b.map(x => x.label),
+      datasets: [
+        { type: 'bar', label: 'Margin', data: b.map(x => Math.round(x.v)), borderRadius: 4,
+          backgroundColor: b.map(x => x.v >= x.bench ? '#3DDC84' : '#FF4D6D') },
+        { type: 'line', label: 'Benchmark', data: b.map(x => x.bench), borderColor: '#FFBE0B', borderWidth: 1.5, pointRadius: 0, stepped: true },
+        { type: 'line', label: 'Trend', data: trend.map(Math.round), borderColor: '#9AA0A6', borderDash: [6, 4], borderWidth: 2, pointRadius: 0 },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#9AA0A6', boxWidth: 14 } }, tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${fmt(c.raw)}` } } },
+      scales: {
+        x: { ticks: CHART_TICK, grid: { display: false } },
+        y: { ticks: { ...CHART_TICK, callback: v => fmt(v) }, grid: { color: CHART_GRID } },
+      },
+    },
+  });
+}
+
+function pfRender() {
+  const page = document.getElementById('page-performance');
+  if (!page || !D) return;
+  const days = pfCompute(), bench = pfBench(), today = ymd(new Date());
+  if (!PF.month) PF.month = today.slice(0, 7);
+  const [y, m] = PF.month.split('-').map(Number);
+  const first = new Date(y, m - 1, 1), count = new Date(y, m, 0).getDate(), lead = (first.getDay() + 6) % 7;
+  let total = 0, worked = 0, okDays = 0, hrs = 0;
+  let cells = '';
+  for (let i = 0; i < lead; i++) cells += '<div class="pf-cell pf-blank"></div>';
+  for (let d = 1; d <= count; d++) {
+    const date = PF.month + '-' + pad2(d), x = days[date];
+    if (x) { total += x.value; hrs += x.hours; if (x.hours) worked++; if (x.value >= bench) okDays++; }
+    cells += pfDayCell(date, x, bench, today);
+  }
+  const monthName = first.toLocaleDateString('en-AU', { month: 'long', year: 'numeric' });
+  const avg = worked ? total / worked : 0;
+  const pills = (items, cur, fn) => items.map(([v, l]) => `<span class="hub-pill-btn${v === cur ? ' active' : ''}" onclick="${fn}(${typeof v === 'string' ? `'${v}'` : v})">${l}</span>`).join('');
+  page.innerHTML = `
+    <div class="divider">Performance — Operating margin per day</div>
+    <div class="kpi-grid">
+      ${kpi(monthName, fmt(total), 'margin this month', 'highlight')}
+      ${kpi('Average per worked day', fmt(avg), worked + ' day' + (worked === 1 ? '' : 's') + ' worked', avg >= bench ? 'good' : 'warn')}
+      ${kpi('Days on benchmark', worked ? okDays + ' of ' + worked : '—', 'at or above ' + fmt(bench), '')}
+      ${kpi('Margin per hour', hrs ? fmt(total / hrs) : '—', 'nominal $' + pfRate() + '/h', hrs && total / hrs >= pfRate() ? 'good' : hrs ? 'warn' : '')}
+    </div>
+    <div class="section">
+      <div class="section-head" style="gap:10px;flex-wrap:wrap">
+        <h2>${monthName}</h2>
+        <div style="display:flex;gap:6px"><span class="hub-pill-btn" onclick="pfMonthShift(-1)" aria-label="Previous month">‹</span><span class="hub-pill-btn" onclick="PF.month=null;pfRender()">Today</span><span class="hub-pill-btn" onclick="pfMonthShift(1)" aria-label="Next month">›</span></div>
+      </div>
+      <div class="pf-grid pf-head"><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span></div>
+      <div class="pf-grid">${cells}</div>
+      <div class="pf-legend"><i class="pf-ok"></i> on or above ${fmt(bench)} (8h at $${pfRate()}) <i class="pf-low"></i> below · tap a day to see its jobs</div>
+    </div>
+    <div class="section">
+      <div class="section-head" style="gap:10px;flex-wrap:wrap">
+        <h2>Margin over time</h2>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${pills([['day','Daily'],['week','Weekly'],['month','Monthly']], PF.view, 'pfSetView')}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${pills(PF_SPANS[PF.view], PF.span[PF.view], 'pfSetSpan')}</div>
+      </div>
+      <div style="height:300px;padding:6px 10px"><canvas id="pf-chart"></canvas></div>
+      <div id="pf-trend" style="font-size:12px;color:var(--ink-3);padding:4px 14px 12px"></div>
+    </div>
+    <div style="font-size:11px;color:var(--ink-4);padding:0 4px 20px;line-height:1.5">
+      How it works: for each job, (sales − expenses) is the money left to pay labour and profit. It is spread over every hour worked on that job, so each hour carries the same value, then added up per day, week and month. Sales = linked invoices + cash. Jobs with no sales yet show their hours as unbilled. Non-billable work is left out.
+    </div>`;
+  pfDrawChart();
+}
 
 function kpi(label, value, sub, style='') {
   return `<div class="kpi ${style}">
