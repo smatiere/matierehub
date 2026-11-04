@@ -439,6 +439,22 @@ button,.tab,.hub-pill-btn,select,input[type=checkbox]{-webkit-tap-highlight-colo
 }
 @media (max-width:720px){.hide-sm{display:none}}
 @keyframes sheetIn{from{transform:translateY(40px);opacity:0}to{transform:none;opacity:1}}
+
+/* Projects table: full columns on desktop, compact card rows on phones */
+.proj-table{min-width:900px}
+.proj-namerow{display:flex;align-items:center;gap:8px}
+.proj-name{white-space:nowrap}
+.proj-margin{font-size:11px;font-weight:700;border:1px solid;border-radius:999px;padding:0 7px;line-height:18px}
+.proj-mini,.proj-contact-sm{display:none}
+@media (max-width:700px){
+  .proj-table{min-width:0;width:100%}
+  .pc-hide-sm{display:none}
+  .proj-name{white-space:normal}
+  .proj-namerow{justify-content:space-between}
+  .proj-contact-sm{display:inline;color:var(--ink-4);font-size:11px}
+  .proj-mini{display:flex;flex-wrap:wrap;gap:3px 12px;margin-top:5px;font-size:11px;color:var(--ink-2)}
+  .proj-mini i{font-style:normal;color:var(--ink-4);margin-right:3px;font-size:10px;text-transform:uppercase;letter-spacing:.04em}
+}
 </style>
 </head>
 <body>
@@ -694,9 +710,12 @@ async function autoLinkQuotesFromInvoices() {
   });
   if (!Object.keys(invoiceProjectMap).length) return 0;
 
+  // If Seb already picked specific lines of a quote, respect that selection:
+  // never pull in the rest of the quote (that made Est. Value show the full quote).
+  const pickedQuotes = new Set((D.quote_items || []).filter(qi => (qi.project || '').trim()).map(qi => (qi.quote_number || '').trim()));
   const toLink = (D.quote_items || []).filter(qi => {
     const qn = (qi.quote_number || '').trim();
-    return qn && invoiceProjectMap[qn] && !(qi.project || '').trim();
+    return qn && invoiceProjectMap[qn] && !pickedQuotes.has(qn) && !(qi.project || '').trim();
   });
   if (!toLink.length) return 0;
 
@@ -713,9 +732,31 @@ async function autoLinkQuotesFromInvoices() {
 // single pass of each is enough since it's a direct field copy, not recursive.
 // Call this after ANY link/bulk-link action and once on every data load.
 async function cascadeLinkedQuotesAndInvoices() {
+  const z = await autoLinkQuotesFromBookings();
   const a = await autoLinkInvoicesFromQuotes();
   const b = await autoLinkQuotesFromInvoices();
-  return a + b;
+  return z + a + b;
+}
+
+// Quotes made from Claude record the job and the Xero quote number together in
+// the Schedule's bookings table. That is exact common ground, so link those quote
+// lines to the job straight away (only if nothing of that quote is linked yet).
+async function autoLinkQuotesFromBookings() {
+  const names = new Set((D.projects || []).map(p => p.name));
+  const map = {};
+  (D.bookings || []).forEach(b => {
+    const qn = (b.quote_number || '').trim(), pr = (b.project || '').trim();
+    if (qn && pr && names.has(pr) && !map[qn]) map[qn] = pr;
+  });
+  if (!Object.keys(map).length) return 0;
+  const picked = new Set((D.quote_items || []).filter(qi => (qi.project || '').trim()).map(qi => (qi.quote_number || '').trim()));
+  let linked = 0;
+  for (const qi of (D.quote_items || [])) {
+    const qn = (qi.quote_number || '').trim();
+    if (!qn || !map[qn] || picked.has(qn) || (qi.project || '').trim()) continue;
+    try { await hubWrite('quote_items', qi.id, { project: map[qn] }); qi.project = map[qn]; linked++; } catch (e) { /* skip */ }
+  }
+  return linked;
 }
 
 // Seb's ask (2026-07-09): once every hand-linked invoice on a project is PAID in
@@ -778,9 +819,13 @@ function projAutoMatchInvoices(name, def) {
                    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 }
 
+function projHasHandLinks(name) {
+  return (D.invoice_items || []).some(ii => (ii.project || '').trim() === name)
+      || (D.quote_items || []).some(qi => (qi.project || '').trim() === name);
+}
+
 function projRenderAutoMatchedSection(name) {
-  const hasHandLinks = (D.invoice_items || []).some(ii => (ii.project || '').trim() === name);
-  if (hasHandLinks) return '';
+  if (projHasHandLinks(name)) return '';
   const def = (D.projects || []).find(p => p.name === name) || {};
   const matches = projAutoMatchInvoices(name, def);
   if (!matches.length) return '';
@@ -805,8 +850,7 @@ function projRenderAutoMatchedSection(name) {
 }
 
 async function projConvertAutoMatched(name) {
-  const hasHandLinks = (D.invoice_items || []).some(ii => (ii.project || '').trim() === name);
-  if (hasHandLinks) return;
+  if (projHasHandLinks(name)) return;
   const def = (D.projects || []).find(p => p.name === name) || {};
   const matches = projAutoMatchInvoices(name, def);
   if (!matches.length) return;
@@ -1983,6 +2027,28 @@ function kpi(label, value, sub, style='') {
   </div>`;
 }
 
+// Actual / quoted tile with a small coloured difference (green on or under, amber a
+// little over, red well over). With no quoted figure it just shows the actual.
+function projVsTile(label, actual, quoted, sub) {
+  if (quoted == null || !(quoted > 0)) return kpi(label, fmt(actual), sub, '');
+  const d = actual - quoted, over = d / quoted * 100;
+  const col = over <= 0 ? 'var(--sage)' : over <= 10 ? 'var(--amber)' : 'var(--pink)';
+  const diff = (d > 0 ? '+' : d < 0 ? '−' : '') + fmt(Math.abs(d)) + (d > 0 ? ' over' : d < 0 ? ' under' : ' on quote');
+  return `<div class="kpi"><div class="kpi-label">${label}</div>
+    <div class="kpi-value">${fmt(actual)} <span style="font-size:13px;font-weight:400;color:var(--ink-4)">/ ${fmt(quoted)}</span></div>
+    <div class="kpi-sub" style="color:${col};font-weight:600">${diff}</div>
+    <div class="kpi-sub">${sub}</div></div>`;
+}
+// Remaining = estimate minus labour and expenses, with its share of the job.
+function projMarginColor(pct) { return pct == null ? 'var(--ink-4)' : pct >= 30 ? 'var(--sage)' : pct >= 10 ? 'var(--amber)' : 'var(--pink)'; }
+function projRemainingTile(remaining, pct) {
+  if (remaining == null) return kpi('Remaining', '—', 'Needs an estimate', '');
+  const col = projMarginColor(pct);
+  return `<div class="kpi"><div class="kpi-label">Remaining</div>
+    <div class="kpi-value" style="color:${col}">${remaining < 0 ? '−' : ''}${fmt(Math.abs(remaining))}</div>
+    <div class="kpi-sub" style="color:${col};font-weight:600">${pct != null ? pct.toFixed(0) + '% of the job' : ''}</div></div>`;
+}
+
 function kpiBar(label, value, sub, fillPct, style='') {
   const w = Math.min(100, Math.max(0, fillPct||0));
   return `<div class="kpi ${style}">
@@ -2023,7 +2089,8 @@ function renderAll() {
 let projSortCol      = null;
 let projSortDir      = 'asc';
 let projFilterText   = '';
-let projFilterStatus = 'Active';   // default filter per spec
+const PROJ_STATUS_ORDER = ['Active','Finished','Quoted','Paid','Inactive'];
+let projStatusSel    = new Set(['Active','Finished']);   // default: chase payments
 let PROJ_SORTED       = [];        // cached billable rows for projRenderRows() (avoids re-aggregating per keystroke)
 
 // 'Quoted' added 2026-09-18 — set automatically when a quote is approved via
@@ -2137,6 +2204,10 @@ function renderProjects(k) {
     const lp = (ii.project || '').trim();
     if (lp && pData[lp]) linkedNames.add(lp);
   });
+  quoteItems.forEach(qi => {
+    const lp = (qi.project || '').trim();
+    if (lp && pData[lp]) linkedNames.add(lp);
+  });
   invoiceItems.forEach(ii => {
     const lp = (ii.project || '').trim();
     if (lp && pData[lp]) {                       // explicit link wins
@@ -2185,9 +2256,10 @@ function renderProjects(k) {
     // Blindly trusting it as Est. Value silently wiped a real $39,450 manual
     // estimate down to $8,135 on a live project the first time this ran. Manual
     // Est. Value now acts as a floor; clear it to $0 if a linked quote should win.
-    p.estValue = (p.linkedQuoteValue > 0 || p.quoted != null)
-      ? Math.max(p.linkedQuoteValue || 0, p.quoted || 0)
-      : null;
+    p.estValue = p.linkedQuoteValue > 0 ? p.linkedQuoteValue : (p.quoted != null ? p.quoted : null);
+    const dd = definedMap[p.name] || {};
+    p.quotedLabour = dd.baseline_labour_hours != null ? Number(dd.baseline_labour_hours) * rate : null;
+    p.quotedMaterials = dd.baseline_materials_estimate != null ? Number(dd.baseline_materials_estimate) : null;
   });
 
   // ── Derive final metrics per project ─────────────────────────────────────
@@ -2253,14 +2325,12 @@ function renderProjects(k) {
         <h2>Project Table</h2>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
           <input id="proj-filter-text" value="${attrEsc(projFilterText)}" oninput="projSetFilter(this.value)" placeholder="Search ID, name or contact…" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:12px;width:200px">
-          <select id="proj-filter-status" onchange="projSetStatusFilter(this.value)" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:12px">
-            ${['All', ...PROJECT_STATUSES].map(s=>`<option value="${s}"${projFilterStatus===s?' selected':''}>${s==='All'?'All statuses':s}</option>`).join('')}
-          </select>
         </div>
+        <div id="proj-status-chips" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;width:100%">${projStatusChips()}</div>
         <span class="chart-clickable-hint">click a row for full detail · values excl. GST</span>
       </div>
       <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-        <table style="min-width:900px;font-size:12px">
+        <table class="proj-table" style="font-size:12px">
           <thead><tr>
             ${projHeader('id','ID')}
             ${projHeader('name','Project')}
@@ -2289,7 +2359,7 @@ function renderProjects(k) {
 function projHeader(col, label, right) {
   const active = projSortCol === col;
   const arrow = active ? (projSortDir === 'asc' ? ' ▲' : ' ▼') : '';
-  return `<th style="${right?'text-align:right;':''}cursor:pointer;white-space:nowrap;user-select:none" onclick="projSort('${col}')">${label}${arrow}</th>`;
+  return `<th class="${col==='name'?'':'pc-hide-sm'}" style="${right?'text-align:right;':''}cursor:pointer;white-space:nowrap;user-select:none" onclick="projSort('${col}')">${label}${arrow}</th>`;
 }
 
 function projSort(col) {
@@ -2303,10 +2373,21 @@ function projSetFilter(v) {
   projRenderRows();
 }
 
-function projSetStatusFilter(v) {
-  projFilterStatus = v;
-  renderProjects(D.kpis);
+// Tag-style status filter: tap tags to include/exclude, All and None to reset.
+function projStatusChips() {
+  const chip = (label, on, fn, cls) => `<span onclick="${fn}" class="hub-pill-btn${on?' active':''}" style="cursor:pointer;padding:5px 11px;font-size:12px;${cls||''}">${label}</span>`;
+  return PROJ_STATUS_ORDER.map(s => chip(s, projStatusSel.has(s), `projToggleStatus('${s}')`)).join('')
+    + chip('All', projStatusSel.size === PROJ_STATUS_ORDER.length, `projStatusAll()`, 'margin-left:6px')
+    + chip('None', projStatusSel.size === 0, `projStatusNone()`);
 }
+function projRefreshChips() {
+  const el = document.getElementById('proj-status-chips');
+  if (el) el.innerHTML = projStatusChips();
+  projRenderRows();
+}
+function projToggleStatus(s) { projStatusSel.has(s) ? projStatusSel.delete(s) : projStatusSel.add(s); projRefreshChips(); }
+function projStatusAll()  { projStatusSel = new Set(PROJ_STATUS_ORDER); projRefreshChips(); }
+function projStatusNone() { projStatusSel = new Set(); projRefreshChips(); }
 
 const PROJ_SORT_KEYS = {
   id:            p => parseInt(String(p.id).replace(/\D/g,''),10) || 0,
@@ -2330,7 +2411,7 @@ function projRenderRows() {
   const rate = (D.kpis && D.kpis.sebRate_per_hour) || 100;
 
   let list = PROJ_SORTED.filter(p => {
-    if (projFilterStatus !== 'All' && p.status !== projFilterStatus) return false;
+    if (!projStatusSel.has(p.status || 'Active')) return false;
     if (q && !(`${p.id} ${p.name} ${p.contactDisplay}`.toLowerCase().includes(q))) return false;
     return true;
   });
@@ -2347,6 +2428,8 @@ function projRenderRows() {
     }
   } else {
     list = [...list].sort((a, b) => {
+      const sa = PROJ_STATUS_ORDER.indexOf(a.status || 'Active'), sb = PROJ_STATUS_ORDER.indexOf(b.status || 'Active');
+      if (sa !== sb) return sa - sb;
       const aD = (D.projects||[]).some(x=>x.name===a.name) ? 0 : 1;
       const bD = (D.projects||[]).some(x=>x.name===b.name) ? 0 : 1;
       if (aD !== bD) return aD - bD;
@@ -2364,18 +2447,32 @@ function projRenderRows() {
       ? `<span style="color:${pc(p.profit)};font-weight:600">${fmt(p.profit)}</span><br>
          <span style="font-size:10px;color:${pc(p.profitPct)}">${p.profitPct >= 0 ? '+' : ''}${p.profitPct.toFixed(1)}%</span>`
       : dash;
+    const rem = p.estValue ? p.estValue - p.laborValue - p.expensesTotal : null;
+    const remPct = p.estValue ? rem / p.estValue * 100 : null;
+    const mc = projMarginColor(remPct);
+    const marginChip = remPct != null
+      ? `<span class="proj-margin" style="color:${mc};border-color:${mc}" title="Remaining after labour and expenses, as a share of the estimate">${remPct.toFixed(0)}%</span>` : '';
+    const vs = (a, q) => q > 0 && a > 0 ? `<span style="color:${a <= q ? 'var(--sage)' : a <= q * 1.1 ? 'var(--amber)' : 'var(--pink)'}">${fmt(a)}</span><span style="color:var(--ink-4)">/${fmt(q)}</span>` : (a > 0 ? fmt(a) : '—');
+    const mini = `<div class="proj-mini">
+        <span><i>Est</i> ${p.estValue != null ? fmt(p.estValue) : '—'}</span>
+        <span><i>Inv</i> ${p.invoicedValue > 0 ? fmt(p.invoicedValue) : '—'}</span>
+        <span><i>Lab</i> ${vs(p.laborValue, p.quotedLabour)}</span>
+        <span><i>Exp</i> ${vs(p.expensesTotal, p.quotedMaterials)}</span>
+        <span><i>Left</i> <b style="color:${mc}">${rem != null ? fmt(rem) : '—'}</b></span>
+      </div>`;
     return `<tr onclick="showProjectDetail('${safeName}')" style="cursor:pointer">
-      <td style="font-size:11px;color:var(--ink-4);white-space:nowrap">#${p.id}</td>
-      <td><strong style="white-space:nowrap">${p.name}</strong>
-          <div style="margin-top:2px">${projStatusBadge(p.status)}</div>
+      <td class="pc-hide-sm" style="font-size:11px;color:var(--ink-4);white-space:nowrap">#${p.id}</td>
+      <td><div class="proj-namerow"><strong class="proj-name">${p.name}</strong>${marginChip}</div>
+          <div style="margin-top:2px">${projStatusBadge(p.status)}<span class="proj-contact-sm"> ${p.contactDisplay || ''}</span></div>
+          ${mini}
       </td>
-      <td style="font-size:12px;white-space:nowrap">${p.contactDisplay}</td>
-      <td class="amount">${p.estValue != null ? fmt(p.estValue) : dash}</td>
-      <td class="amount" style="color:var(--blue)">${p.invoicedValue > 0 ? fmt(p.invoicedValue) : dash}</td>
-      <td class="amount" style="color:var(--amber)">${p.laborValue > 0 ? fmt(p.laborValue) : dash}</td>
-      <td class="amount" style="color:var(--orange)">${p.expensesTotal > 0 ? fmt(p.expensesTotal) : dash}</td>
-      <td class="amount">${profitCell}</td>
-      <td class="amount" style="color:${adjRateColor};white-space:nowrap">${p.adjRate !== null ? '$' + Math.round(p.adjRate) + '/h' : dash}</td>
+      <td class="pc-hide-sm" style="font-size:12px;white-space:nowrap">${p.contactDisplay}</td>
+      <td class="amount pc-hide-sm">${p.estValue != null ? fmt(p.estValue) : dash}</td>
+      <td class="amount pc-hide-sm" style="color:var(--blue)">${p.invoicedValue > 0 ? fmt(p.invoicedValue) : dash}</td>
+      <td class="amount pc-hide-sm" style="color:var(--amber)">${p.laborValue > 0 ? vs(p.laborValue, p.quotedLabour) : dash}</td>
+      <td class="amount pc-hide-sm" style="color:var(--orange)">${p.expensesTotal > 0 ? vs(p.expensesTotal, p.quotedMaterials) : dash}</td>
+      <td class="amount pc-hide-sm">${profitCell}</td>
+      <td class="amount pc-hide-sm" style="color:${adjRateColor};white-space:nowrap">${p.adjRate !== null ? '$' + Math.round(p.adjRate) + '/h' : dash}</td>
     </tr>`;
   }).join('') || `<tr><td colspan="9"><div class="empty" style="padding:20px">No projects match the current filter</div></td></tr>`;
 }
@@ -2442,12 +2539,15 @@ function showProjectDetail(name) {
   const linkedTotal = linked.reduce((a,ii)=>a+(Number(ii.price_excl_gst)||0),0);
 
   // Manual Est. Value is a floor, not just a fallback — see renderProjects() for why.
-  const estValue  = (linkedQTotal > 0 || quoted != null) ? Math.max(linkedQTotal, quoted || 0) : null;
+  const estValue  = linkedQTotal > 0 ? linkedQTotal : (quoted != null ? quoted : null);
   const remaining = estValue != null ? estValue - laborValue - totalExpenses : null;
+  const remPct    = estValue ? remaining / estValue * 100 : null;
+  const qLab = defined && defined.baseline_labour_hours != null ? Number(defined.baseline_labour_hours) * rate : null;
+  const qMat = defined && defined.baseline_materials_estimate != null ? Number(defined.baseline_materials_estimate) : null;
   const showLinks = !isNonBillable(name);
 
   const autoMatchedSection = projRenderAutoMatchedSection(name);
-  const scopeSection = projRenderScope(name, linkedQ, linked, projAutoMatchInvoices(name, defined));
+  const scopeSection = projRenderScope(name, linkedQ, linked, projHasHandLinks(name) ? [] : projAutoMatchInvoices(name, defined));
 
   // Merged, compact "bar" list — Seb's ask 2026-07-10: the old two-table layout
   // (Linked Quotes / Linked Invoices, each its own table + search box) was too
@@ -2474,7 +2574,7 @@ function showProjectDetail(name) {
     <div style="margin-bottom:20px">
       <div class="divider" style="margin-top:0">Est. Value & Revenue</div>
       <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:14px;padding:12px;background:var(--bg-2);border-radius:10px">
-        <div><div style="font-size:11px;color:var(--ink-4);margin-bottom:3px">Manual Est. Value${linkedQTotal>0 && linkedQTotal<=Number(quoted||0)?' <span style="color:var(--amber)">(higher than linked quotes — wins as the floor)</span>':linkedQTotal>0?' <span style="color:var(--amber)">(linked quotes are higher — they win)</span>':''}</div><input id="pd-quoted" type="number" step="0.01" value="${quoted!=null?quoted:''}" placeholder="0" style="${inpS};width:140px;text-align:right"></div>
+        <div><div style="font-size:11px;color:var(--ink-4);margin-bottom:3px">Manual Est. Value${linkedQTotal>0?' <span style="color:var(--amber)">(not used — picked quote lines win)</span>':''}</div><input id="pd-quoted" type="number" step="0.01" value="${quoted!=null?quoted:''}" placeholder="0" style="${inpS};width:140px;text-align:right"></div>
         <div><div style="font-size:11px;color:var(--ink-4);margin-bottom:3px">Manual revenue (cash)</div><input id="pd-manrev" type="number" step="0.01" value="${manRev||''}" placeholder="0" style="${inpS};width:140px;text-align:right"></div>
         <div style="flex:1;min-width:160px"><div style="font-size:11px;color:var(--ink-4);margin-bottom:3px">Manual revenue note</div><input id="pd-manrev-note" value="${attrEsc(manRevNote)}" placeholder="e.g. cash job, no invoice" style="${inpS};width:100%"></div>
         <button onclick="projSaveRevenue('${safe}')" style="padding:8px 16px;background:var(--sage);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700">Save</button>
@@ -2509,10 +2609,10 @@ function showProjectDetail(name) {
       ${projStatusPills(name, status)}
     </div>
     <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:16px">
-      ${kpi('Est. Value', estValue!=null?fmt(estValue):'TBD','',estValue?'highlight':'')}
-      ${kpi('Labour',fmt(laborValue),totalHours+'h @ $'+rate+'/hr','')}
-      ${kpi('Expenses',totalExpenses>0?fmt(totalExpenses):'$0','Materials & costs','')}
-      ${kpi('Remaining',remaining!==null?fmt(remaining):'—','Budget left',remaining===null?'':remaining>=0?'good':'warn')}
+      ${kpi('Est. Value', estValue!=null?fmt(estValue):'TBD', linkedQ.length?linkedQ.length+' quote line'+(linkedQ.length>1?'s':'')+' picked':'','highlight')}
+      ${projVsTile('Labour', laborValue, qLab, totalHours+'h @ $'+rate+'/hr')}
+      ${projVsTile('Expenses', totalExpenses, qMat, 'Materials & costs')}
+      ${projRemainingTile(remaining, remPct)}
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:18px;font-size:11px;color:var(--ink-4);margin-bottom:20px;padding:10px 12px;background:var(--bg-2);border-radius:8px">
       <div><strong style="color:var(--ink-2)">Team:</strong> ${players.length?players.join(', '):'—'}</div>

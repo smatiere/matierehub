@@ -331,3 +331,13 @@ Files: `index.html`, `netlify/functions/hub-write.js` (new), `CLAUDE.md`. Verifi
 **Shared/documented:** `.hub-pill-btn` (canonical pill/preset button) and `HUB_PALETTE` (canonical 10-colour palette) — single sources of truth, see CLAUDE.md.
 
 **Manual DB step done:** `ALTER TABLE expense_log ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT '';` (run 2026-06-20).
+
+
+## Batch 2026-11-05 — Projects fixes (local, not yet pushed)
+- Scope of Work no longer pulls in another job's invoice once anything is hand-linked.
+- Auto-match box disappears as soon as a quote or invoice is picked.
+- Auto-link: quotes made from Claude are linked to their job by the quote number saved in the Schedule bookings.
+- Picking one quote line no longer drags in the rest of that quote; Est. Value = picked lines (manual figure only when none picked).
+- Detail tiles: Labour and Expenses show actual / quoted with a coloured difference; Remaining shows $ and % of the job.
+- Project table: margin % chip beside the name; compact card rows on phones.
+- Status filter: tags (Active, Finished, Quoted, Paid, Inactive) plus All / None; default Active + Finished; list ordered by status.
