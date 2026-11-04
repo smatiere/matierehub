@@ -651,6 +651,15 @@ async function hubWrite(table, id, fields) {
   return out.row;
 }
 
+// Bookings hold client phone/email, so they are read through a password-gated function,
+// not the browser's public key.
+async function hubReadBookings() {
+  const r = await fetch('/.netlify/functions/hub-read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ table: 'bookings' }) });
+  const out = await r.json().catch(() => ({}));
+  if (!r.ok || !out.ok) throw new Error(out.error || 'read failed');
+  return out.rows;
+}
+
 // ── Data load — live from Supabase ────────────────────────────────────────────
 async function loadData() {
   try {
@@ -670,7 +679,7 @@ async function loadData() {
       sbGet('/rest/v1/shopping_lists?select=*&order=created_at.desc').catch(() => []),
       // bookings (Schedule tab, 2026-11-01) — null = table not created yet
       // (supabase_bookings.sql not run); the tab then shows a one-tap setup card.
-      sbGet('/rest/v1/bookings?select=*&order=created_at.desc').catch(() => null)
+      hubReadBookings().catch(() => null)
     ]);
 
     const xero = {};
@@ -1708,6 +1717,15 @@ async function schGapFill() {
     // Quotes accepted in Xero land in the pipeline by themselves.
     const won = schCandidates().filter(c => c.status === 'ACCEPTED');
     for (const c of won) { try { await schAddFromQuote(c.quote_number, false); n++; } catch (e) {} }
+    // Every Won project has a place in the pipeline.
+    for (const p of (D.projects || []).filter(x => x.status === 'Won')) {
+      const has = D.bookings.some(b => b.status !== 'cancelled' && (schProjectOf(b) || {}).id === p.id || (b.project || '').toLowerCase() === (p.name || '').toLowerCase());
+      if (has) continue;
+      try {
+        const nb = await schCreate({ project: p.name, title: p.baseline_scope || '', approval_source: 'hub', approved_at: todayStr(), status: 'approved', client_name: p.name, hours: Number(p.baseline_labour_hours) || null });
+        n++; schFillFromContact(nb.id);
+      } catch (e) {}
+    }
     for (const b of D.bookings) {
       if (['done', 'cancelled'].includes(b.status)) continue;
       const patch = {};
@@ -1824,8 +1842,8 @@ async function schAddFromQuote(qn, open) {
   if (SCH.adding.has(qn)) return null;
   SCH.adding.add(qn);
   try {
-    const fresh = await sbGet('/rest/v1/bookings?select=id&status=neq.cancelled&quote_number=eq.' + encodeURIComponent(qn));
-    if (fresh.length) { D.bookings = await sbGet('/rest/v1/bookings?select=*&order=created_at.desc'); return null; }
+    const rows = await hubReadBookings();
+    if (rows.some(x => x.quote_number === qn && x.status !== 'cancelled')) { D.bookings = rows; return null; }
     return await schAddFromQuote2(c, qn, open);
   } finally { SCH.adding.delete(qn); }
 }
@@ -1850,6 +1868,7 @@ async function schAddAllAccepted() {
 async function schAddFromProject(name) {
   const p = (D.projects || []).find(x => x.name === name);
   if (!p) return;
+  if (p.status !== 'Won' && p.status !== 'Active') { try { Object.assign(p, await hubWrite('projects', p.id, { status: 'Won' })); } catch (e) {} }
   const b = await schCreate({
     project: p.name, title: p.baseline_scope || '', approval_source: 'hub', approved_at: todayStr(), status: 'approved',
     client_name: p.name, hours: Number(p.baseline_labour_hours) || null
@@ -1866,15 +1885,13 @@ async function schAddBlank() {
 }
 
 function schAddModal() {
-  const cands = schCandidates();
   const taken = new Set(schAll().filter(b => b.status !== 'cancelled').map(b => (b.project || '').toLowerCase()));
-  const projs = (D.projects || []).filter(p => ['Quoted', 'Won', 'Active'].includes(p.status) && !taken.has((p.name || '').toLowerCase()));
+  const projs = (D.projects || []).filter(p => ['Quoted', 'Lost', 'Inactive'].includes(p.status) && !taken.has((p.name || '').toLowerCase()));
   const row = (t, sub, act) => '<button class="sch-pick" onclick="' + act + '"><span><b>' + attrEsc(t) + '</b><small>' + attrEsc(sub) + '</small></span><i>＋</i></button>';
-  openModal('Add a job to the pipeline', `
-    <div class="sch-lbl">Quotes from Xero</div>
-    ${cands.length ? cands.map(c => row(c.contact + ' · ' + c.quote_number, (c.status === 'ACCEPTED' ? 'Accepted in Xero' : 'Sent — approve here') + ' · ' + fmt(c.total) + (c.labourHrs ? ' · ' + c.labourHrs + 'h labour' : ''), "schAddFromQuote('" + attrEsc(c.quote_number) + "',true);closeModal()")).join('') : '<div class="sch-empty">No unscheduled quotes in the last 5 months.</div>'}
-    <div class="sch-lbl">Projects</div>
-    ${projs.length ? projs.map(p => row(p.name, p.status + (p.baseline_labour_hours ? ' · ' + p.baseline_labour_hours + 'h baseline' : ''), "schAddFromProject('" + attrEsc(p.name).replace(/'/g, "\\'") + "')")).join('') : '<div class="sch-empty">Every active project is already scheduled.</div>'}
+  openModal('Add a job to the schedule', `
+    <div class="sch-hint" style="margin-bottom:8px">Won jobs are added automatically. Pick a job below to mark it <b>Won</b> and schedule it.</div>
+    <div class="sch-lbl">Quoted / lost jobs</div>
+    ${projs.length ? projs.map(p => row(p.name, p.status + (p.baseline_labour_hours ? ' · ' + p.baseline_labour_hours + 'h' : ''), "schAddFromProject('" + attrEsc(p.name).replace(/'/g, "\\'") + "')")).join('') : '<div class="sch-empty">No quoted jobs waiting.</div>'}
     <div class="sch-lbl">Something new</div>
     <div style="display:flex;gap:8px"><input id="sch-new-name" class="sch-in" placeholder="Client – suburb (e.g. Sam – Manly)" style="flex:1"><button class="sch-btn pri" onclick="schAddBlank()">Add</button></div>`);
 }
@@ -2018,7 +2035,7 @@ function schPipeline() {
   const acc = cands.filter(c => c.status === 'ACCEPTED');
   const sec = (title, list, color) => list.length ? `<div class="sch-sec"><div class="sch-sec-h" style="--c:${color}">${title} <em>${list.length}</em></div>${list.map(schCard).join('')}</div>` : '';
   return `<div class="sch-pipe">
-    ${acc.length ? `<div class="sch-xero"><span><b>${acc.length} approved in Xero</b><small>not in the schedule yet</small></span><button class="sch-btn pri" onclick="schAddAllAccepted()">Add ${acc.length > 1 ? 'all' : ''}</button></div>` : ''}
+    
     ${sec('Needs a date', needs, '#FFBE0B')}${sec('Tentative', tent, '#3A86FF')}${sec('Confirmed', conf, '#05C46B')}
     ${!all.filter(b => !['done', 'cancelled'].includes(b.status)).length ? '<div class="sch-empty big">No jobs in the pipeline.<br>Approve a quote in Xero, or tap <b>＋ Add job</b>.</div>' : ''}
     ${done.length ? `<button class="sch-link" onclick="SCH.showDone=!SCH.showDone;schRender()">${SCH.showDone ? 'Hide' : 'Show'} done / cancelled (${done.length})</button>${SCH.showDone ? done.map(schCard).join('') : ''}` : ''}
@@ -2310,7 +2327,7 @@ function schBadge() {
   const el = document.getElementById('sch-count');
   if (el) { el.textContent = n; el.style.display = n ? 'inline' : 'none'; }
 }
-function renderSchedule() { schBadge(); schRender(); }
+function renderSchedule() { schBadge(); schRender(); schGapFill(); }
 
 // ── Performance (2026-11-05, v2) ─────────────────────────────────────────────
 // Operating margin per day. For each billable job: sales (hand-linked invoices +

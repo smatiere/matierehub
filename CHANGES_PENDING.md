@@ -374,3 +374,7 @@ Files: `index.html`, `netlify/functions/hub-write.js` (new), `CLAUDE.md`. Verifi
 - New `smart-note.js` function: quick note → tidy note with exact dates (Haiku).
 - Duplicate guard when auto-adding accepted quotes (checks the database first).
 - Project statuses Won and Lost; Quoted → Won when the Xero quote is ACCEPTED, → Lost when DECLINED. Filter default: Active, Won, Finished.
+
+## Batch — bookings visible again + Won jobs flow into Schedule (2026-11-05)
+- Root cause of "jobs not showing": bookings table has row-level security with no read rule, so the browser's public key saw nothing. Now read through new password-gated `hub-read.js` (DB left locked: bookings hold client phone/email).
+- Every Won project is added to the Schedule automatically; "Add job" now lists Quoted/Lost jobs and marks the pick Won. "approved in Xero" banner removed.
