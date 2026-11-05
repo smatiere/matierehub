@@ -413,3 +413,6 @@ Files: `index.html`, `netlify/functions/hub-write.js` (new), `CLAUDE.md`. Verifi
 - Workflow `receipts-to-xero.yml`: manual for now; schedule lines ready to un-comment (twice daily) after the first batch is checked.
 - Needs supabase columns xero_status, xero_error, tax_mode, reference, xero_sent_at (already run).
 - Inbox card: per-line job override (inside the collapsed lines list, 'same job' by default). Every saved line still goes to expenses (per line) and the price library.
+
+## Batch — ignore rules (2026-11-05)
+- New table receipt_ignore. Receipts whose supplier / sender / subject match a rule (seeded: Matiere = our own sales invoices) go straight to a 'Not a cost' pile instead of Pending. 'Not a cost' button on the card: this one, or always for that supplier (also clears matching ones already waiting).

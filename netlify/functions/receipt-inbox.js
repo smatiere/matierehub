@@ -42,6 +42,16 @@ async function readReceipt(event, name, mime, data) {
   } catch (e) { return null; }
 }
 
+// Receipts that should never be processed (our own sales invoices, anything Seb says "never"): rules live in receipt_ignore.
+const keyOf = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+async function ignoreReason(supplier, from, subject) {
+  let rules = [];
+  try { rules = await rest('GET', 'receipt_ignore?select=supplier_key,reason'); } catch (e) { return ''; }
+  const hay = [keyOf(supplier), keyOf(from), keyOf(subject)];
+  const hit = rules.find(r => r.supplier_key && hay.some(h => h.includes(r.supplier_key)));
+  return hit ? (hit.reason || 'Ignored by rule') : '';
+}
+
 exports.handler = async (event) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -77,8 +87,10 @@ exports.handler = async (event) => {
       const parsed = await readReceipt(event, b.name || 'receipt', mime, String(b.data));
       const items = parsed ? parsed.items : [];
       const first = items[0] || {};
+      const supplierRead = parsed ? (parsed.supplier || first.supplier || '') : '';
+      const ignoredWhy = await ignoreReason(supplierRead, b.email_from, b.email_subject);
       const row = (await rest('POST', 'receipt_inbox', {
-        status: 'pending', source: ['upload', 'photo', 'email'].includes(b.source) ? b.source : 'upload',
+        status: ignoredWhy ? 'ignored' : 'pending', notes: ignoredWhy || '', source: ['upload', 'photo', 'email'].includes(b.source) ? b.source : 'upload',
         file_path: path, file_name: String(b.name || '').slice(0, 120), mime, size: buf.length, file_hash: hash,
         email_from: String(b.email_from || '').slice(0, 200), email_subject: String(b.email_subject || '').slice(0, 300), email_date: b.email_date || null,
         supplier: parsed ? (parsed.supplier || first.supplier || '') : '', receipt_date: first.date || b.email_date || null,
@@ -127,12 +139,25 @@ exports.handler = async (event) => {
       const parsed = await readReceipt(event, r.file_name || 'receipt', r.mime, data);
       if (!parsed) return out(200, { ok: true, read: false, row: r });
       const items = parsed.items, first = items[0] || {};
+      const why = r.status === 'pending' ? await ignoreReason(parsed.supplier || first.supplier, r.email_from, r.email_subject) : '';
       const row = (await rest('PATCH', `receipt_inbox?id=eq.${encodeURIComponent(b.id)}`, {
+        ...(why ? { status: 'ignored', notes: why } : {}),
         supplier: parsed.supplier || first.supplier || r.supplier || '', receipt_date: first.date || r.receipt_date || r.email_date || null,
         total_inc: parsed.check && parsed.check.total ? parsed.check.total : Math.round(items.reduce((t2, i) => t2 + (Number(i.amount) || 0), 0) * 110) / 100,
         lines: items, check_info: parsed.check, updated_at: new Date().toISOString()
       }))[0];
       return out(200, { ok: true, read: true, row });
+    }
+
+    if (b.action === 'ignore_rule') {
+      const k = keyOf(b.supplier);
+      if (k.length < 3) return out(400, { error: 'Supplier name too short' });
+      await rest('POST', 'receipt_ignore', { supplier_key: k, supplier: String(b.supplier).slice(0, 80), reason: b.reason || 'Not a cost — ignored' });
+      // also move anything already waiting from that supplier
+      const waiting = await rest('GET', 'receipt_inbox?select=id,supplier,email_from,email_subject&status=eq.pending');
+      let moved = 0;
+      for (const w of waiting) { if ([keyOf(w.supplier), keyOf(w.email_from), keyOf(w.email_subject)].some(h => h.includes(k))) { await rest('PATCH', `receipt_inbox?id=eq.${w.id}`, { status: 'ignored', notes: b.reason || 'Not a cost — ignored', updated_at: new Date().toISOString() }); moved++; } }
+      return out(200, { ok: true, moved });
     }
 
     if (b.action === 'xero_attach') {

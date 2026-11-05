@@ -23,3 +23,9 @@ insert into storage.buckets (id, name, public) values ('receipts', 'receipts', f
 -- 2026-11-05 (b): Xero queue columns
 alter table receipt_inbox add column if not exists xero_status text default '', add column if not exists xero_error text default '',
   add column if not exists tax_mode text default 'gst', add column if not exists reference text default '', add column if not exists xero_sent_at timestamptz;
+
+-- 2026-11-05 (c): suppliers whose receipts should never be processed (our own sales invoices etc.)
+create table if not exists receipt_ignore (supplier_key text primary key, supplier text default '', reason text default '', created_at timestamptz default now());
+alter table receipt_ignore enable row level security;
+grant all on receipt_ignore to service_role;
+insert into receipt_ignore(supplier_key,supplier,reason) values ('matiere','Matiere Pty Ltd','Our own sales invoice — not a cost') on conflict do nothing;
