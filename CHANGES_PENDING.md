@@ -389,3 +389,9 @@ Files: `index.html`, `netlify/functions/hub-write.js` (new), `CLAUDE.md`. Verifi
 - Scan Receipt takes many receipts at once (different suppliers and dates). One request per receipt, in parallel; each gets its own header (supplier + date editable), a lines-vs-printed-total check, and an "already saved?" warning.
 - claude-parse: receipts are read by Haiku first; if lines don't add up to the printed total (within 3%, ex-GST x1.1 or GST-free) the receipt is re-read by Sonnet. Day-first (Australian) dates enforced in the prompt.
 - Xero export (if ticked) makes one draft per receipt. Saved lines feed the price library automatically (trigger).
+
+## Batch — Receipt Inbox (2026-11-05)
+- New table `receipt_inbox` + private storage bucket `receipts` (supabase_receipt_inbox.sql, already run). New function `receipt-inbox.js` (add / list / url / update / xero_attach), login token or HUB_API_KEY.
+- Scan Receipt tab → "📥 Inbox": Pending / Processed / Personal / Missing receipts. Swipe card: photo, supplier/date/total, project chips from that day's timesheets, No project, Personal, Skip, Save & next (expenses + price library) with optional Xero draft + the original file attached.
+- Missing receipts: bank money-out in the last 90 days with no matching receipt.
+- Fix: login token now sent to hub-read / smart-note / receipt-inbox (bookings were refused → schedule showed the setup card).

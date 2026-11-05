@@ -6350,7 +6350,7 @@ async function exSaveCell(inp) {
 // Seb corrects project/category/qty/price, excludes junk lines, then Save commits
 // the batch via the existing expense_batch path (pendingAction). Second sub-view
 // is a Materials Catalog deduped from expense_log, for reuse when quoting.
-const RC = { view:'scan', items:null, supplier:'', files:[], parsing:false, catSearch:'', catSupplier:'', catProject:'', presetProject:null,
+const RC = { view:'inbox', items:null, supplier:'', files:[], parsing:false, catSearch:'', catSupplier:'', catProject:'', presetProject:null,
              xeroAccounts:null, xeroBankAccountId:null, xeroExport:true };
 
 // Entry point from a Project card's "📷 Scan a receipt for this job" button
@@ -6368,8 +6368,10 @@ async function renderReceipts() {
   const el = document.getElementById('page-receipts');
   if (!el || !D) return;
   await exLoadCategories();           // populates EX_CATEGORIES (shared category list)
+  if (RC.view === 'inbox') { await siLoad(SI.pile === 'missing' ? 'pending' : SI.pile).catch(() => {}); }
   el.innerHTML = rcShell();
-  if (RC.view === 'scan') rcRenderScan();
+  if (RC.view === 'inbox') siRender();
+  else if (RC.view === 'scan') rcRenderScan();
   else rcRenderCatalog();
 }
 
@@ -6378,6 +6380,7 @@ function rcShell() {
   return `
   <div style="padding:20px">
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:18px">
+      ${tab('inbox','📥 Inbox' + (SI.counts.pending ? ' (' + SI.counts.pending + ')' : ''))}
       ${tab('scan','📷 Scan receipt')}
       ${tab('catalog','📚 Price library')}
     </div>
@@ -6386,6 +6389,266 @@ function rcShell() {
 }
 
 function rcSetView(v) { RC.view = v; renderReceipts(); }
+
+
+// ═══ RECEIPT INBOX ══════════════════════════════════════════════════════════
+// Every receipt (photo, upload, email) lands in Pending. Swipe through, pick a project, save:
+// lines go to expenses (and the price library), the original file is kept in Processed and can
+// be attached to a Xero draft. Files sit in a private bucket; the Hub only gets short-lived links.
+const SI = { pile:'pending', rows:[], counts:{}, idx:0, urls:{}, proj:'', noProj:false, missing:null, showLines:false, busy:false };
+
+async function siApi(body) {
+  const r = await fetch('/.netlify/functions/receipt-inbox', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.ok) throw new Error(j.error || ('Inbox error ' + r.status));
+  return j;
+}
+async function siLoad(pile) {
+  const j = await siApi({ action:'list', status: pile });
+  SI.rows = j.rows; SI.counts = j.counts || {};
+  if (SI.idx >= SI.rows.length) SI.idx = 0;
+}
+async function siUrl(id) {
+  if (SI.urls[id] && SI.urls[id].exp > Date.now()) return SI.urls[id];
+  const j = await siApi({ action:'url', id });
+  return SI.urls[id] = { url: j.url, mime: j.mime, exp: Date.now() + 50 * 60 * 1000 };
+}
+function siPileTab(v, label, n) {
+  return `<button class="hub-pill-btn${SI.pile===v?' active':''}" onclick="siSetPile('${v}')">${label}${n ? ' ' + n : ''}</button>`;
+}
+async function siSetPile(v) {
+  SI.pile = v; SI.idx = 0; SI.proj = ''; SI.noProj = false;
+  if (v === 'missing') { await siRender(); return; }
+  try { await siLoad(v); } catch (e) { claudeToast('⚠ ' + e.message, 'error'); }
+  siRender();
+}
+async function siRender() {
+  const body = document.getElementById('rc-body');
+  if (!body) return;
+  const c = SI.counts;
+  const head = `
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px">
+      ${siPileTab('pending','Pending', c.pending||0)}${siPileTab('processed','Processed', c.processed||0)}${siPileTab('personal','Personal', c.personal||0)}${siPileTab('missing','Missing receipts','')}
+      <button onclick="document.getElementById('si-file').click()" class="hub-pill-btn" style="margin-left:auto;background:var(--amber);color:#000;font-weight:700">＋ Add receipts</button>
+      <input id="si-file" type="file" accept="image/*,.pdf" multiple style="display:none" onchange="siAddFiles(this.files);this.value=''">
+    </div>`;
+  if (SI.pile === 'pending') body.innerHTML = head + siCardHtml();
+  else if (SI.pile === 'missing') { body.innerHTML = head + '<div style="color:var(--ink-4);padding:20px;text-align:center"><span class="spinner-sm"></span> Checking your bank spending…</div>'; body.innerHTML = head + await siMissingHtml(); return; }
+  else body.innerHTML = head + siListHtml();
+  if (SI.pile === 'pending' && SI.rows[SI.idx]) siWireCard();
+}
+
+// ── Add (upload) ──
+async function siAddFiles(files) {
+  const list = [...files].filter(f => f.type.startsWith('image/') || f.type === 'application/pdf');
+  if (!list.length) return;
+  let done = 0, dup = 0, fail = 0;
+  claudeToast(`Adding ${list.length} receipt${list.length>1?'s':''}…`);
+  const one = async (f) => {
+    try {
+      const { data, type } = await fileToBase64(f);
+      const j = await siApi({ action:'add', name:f.name, mime:type, data, source:'upload' });
+      if (j.duplicate) dup++; else done++;
+    } catch (e) { fail++; }
+  };
+  const q = [...list];
+  await Promise.all([0,1].map(async () => { while (q.length) await one(q.shift()); }));
+  claudeToast(`✓ ${done} added${dup?`, ${dup} already in`:''}${fail?`, ${fail} failed`:''}`, fail ? 'unclear' : 'success');
+  SI.pile = 'pending'; SI.idx = 0;
+  await siLoad('pending').catch(() => {});
+  renderReceipts();
+}
+
+// ── Pending card ──
+function siSuggest(date) {
+  const by = {};
+  (D.timesheets || []).filter(t => (t.date || '').slice(0,10) === date && t.project && !isNonBillable(t.project)).forEach(t => by[t.project] = (by[t.project]||0) + (Number(t.hours)||0));
+  return Object.entries(by).sort((a,b) => b[1]-a[1]).slice(0, 3);
+}
+function siCardHtml() {
+  const rows = SI.rows;
+  if (!rows.length) return `<div style="text-align:center;padding:50px 20px;color:var(--ink-4)"><div style="font-size:38px;margin-bottom:8px">🎉</div>Nothing waiting. Tap <b>＋ Add receipts</b> to add some.</div>`;
+  const r = rows[SI.idx];
+  const inp = 'padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:14px;width:100%';
+  const sug = siSuggest((r.receipt_date||'').slice(0,10));
+  const src = r.source === 'email' ? `✉️ ${attrEsc(r.email_from || 'email')}${r.email_subject ? ' — ' + attrEsc(r.email_subject) : ''}` : r.source === 'photo' ? '📸 Photo' : '⬆️ Upload';
+  const chip = (label, on, fn) => `<span onclick="${fn}" class="hub-pill-btn${on?' active':''}" style="cursor:pointer;padding:6px 12px;font-size:12px">${label}</span>`;
+  const lines = Array.isArray(r.lines) ? r.lines : [];
+  const sumInc = Math.round(lines.reduce((t,l) => t + (parseFloat(l.amount)||0), 0) * 110) / 100;
+  const chk = r.check_info && r.check_info.total ? (r.check_info.ok ? `<span style="color:var(--sage)">✓ lines add up to the printed ${fmt(r.check_info.total,2)}</span>` : `<span style="color:var(--amber)">⚠ lines add to ${fmt(sumInc,2)}, receipt says ${fmt(r.check_info.total,2)} — check for a missed line</span>`) : '<span style="color:var(--ink-4)">no printed total to check</span>';
+  return `
+  <div style="max-width:760px;margin:0 auto">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;font-size:12px;color:var(--ink-4)">
+      <button class="hub-pill-btn" onclick="siMove(-1)">‹</button><span>${SI.idx+1} of ${rows.length}</span><button class="hub-pill-btn" onclick="siMove(1)">›</button>
+      <span style="margin-left:auto">${src}</span>
+    </div>
+    <div id="si-preview" style="background:var(--bg-2);border-radius:10px;min-height:120px;display:flex;align-items:center;justify-content:center;margin-bottom:12px;overflow:hidden;color:var(--ink-4);font-size:12px">Loading receipt…</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+      <label style="grid-column:1/-1;font-size:11px;color:var(--ink-4)">Supplier<input id="si-sup" style="${inp}" value="${attrEsc(r.supplier||'')}"></label>
+      <label style="font-size:11px;color:var(--ink-4)">Date<input id="si-date" type="date" style="${inp}" value="${attrEsc((r.receipt_date||'').slice(0,10))}" onchange="siDateChanged(this.value)"></label>
+      <label style="font-size:11px;color:var(--ink-4)">Total (inc GST)<input id="si-total" inputmode="decimal" style="${inp}" value="${r.total_inc!=null?r.total_inc:''}"></label>
+    </div>
+    <div style="font-size:11px;margin-bottom:10px">${chk}</div>
+    <div style="font-size:11px;color:var(--ink-4);margin-bottom:6px">Which job?</div>
+    <div id="si-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+      ${sug.map(([n,h]) => chip(`${attrEsc(n)} · ${+h.toFixed(1)}h that day`, SI.proj===n && !SI.noProj, `siPick('${attrEsc(n).replace(/'/g,"\\'")}')`)).join('')}
+      ${chip('No project', SI.noProj, 'siPickNone()')}
+    </div>
+    <input id="si-proj" placeholder="Or type a project…" style="${inp};margin-bottom:10px" value="${attrEsc(SI.noProj?'':SI.proj)}">
+    <details ${SI.showLines?'open':''} ontoggle="SI.showLines=this.open" style="margin-bottom:10px"><summary style="cursor:pointer;color:var(--ink-3);font-size:13px">${lines.length} line${lines.length===1?'':'s'} · ${fmt(sumInc,2)} inc GST — edit</summary>
+      <div style="overflow-x:auto;margin-top:6px"><table style="width:100%;border-collapse:collapse;font-size:12px">
+        ${lines.map((l,i) => `<tr style="border-top:1px solid var(--border)">
+          <td style="padding:3px"><input style="${inp};font-size:12px;padding:5px 7px;min-width:150px" value="${attrEsc(l.description||'')}" onchange="siLine(${i},'description',this.value)"></td>
+          <td style="padding:3px;width:54px"><input inputmode="decimal" style="${inp};font-size:12px;padding:5px 7px;text-align:right" value="${l.qty!=null?l.qty:1}" onchange="siLine(${i},'qty',this.value)"></td>
+          <td style="padding:3px;width:74px"><input inputmode="decimal" style="${inp};font-size:12px;padding:5px 7px;text-align:right" value="${l.unit_price!=null?l.unit_price:''}" onchange="siLine(${i},'unit_price',this.value)"></td>
+          <td style="padding:3px;width:24px;text-align:center"><span onclick="siLineDel(${i})" style="cursor:pointer;color:var(--ink-4)">✕</span></td></tr>`).join('')}
+      </table></div><div style="font-size:10px;color:var(--ink-4);margin-top:4px">Unit price is ex GST.</div>
+    </details>
+    ${rcRenderXeroExportBox()}
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px">
+      <button id="si-save" onclick="siSave()" style="flex:1;min-width:160px;padding:12px;background:var(--sage);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer">Save &amp; next</button>
+      <button onclick="siPersonal()" style="padding:12px 16px;background:var(--bg-2);color:var(--ink-2);border:1px solid var(--border);border-radius:8px;font-size:13px;cursor:pointer">Personal</button>
+      <button onclick="siMove(1)" style="padding:12px 16px;background:var(--bg-2);color:var(--ink-2);border:1px solid var(--border);border-radius:8px;font-size:13px;cursor:pointer">Skip</button>
+    </div>
+  </div>`;
+}
+function siWireCard() {
+  const r = SI.rows[SI.idx];
+  smartSuggest(document.getElementById('si-proj'), ssProjectNames, v => { SI.proj = v; SI.noProj = false; siRefreshChips(); });
+  const pi = document.getElementById('si-proj');
+  if (pi) pi.addEventListener('input', () => { SI.proj = pi.value.trim(); SI.noProj = false; });
+  rcPopulateXeroPayment();
+  siUrl(r.id).then(u => {
+    const el = document.getElementById('si-preview'); if (!el || SI.rows[SI.idx] !== r) return;
+    el.innerHTML = u.mime === 'application/pdf'
+      ? `<a href="${u.url}" target="_blank" rel="noopener" style="padding:30px;color:var(--amber);font-size:15px;text-decoration:none">📄 Open the PDF receipt</a>`
+      : `<a href="${u.url}" target="_blank" rel="noopener" style="display:block;width:100%"><img src="${u.url}" style="display:block;width:100%;max-height:62vh;object-fit:contain;background:#000" alt="receipt"></a>`;
+  }).catch(() => { const el = document.getElementById('si-preview'); if (el) el.textContent = 'Could not load the picture'; });
+  // best guess: the one job logged that day
+  const sug = siSuggest((r.receipt_date||'').slice(0,10));
+  if (!SI.proj && !SI.noProj && sug.length === 1) { SI.proj = sug[0][0]; const pi2 = document.getElementById('si-proj'); if (pi2) pi2.value = SI.proj; siRefreshChips(); }
+}
+function siRefreshChips() { const r = SI.rows[SI.idx]; if (!r) return; const c = document.getElementById('si-chips'); if (!c) return;
+  const sug = siSuggest((document.getElementById('si-date')||{}).value || (r.receipt_date||'').slice(0,10));
+  const chip = (label, on, fn) => `<span onclick="${fn}" class="hub-pill-btn${on?' active':''}" style="cursor:pointer;padding:6px 12px;font-size:12px">${label}</span>`;
+  c.innerHTML = sug.map(([n,h]) => chip(`${attrEsc(n)} · ${+h.toFixed(1)}h that day`, SI.proj===n && !SI.noProj, `siPick('${attrEsc(n).replace(/'/g,"\\'")}')`)).join('') + chip('No project', SI.noProj, 'siPickNone()');
+}
+function siPick(n) { SI.proj = n; SI.noProj = false; const pi = document.getElementById('si-proj'); if (pi) pi.value = n; siRefreshChips(); }
+function siPickNone() { SI.noProj = true; SI.proj = ''; const pi = document.getElementById('si-proj'); if (pi) pi.value = ''; siRefreshChips(); }
+function siDateChanged(v) { const r = SI.rows[SI.idx]; if (r) { r.receipt_date = v; (r.lines||[]).forEach(l => l.date = v); } SI.proj = ''; SI.noProj = false; siRender(); }
+function siMove(d) { if (!SI.rows.length) return; SI.idx = (SI.idx + d + SI.rows.length) % SI.rows.length; SI.proj = ''; SI.noProj = false; siRender(); window.scrollTo({ top: 0 }); }
+function siLine(i, f, v) { const r = SI.rows[SI.idx]; const l = r.lines[i]; if (f === 'description') l.description = v.trim(); else { l[f] = parseFloat(v) || 0; l.amount = Math.round((parseFloat(l.qty)||1) * (parseFloat(l.unit_price)||0) * 100) / 100; } }
+function siLineDel(i) { const r = SI.rows[SI.idx]; r.lines.splice(i, 1); SI.showLines = true; siRender(); }
+
+async function siAdvance(removedId) {
+  SI.rows = SI.rows.filter(x => x.id !== removedId);
+  SI.counts.pending = Math.max(0, (SI.counts.pending||1) - 1);
+  if (SI.idx >= SI.rows.length) SI.idx = 0;
+  SI.proj = ''; SI.noProj = false;
+  siRender(); window.scrollTo({ top: 0 });
+}
+async function siPersonal() {
+  const r = SI.rows[SI.idx]; if (!r) return;
+  try { await siApi({ action:'update', id:r.id, fields:{ status:'personal' } }); SI.counts.personal = (SI.counts.personal||0) + 1; claudeToast('Moved to Personal'); siAdvance(r.id); }
+  catch (e) { claudeToast('⚠ ' + e.message, 'error'); }
+}
+function siItems(r, project) {
+  return (r.lines || []).map(l => ({ action:'new', type:'expense', date:(r.receipt_date||'').slice(0,10), supplier:r.supplier||'', description:l.description||'', category:l.category||'',
+    project: project || '', qty:parseFloat(l.qty)||1, unit_price:parseFloat(l.unit_price)||0, amount:Math.round((parseFloat(l.qty)||1)*(parseFloat(l.unit_price)||0)*100)/100 }));
+}
+async function siSave() {
+  const r = SI.rows[SI.idx]; if (!r || SI.busy) return;
+  const sup = document.getElementById('si-sup').value.trim(), date = document.getElementById('si-date').value, total = parseFloat(document.getElementById('si-total').value);
+  const projTyped = (document.getElementById('si-proj').value || '').trim();
+  const project = SI.noProj ? '' : (projTyped || SI.proj);
+  if (!sup || !date) { claudeToast('Add the supplier and date first', 'unclear'); return; }
+  if (!project && !SI.noProj) { claudeToast('Pick a job, or tap “No project”', 'unclear'); return; }
+  if (!(r.lines||[]).length) { claudeToast('No lines on this receipt — open “lines” and add one', 'unclear'); SI.showLines = true; return; }
+  r.supplier = sup; r.receipt_date = date; r.total_inc = isNaN(total) ? r.total_inc : total;
+  const items = siItems(r, project);
+  const wantsXero = !!(document.getElementById('rc-xero-export') || {}).checked;
+  SI.busy = true; const btn = document.getElementById('si-save'); if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  try {
+    const res = await fetch('/.netlify/functions/claude-parse', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ pendingAction:{ action:'expense_batch', items } }) });
+    const data = await res.json();
+    if (data.status !== 'success') throw new Error(data.message || 'Save failed');
+    if (data.entries && D) { D.expense_log = D.expense_log || []; data.entries.forEach(e => D.expense_log.push(e)); }
+    const ids = (data.entries || []).map(e => e.id);
+    await siApi({ action:'update', id:r.id, fields:{ status:'processed', supplier:sup, receipt_date:date, total_inc:r.total_inc, lines:r.lines, project, no_project:!project, expense_ids:ids } });
+    SI.counts.processed = (SI.counts.processed||0) + 1;
+    claudeToast(`✓ ${items.length} line${items.length>1?'s':''} saved${project?' to '+project:''}`, 'success');
+    if (wantsXero) await siXero(r.id, items, sup + ' ' + date);
+    siAdvance(r.id);
+  } catch (e) { claudeToast('⚠ ' + (e.message||'Save failed'), 'error'); }
+  finally { SI.busy = false; const b2 = document.getElementById('si-save'); if (b2) { b2.disabled = false; b2.textContent = 'Save & next'; } }
+}
+// Creates the Xero draft (Spend Money) and attaches the original file to it.
+async function siXero(id, items, label) {
+  const txn = await rcExportToXero(items, label);
+  if (!txn || !txn.BankTransactionID) return false;
+  try {
+    const tok = await getXeroToken();
+    await siApi({ action:'xero_attach', id, txn_id: txn.BankTransactionID, access_token: tok, tenant_id: localStorage.getItem('xero_tenant_id') });
+    claudeToast('📎 Receipt attached to the Xero draft', 'success');
+    return true;
+  } catch (e) { claudeToast('⚠ Draft made in Xero, but the file did not attach: ' + e.message, 'error'); return false; }
+}
+
+// ── Processed / Personal lists ──
+function siListHtml() {
+  if (!SI.rows.length) return `<div style="padding:40px 20px;text-align:center;color:var(--ink-4)">Nothing here yet.</div>`;
+  const proc = SI.pile === 'processed';
+  return `<div style="max-width:760px;margin:0 auto">` + SI.rows.map(r => {
+    const xero = r.xero_attached ? '<span style="color:var(--sage)">Xero ✓ attached</span>' : (r.xero_txn_id ? '<span style="color:var(--amber)">in Xero, no file</span>' : '<span style="color:var(--ink-4)">not in Xero</span>');
+    return `<div style="display:flex;gap:10px;align-items:center;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;background:var(--bg-1)">
+      <div style="flex:1;min-width:0"><div style="font-weight:600;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${attrEsc(r.supplier||r.file_name||'Receipt')} <span style="color:var(--ink-4);font-weight:400">· ${fmtDMY((r.receipt_date||'').slice(0,10))} · ${r.total_inc!=null?fmt(r.total_inc,2):''}</span></div>
+        <div style="font-size:11px;color:var(--ink-4)">${proc ? (r.no_project ? 'No project' : attrEsc(r.project||'')) + ' · ' + xero : (r.source==='email'?'✉️ email':'📸')}</div></div>
+      <button class="hub-pill-btn" onclick="siOpenFile('${r.id}')">View</button>
+      ${proc && !r.xero_attached ? `<button class="hub-pill-btn" onclick="siSendXero('${r.id}')">To Xero</button>` : ''}
+      ${!proc ? `<button class="hub-pill-btn" onclick="siRestore('${r.id}')">Restore</button>` : ''}
+    </div>`; }).join('') + `</div>`;
+}
+async function siOpenFile(id) { try { const u = await siUrl(id); window.open(u.url, '_blank'); } catch (e) { claudeToast('⚠ ' + e.message, 'error'); } }
+async function siRestore(id) { try { await siApi({ action:'update', id, fields:{ status:'pending' } }); await siLoad(SI.pile); SI.counts.pending = (SI.counts.pending||0)+1; siRender(); } catch (e) { claudeToast('⚠ ' + e.message, 'error'); } }
+async function siSendXero(id) {
+  const r = SI.rows.find(x => x.id === id); if (!r) return;
+  if (!localStorage.getItem('xero_access_token')) { claudeToast('Connect Xero first (top right)', 'unclear'); return; }
+  if (!RC.xeroBankAccountId) { try { await rcLoadXeroAccounts(); const { bankAccounts } = await rcLoadXeroAccounts(); if (bankAccounts.length) RC.xeroBankAccountId = bankAccounts[0].AccountID; } catch (e) {} }
+  claudeToast('Sending to Xero…');
+  const ok = await siXero(id, siItems(r, r.project), (r.supplier||'') + ' ' + (r.receipt_date||''));
+  if (ok) { r.xero_attached = true; siRender(); }
+}
+
+// ── Missing receipts: money out of the bank with no receipt anywhere ──
+async function siMissingHtml() {
+  try {
+    const since = new Date(Date.now() - 90*86400000).toISOString().slice(0,10);
+    const [bank, all] = await Promise.all([
+      sbGet(`/rest/v1/bank_transactions?select=id,date,contact,description,debit&debit=gt.0&date=gte.${since}&order=date.desc&limit=500`),
+      siApi({ action:'list', status:'all' })
+    ]);
+    const have = [];   // {t: time, amt: inc GST}
+    const groups = {};
+    (D.expense_log || []).forEach(e => { const k = (e.supplier||'')+'|'+(e.date||'').slice(0,10); (groups[k] = groups[k] || { d:(e.date||'').slice(0,10), a:0 }).a += (Number(e.amount)||0) * 1.1; });
+    Object.values(groups).forEach(g => have.push({ t: new Date(g.d+'T00:00:00').getTime(), a: g.a }));
+    all.rows.forEach(r => { if (r.total_inc != null && r.receipt_date) have.push({ t: new Date(r.receipt_date.slice(0,10)+'T00:00:00').getTime(), a: Number(r.total_inc) }); });
+    let ign = []; try { ign = JSON.parse(localStorage.getItem('si_ignored') || '[]'); } catch (e) {}
+    const miss = bank.filter(b => {
+      if (ign.includes(b.id)) return false;
+      const t = new Date(b.date.slice(0,10)+'T00:00:00').getTime(), a = Number(b.debit);
+      return !have.some(h => Math.abs(h.t - t) <= 5*86400000 && Math.abs(h.a - a) <= Math.max(1, a*0.03));
+    });
+    SI.missing = miss;
+    if (!miss.length) return `<div style="padding:40px 20px;text-align:center;color:var(--ink-4)"><div style="font-size:34px">✅</div>Every payment in the last 90 days has a receipt.</div>`;
+    return `<div style="max-width:760px;margin:0 auto"><div style="font-size:12px;color:var(--ink-4);margin-bottom:8px">${miss.length} payment${miss.length>1?'s':''} out of the bank in the last 90 days with no matching receipt. Find the receipt and add it, or tap Ignore (wages, transfers…).</div>` +
+      miss.map(b => `<div style="display:flex;gap:10px;align-items:center;padding:9px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;background:var(--bg-1)">
+        <div style="flex:1;min-width:0"><div style="font-weight:600;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${attrEsc(b.contact||b.description||'Payment')}</div><div style="font-size:11px;color:var(--ink-4)">${fmtDMY(b.date.slice(0,10))}</div></div>
+        <div style="color:var(--amber);font-weight:700">${fmt(b.debit,2)}</div>
+        <button class="hub-pill-btn" onclick="siIgnore('${b.id}')">Ignore</button></div>`).join('') + `</div>`;
+  } catch (e) { return `<div style="padding:30px;color:var(--pink);text-align:center">⚠ ${attrEsc(e.message)}</div>`; }
+}
+function siIgnore(id) { let ign = []; try { ign = JSON.parse(localStorage.getItem('si_ignored') || '[]'); } catch (e) {} ign.push(id); try { localStorage.setItem('si_ignored', JSON.stringify(ign)); } catch (e) {} siRender(); }
+
 
 // ── Scan sub-view ───────────────────────────────────────────────────────────
 function rcRenderScan() {

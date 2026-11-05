@@ -8,6 +8,9 @@
 [functions."claude-parse"]
   timeout = 26
 
+[functions."receipt-inbox"]
+  timeout = 26
+
 [functions."xero-mcp"]
   timeout = 26
 
