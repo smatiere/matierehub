@@ -6404,14 +6404,14 @@ function rcRenderScan() {
     <div id="rc-drop" style="border:2px dashed var(--border-2);border-radius:12px;padding:26px;text-align:center;background:var(--bg-2);cursor:pointer;transition:all .15s"
          onclick="document.getElementById('rc-file-input').click()">
       <div style="font-size:30px;margin-bottom:8px">🧾</div>
-      <div style="font-weight:600;color:var(--ink-2);margin-bottom:4px">Drop a receipt here or click to choose</div>
-      <div style="font-size:12px;color:var(--ink-4)">Photo (JPG/PNG) or PDF — every line is extracted for review before saving</div>
+      <div style="font-weight:600;color:var(--ink-2);margin-bottom:4px">Drop one or several receipts here, or click to choose</div>
+      <div style="font-size:12px;color:var(--ink-4)">Photos (JPG/PNG) or PDFs — different suppliers and dates are fine. Every line is extracted for review before saving</div>
       <input id="rc-file-input" type="file" accept="image/*,.pdf" multiple style="display:none" onchange="rcFilesSelected(this.files)">
     </div>
     <div id="rc-chips" style="display:none;flex-wrap:wrap;gap:8px;margin-top:12px"></div>
     <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:14px">
       <input type="text" id="rc-note" placeholder="Optional note — e.g. project name for the whole receipt…" style="${inp};flex:1;min-width:240px" value="${attrEsc(RC.note||'')}">
-      <button id="rc-parse-btn" onclick="rcParse()" style="padding:9px 18px;background:var(--amber);color:#000;border:none;border-radius:7px;cursor:pointer;font-size:13px;font-weight:700">Parse receipt</button>
+      <button id="rc-parse-btn" onclick="rcParse()" style="padding:9px 18px;background:var(--amber);color:#000;border:none;border-radius:7px;cursor:pointer;font-size:13px;font-weight:700">Read receipts</button>
     </div>
     <div id="rc-preview" style="margin-top:22px"></div>`;
 
@@ -6484,31 +6484,37 @@ async function rcParse() {
   const btn = document.getElementById('rc-parse-btn');
   const prev = document.getElementById('rc-preview');
   if (btn) { btn.disabled = true; btn.textContent = 'Parsing…'; }
-  if (prev) prev.innerHTML = '<div style="color:var(--ink-4);padding:20px;text-align:center"><span class="spinner-sm"></span> Reading every line on the receipt…</div>';
+  if (prev) prev.innerHTML = '<div style="color:var(--ink-4);padding:20px;text-align:center"><span class="spinner-sm"></span> Reading every line on every receipt…</div>';
   try {
-    const res = await fetch('/.netlify/functions/claude-parse', {
-      method: 'POST', headers: { 'Content-Type':'application/json' },
-      body: JSON.stringify({
-        previewOnly: true,
-        text: RC.note.trim() || undefined,
-        images: RC.files.map(f => ({ name:f.name, mediaType:f.type, data:f.data }))
-      })
+    // One request per receipt, in parallel: each keeps its own supplier, date and printed-total check.
+    const reads = await Promise.all(RC.files.map(async (f, i) => {
+      try {
+        const res = await fetch('/.netlify/functions/claude-parse', {
+          method: 'POST', headers: { 'Content-Type':'application/json' },
+          body: JSON.stringify({ previewOnly: true, text: RC.note.trim() || undefined, images: [{ name:f.name, mediaType:f.type, data:f.data }] })
+        });
+        const data = await res.json();
+        if (data.status !== 'preview' || !Array.isArray(data.items)) throw new Error(data.message || data.error || 'Could not read this receipt');
+        return { i, name: f.name, data };
+      } catch (e) { return { i, name: f.name, error: e.message || 'Could not read this receipt' }; }
+    }));
+    RC.items = []; RC.receipts = [];
+    reads.forEach(r => {
+      if (r.error) { RC.receipts.push({ id: r.i, name: r.name, supplier: '', date: '', lines: 0, error: r.error }); return; }
+      const d = r.data;
+      const supplier = d.supplier || (d.items.find(x => x.supplier) || {}).supplier || '';
+      const date = (d.items[0] || {}).date || '';
+      d.items.forEach(it => RC.items.push({ ...it, _inc: true, _rc: r.i }));
+      RC.receipts.push({ id: r.i, name: r.name, supplier, date, lines: d.items.length, check: d.check || null, model: d.model || '' });
     });
-    const data = await res.json();
-    if (data.status !== 'preview' || !Array.isArray(data.items)) {
-      throw new Error(data.message || 'Could not parse the receipt');
-    }
-    RC.items = data.items.map(it => ({ ...it, _inc: true }));
-    RC.supplier = data.supplier || RC.items.find(i=>i.supplier)?.supplier || '';
-    // Came from a Project card ("scan a receipt for this job") — allocate any
-    // line the parser didn't already guess a project for, rather than leaving
-    // it blank for Seb to type out. He can still edit or override per-line.
+    if (!RC.items.length) throw new Error((RC.receipts[0] && RC.receipts[0].error) || 'Could not parse the receipt');
+    RC.supplier = RC.receipts.length === 1 ? RC.receipts[0].supplier : '';
     if (RC.presetProject) RC.items.forEach(it => { if (!it.project) it.project = RC.presetProject; });
     rcRenderTable();
   } catch(err) {
     if (prev) prev.innerHTML = `<div style="color:var(--pink);padding:20px;text-align:center">⚠ ${(err.message||'Parse failed').replace(/</g,'&lt;')}</div>`;
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = 'Parse receipt'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Read receipts'; }
   }
 }
 
@@ -6543,7 +6549,7 @@ function rcRenderTable() {
   const supplier = RC.supplier || RC.items.find(i=>i.supplier)?.supplier || '—';
   wrap.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:10px">
-      <div style="font-size:13px;color:var(--ink-3)">Supplier: <strong style="color:var(--ink-2)">${attrEsc(supplier)}</strong> · <span id="rc-total"></span></div>
+      <div style="font-size:13px;color:var(--ink-3)">${(RC.receipts||[]).length > 1 ? '<strong style="color:var(--ink-2)">'+RC.receipts.length+' receipts</strong>' : 'Supplier: <strong style="color:var(--ink-2)">'+attrEsc(supplier)+'</strong>'} · <span id="rc-total"></span></div>
       <div style="display:flex;gap:8px">
         <button onclick="rcCancel()" style="padding:7px 12px;background:transparent;color:var(--ink-4);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:12px">Cancel</button>
         <button onclick="rcAddRow()" style="padding:7px 12px;background:var(--bg-1);color:var(--ink-2);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:12px">+ Add line</button>
@@ -6556,6 +6562,7 @@ function rcRenderTable() {
       <button onclick="rcApplyProjectAll()" style="padding:6px 12px;background:var(--amber);color:#000;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700">Apply to all</button>
       <span style="font-size:11px;color:var(--ink-4)">Sets the project on all lines below — then tweak any exceptions individually.</span>
     </div>
+    ${(RC.receipts||[]).filter(r => r.error).map(r => `<div style="padding:8px 12px;margin-bottom:8px;background:rgba(255,0,110,.1);border-radius:8px;font-size:12px;color:var(--pink)">⚠ Couldn't read ${attrEsc(r.name||'a receipt')}: ${attrEsc(r.error)} — try a clearer photo.</div>`).join('')}
     ${rcRenderXeroExportBox()}
     <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
       <thead><tr style="background:var(--bg-2);text-align:left">
@@ -6572,7 +6579,8 @@ function rcRenderTable() {
         ${RC.items.map((it,i) => {
           const lowCat  = !it.category;
           const lowProj = !it.project || it._projUnmatched;
-          return `
+          const first = it._rc != null && (i === 0 || RC.items[i-1]._rc !== it._rc);
+          return (first ? rcReceiptHeader(it._rc) : '') + `
           <tr data-row="${i}" style="border-top:1px solid var(--border);background:${it._inc?(i%2===0?'var(--bg-1)':'var(--bg-2)'):'transparent'};opacity:${it._inc?1:0.45}">
             <td style="text-align:center"><input type="checkbox" class="rc-inc" data-idx="${i}" ${it._inc?'checked':''}></td>
             <td style="padding:4px 6px"><input class="rc-cell" data-idx="${i}" data-field="description" value="${attrEsc(it.description||'')}" style="${cell};min-width:170px"></td>
@@ -6621,6 +6629,37 @@ function rcRenderTable() {
   rcUpdateTotal();
 }
 
+// One header row per receipt: supplier + date (editable, applied to that receipt's lines),
+// the lines-vs-printed-total check, and a warning if it looks already saved.
+function rcReceiptHeader(id) {
+  const r = (RC.receipts || []).find(x => x.id === id);
+  if (!r) return '';
+  const many = (RC.receipts || []).length > 1;
+  const lines = RC.items.filter(x => x._rc === id);
+  const inc = Math.round(lines.filter(x => x._inc).reduce((t, x) => t + (parseFloat(x.amount) || 0), 0) * 110) / 100;
+  let note = '';
+  if (r.check && r.check.total) note = r.check.ok
+    ? `<span style="color:var(--sage)">✓ adds up to the printed total ${fmt(r.check.total, 2)}</span>`
+    : `<span style="color:var(--amber)">⚠ lines add to ${fmt(r.check.lines_inc_gst, 2)} but the receipt says ${fmt(r.check.total, 2)} — check for a missed line</span>`;
+  else note = '<span style="color:var(--ink-4)">no printed total to check</span>';
+  const sup = String(lines[0] && lines[0].supplier || r.supplier || '').toLowerCase();
+  const dup = (D.expense_log || []).filter(e => String(e.supplier || '').toLowerCase() === sup && String(e.date || '').slice(0, 10) === (lines[0] || {}).date);
+  const dupHit = lines.length && lines.filter(l => dup.some(e => String(e.description || '').toLowerCase() === String(l.description || '').toLowerCase())).length / lines.length >= 0.6;
+  const ci = 'padding:4px 7px;border:1px solid var(--border);border-radius:5px;background:var(--bg-1);color:var(--ink-1);font-size:12px';
+  return `<tr class="rc-rhead"><td colspan="8" style="padding:12px 8px 6px;background:var(--bg-2);border-top:2px solid var(--border-2)">
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+      <span style="font-size:15px">🧾</span>
+      <input style="${ci};width:150px" value="${attrEsc((lines[0] && lines[0].supplier) || r.supplier || '')}" placeholder="Supplier" onchange="rcSetReceipt(${id},'supplier',this.value)">
+      <input type="date" style="${ci}" value="${attrEsc((lines[0] && lines[0].date) || r.date || '')}" onchange="rcSetReceipt(${id},'date',this.value)">
+      <span style="font-size:11px;color:var(--ink-4)">${lines.length} line${lines.length === 1 ? '' : 's'} · ${fmt(inc, 2)} inc GST${many ? ' · ' + attrEsc(r.name || '') : ''}</span>
+    </div>
+    <div style="font-size:11px;margin-top:4px">${note}${dupHit ? ' · <span style="color:var(--pink)">⚠ looks already saved — untick or Cancel to avoid doubling up</span>' : ''}</div></td></tr>`;
+}
+function rcSetReceipt(id, field, val) {
+  RC.items.forEach(it => { if (it._rc === id) it[field] = val.trim(); });
+  const r = (RC.receipts || []).find(x => x.id === id); if (r) r[field] = val.trim();
+}
+
 function rcAddRow() {
   RC.items = RC.items || [];
   RC.items.push({ action:'new', type:'expense', date:(RC.items[0]?.date)||new Date().toISOString().slice(0,10),
@@ -6664,7 +6703,7 @@ function rcApplyProjectAll() {
 // re-parse or swap them; confirms first if there are edits to lose.
 function rcCancel() {
   if (RC.items && RC.items.length && !confirm('Discard this parsed receipt? Nothing has been saved and your edits will be lost.')) return;
-  RC.items = null; RC.supplier = ''; RC.presetProject = null;
+  RC.items = null; RC.receipts = []; RC.supplier = ''; RC.presetProject = null;
   rcRenderScan();
 }
 
@@ -6692,7 +6731,7 @@ async function rcSave() {
     if (data.entries && D) { D.expense_log = D.expense_log || []; data.entries.forEach(e => D.expense_log.push(e)); }
     claudeToast(`✓ ${data.label || (items.length+' lines saved')}`, 'success');
     if (wantsXeroExport) await rcExportToXero(items, data.label);
-    RC.items = null; RC.files = []; RC.supplier = ''; RC.note = ''; RC.presetProject = null;
+    RC.items = null; RC.receipts = []; RC.files = []; RC.supplier = ''; RC.note = ''; RC.presetProject = null;
     rcRenderScan();
   } catch(err) {
     claudeToast('⚠ ' + (err.message||'Save failed'), 'error');
@@ -6758,6 +6797,14 @@ async function rcPopulateXeroPayment() {
 }
 
 async function rcExportToXero(items, batchLabel) {
+  // One draft per receipt: group by supplier + date.
+  const groups = {};
+  items.forEach(it => { const k = (it.supplier || RC.supplier || '') + '|' + (it.date || ''); (groups[k] = groups[k] || []).push(it); });
+  if (Object.keys(groups).length > 1) {
+    let last = null;
+    for (const g of Object.values(groups)) last = await rcExportToXero(g, (g[0].supplier || '') + ' ' + (g[0].date || ''));
+    return last;
+  }
   const bankAccountId = RC.xeroBankAccountId || (document.getElementById('rc-xero-payment')||{}).value;
   if (!bankAccountId) { claudeToast('⚠ Saved to MatiereHub, but no Xero bank account was selected — export skipped', 'unclear'); return null; }
   try {

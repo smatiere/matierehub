@@ -384,3 +384,8 @@ Files: `index.html`, `netlify/functions/hub-write.js` (new), `CLAUDE.md`. Verifi
 - Fed automatically: a database trigger on `expense_log` adds every saved receipt/expense line (any entry route). Backfilled 189 items from existing receipts.
 - Xero MCP connector (used by the quoting chat) gains `search_prices` and `save_price`; `create_quote` description tells Claude to check the library first and save web finds.
 - Hub: Scan Receipt → "Price library" now shows the shared library (source, price range).
+
+## Batch — Multi-receipt scan (2026-11-05)
+- Scan Receipt takes many receipts at once (different suppliers and dates). One request per receipt, in parallel; each gets its own header (supplier + date editable), a lines-vs-printed-total check, and an "already saved?" warning.
+- claude-parse: receipts are read by Haiku first; if lines don't add up to the printed total (within 3%, ex-GST x1.1 or GST-free) the receipt is re-read by Sonnet. Day-first (Australian) dates enforced in the prompt.
+- Xero export (if ticked) makes one draft per receipt. Saved lines feed the price library automatically (trigger).

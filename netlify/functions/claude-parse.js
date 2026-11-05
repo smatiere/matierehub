@@ -379,7 +379,7 @@ If you cannot confidently parse the input at all: {"action":"unclear","message":
         const imageInstruction =
 `This is a receipt/invoice photo (or PDF). Extract EVERY individual product line as its own expense entry — do NOT skip, merge, summarise, or group lines. If the receipt has 25 line items, return 25 objects. Capture small and cheap items too.
 
-OVERRIDE: ignore the "Output ONE JSON object only" rule for this image. Return a JSON ARRAY only — one object per product line, each in this shape:
+OVERRIDE: ignore the "Output ONE JSON object only" rule for this image. Return a JSON ARRAY only — one object per product line, then ONE final object {"receipt_total": 123.45} holding the grand total paid (incl GST) exactly as printed (leave that object out if no total is printed). Each product line has this shape:
 [{"action":"new","type":"expense","date":"${todayStr}","supplier":"StoreName","description":"Item name","category":"Category","project":"","qty":1,"unit_price":9.09,"amount":9.09}]
 
 Rules:
@@ -388,8 +388,8 @@ Rules:
 - qty × unit_price = amount, all EX-GST. If prices are inc-GST, divide by 1.1 and round to 2dp.
 - Do NOT create entries for subtotals, totals, GST lines, rounding, change, or payment/tender lines — only actual purchased items.
 - category: pick the best fit from the EXPENSE CATEGORIES list in the system prompt. If genuinely unsure, use "Materials" for building supplies else "Sundry Expenses" — never drop a line because the category is unclear.
-- supplier: the same store name on every line.
-- date: the receipt date if visible, otherwise ${todayStr}.
+- supplier: the store/business name from the receipt header, the same on every line.
+- date: the printed receipt date as YYYY-MM-DD. Australian receipts print DAY first (dd/mm/yyyy, e.g. 02/11/2026 = 2 November 2026). If no date is visible use ${todayStr}.
 ` + (userHint
   ? `\nUSER NOTE (applies to the whole receipt): "${userHint}"\n- If the user named a project, set "project" to that project on EVERY line.\n- If the user did not name a project, or you are unsure which line belongs to which project, leave "project":"" — it can be corrected later in the Hub. Never skip or drop a line just because the project is unclear.`
   : `\n- Leave "project":"" on every line — it will be assigned later in the Hub.`);
@@ -398,8 +398,41 @@ Rules:
         userContent = text.trim();
       }
 
-      // Use Sonnet for image requests (vision-capable); Haiku for text-only
-      const model = hasImages ? 'claude-sonnet-4-6' : 'claude-haiku-4-5-20251001';
+      // Receipts: Haiku reads first (fast, cheap). The lines are added up and compared with the
+      // printed total; only a receipt that does not add up is re-read by Sonnet.
+      const HAIKU = 'claude-haiku-4-5-20251001', SONNET = 'claude-sonnet-4-6';
+      async function visionRun(model) {
+        const r = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+          body: JSON.stringify({ model, max_tokens: 8000, system: systemPrompt, messages: [{ role: 'user', content: userContent }] })
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(`Claude API error: ${d.error?.message || JSON.stringify(d).slice(0, 200)}`);
+        let raw = d.content[0].text.trim().replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim();
+        let arr = [];
+        try { const c = JSON.parse(raw); arr = Array.isArray(c) ? c : [c]; } catch (e) { arr = extractJsonObjects(raw); }
+        const totObj = arr.find(o => o && o.receipt_total != null);
+        const total = totObj ? parseFloat(totObj.receipt_total) : null;
+        const lines = arr.filter(o => o && o.receipt_total == null);
+        let sum = 0; lines.forEach(o => { const q = parseFloat(o.qty) || 1; sum += (parseFloat(o.unit_price) || (parseFloat(o.amount) / q) || 0) * q; });
+        sum = Math.round(sum * 100) / 100;
+        const tol = total ? Math.max(1, total * 0.03) : 0;
+        const ok = !total || Math.abs(sum * 1.1 - total) <= tol || Math.abs(sum - total) <= tol;   // ex-GST x1.1, or GST-free receipt
+        return { items: lines, total, sum_ex: sum, ok, truncated: d.stop_reason === 'max_tokens', model };
+      }
+      if (hasImages) {
+        let best = null;
+        for (const m of [HAIKU, SONNET]) {
+          try { best = await visionRun(m); } catch (e) { if (m === SONNET && !best) throw e; continue; }
+          if (best.ok && best.items.length && !best.truncated) break;
+        }
+        if (!best || !best.items.length) throw new Error('No line items parsed from receipt');
+        parsed = { action: 'expense_batch', items: best.items,
+          _check: { ok: best.ok, total: best.total, lines_inc_gst: Math.round(best.sum_ex * 110) / 100 }, _model: best.model };
+      }
+      if (!parsed) {
+      const model = 'claude-haiku-4-5-20251001';
 
       const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -461,6 +494,7 @@ Rules:
             throw new Error(`Bad JSON from model: ${rawText.slice(0, 200)}`);
           }
         }
+      }
       }
     }
 
@@ -524,7 +558,8 @@ Rules:
         const supplier = previewItems.find(i => i.supplier)?.supplier || '';
         return { statusCode: 200, headers, body: JSON.stringify({
           status: 'preview', action: 'expense_batch',
-          items: previewItems, count: previewItems.length, supplier
+          items: previewItems, count: previewItems.length, supplier,
+          check: parsed._check || null, model: parsed._model || ''
         })};
       }
       // Non-batch input (e.g. a single typed expense) — return parsed, unsaved.
