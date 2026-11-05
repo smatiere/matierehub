@@ -6523,6 +6523,14 @@ function siGuessSupplier(r) {
   if (!d || /^(gmail|hotmail|outlook|yahoo|icloud|live|me)$/i.test(d)) return '';
   return d.charAt(0).toUpperCase() + d.slice(1);
 }
+// From past saved expenses: is this supplier usually NOT tied to a project? (e.g. Google, Anthropic)
+function siHabit(sup) {
+  const k = String(sup || '').toLowerCase().trim(); if (!k) return null;
+  const rows = (D.expense_log || []).filter(e => String(e.supplier || '').toLowerCase().trim() === k);
+  if (rows.length < 3) return null;
+  const none = rows.filter(e => !String(e.project || '').trim() || isNonBillable(e.project)).length;
+  return { n: rows.length, noProjShare: none / rows.length };
+}
 function siSupplierList() {
   const set = new Set();
   (D.expense_log || []).forEach(e => e.supplier && set.add(e.supplier));
@@ -6544,7 +6552,8 @@ function siCardHtml() {
   const tax = SI.tax || mem.tax || 'gst';
   const src = r.source === 'email' ? `✉️ ${attrEsc(r.email_from || 'email')}` : r.source === 'photo' ? '📸 Photo' : '⬆️ Upload';
   const sug = siSuggest((r.receipt_date||'').slice(0,10));
-  if (!SI.touched && !SI.noProj && !SI.proj) { if (mem.noProj) SI.noProj = true; else if (sug.length === 1) SI.proj = sug[0][0]; else if (mem.project) SI.proj = mem.project; }
+  const habit = siHabit(sup);
+  if (!SI.touched && !SI.noProj && !SI.proj) { if (mem.noProj || (habit && habit.noProjShare >= 0.8)) SI.noProj = true; else if (sug.length === 1) SI.proj = sug[0][0]; else if (mem.project) SI.proj = mem.project; }
   const chip = (label, on, fn) => `<span onclick="${fn}" class="hub-pill-btn${on?' active':''}" style="cursor:pointer;padding:6px 12px;font-size:12px">${label}</span>`;
   const chk = r.check_info && r.check_info.total ? (r.check_info.ok ? `<span style="color:var(--sage)">✓ lines add up to the printed ${fmt(r.check_info.total,2)}</span>` : `<span style="color:var(--amber)">⚠ lines add to ${fmt(sumInc,2)}, receipt says ${fmt(r.check_info.total,2)}</span>`)
     : (lines.length ? '<span style="color:var(--ink-4)">no printed total to check</span>' : '<span style="color:var(--amber)">Couldn’t read this one automatically — fill in the amount and what it was for.</span>');
@@ -6587,7 +6596,7 @@ function siCardHtml() {
       <div class="si-note">Unit price is ex GST. Qty × unit = line.</div>
     </details>
 
-    ${rcRenderXeroExportBox()}
+    ${localStorage.getItem('xero_access_token') ? rcRenderXeroExportBox() : '<div class="si-note" style="padding:10px 12px;background:var(--bg-2);border-radius:8px;color:var(--amber)">Xero is not connected on this device, so Save only saves here. Tap <b>Connect Xero</b> (top right) to also create the Xero entry and attach the receipt.</div>'}
     <div class="si-actions">
       <button id="si-save" class="si-primary" onclick="siSave()">Save &amp; next</button>
       <button onclick="siPersonal()">Personal</button>
@@ -6601,7 +6610,7 @@ function siWireCard() {
   const pi = document.getElementById('si-proj');
   if (pi) pi.addEventListener('input', () => { SI.proj = pi.value.trim(); SI.noProj = false; SI.touched = true; });
   ['si-cat','si-tax'].forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener('change', () => { SI[id === 'si-cat' ? 'cat' : 'tax'] = el.value; }); });
-  rcPopulateXeroPayment();
+  rcPopulateXeroPayment().then(() => { const m = siMem(siGuessSupplier(r)); const sel = document.getElementById('rc-xero-payment'); if (sel && m.bank && [...sel.options].some(o => o.value === m.bank)) { sel.value = m.bank; RC.xeroBankAccountId = m.bank; } });
   siUrl(r.id).then(u => siShowFile(r, u)).catch(() => { const el = document.getElementById('si-preview'); if (el) el.textContent = 'Could not load the receipt'; });
 }
 // Shows the receipt right on the page: photos as pictures, PDFs drawn page by page.
@@ -6701,7 +6710,7 @@ async function siSave() {
     if (data.status !== 'success') throw new Error(data.message || 'Save failed');
     if (data.entries && D) { D.expense_log = D.expense_log || []; data.entries.forEach(e => D.expense_log.push(e)); }
     const ids = (data.entries || []).map(e => e.id);
-    siMemSave(sup, { cat: cat || undefined, tax, project: project || undefined, noProj: !project });
+    siMemSave(sup, { cat: cat || undefined, tax, project: project || undefined, noProj: !project, bank: RC.xeroBankAccountId || undefined });
     await siApi({ action:'update', id:r.id, fields:{ status:'processed', supplier:sup, receipt_date:date, total_inc: isNaN(total) ? r.total_inc : total, lines: items.map(i => ({ description:i.description, qty:i.qty, unit_price:i.unit_price, amount:i.amount, category:i.category })), project, no_project:!project, expense_ids:ids, notes: [ref && ('Ref ' + ref), desc].filter(Boolean).join(' · ') } });
     SI.counts.processed = (SI.counts.processed||0) + 1;
     claudeToast(`✓ ${items.length} line${items.length>1?'s':''} saved${project?' to '+project:''}`, 'success');
