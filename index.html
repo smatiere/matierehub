@@ -6813,6 +6813,53 @@ function siDupBanner(r) {
       ${miss ? `<button class="si-primary2" onclick="siDupAdd()">Add only the ${miss} missing line${miss>1?'s':''}</button>` : ''}
       <button onclick="siDupDismiss()">Different — save normally</button></div></div>`;
 }
+// ── Is it already in Xero? (asked at review time, so a receipt Xero already has is never logged twice) ──
+function siXeroKey(r) { return [r.id, siNorm(r.supplier), (r.receipt_date || '').slice(0, 10), r.total_inc].join('|'); }
+function siXeroHtml(r) {
+  const x = (SI.xchk || {})[siXeroKey(r)];
+  if (x === undefined) return '<div class="si-note" style="color:var(--ink-4)">Checking Xero for an existing entry…</div>';
+  if (!x || x.error || x.skipped) return '';
+  if (!x.found) return '<div class="si-note" style="color:var(--ink-4)">Checked Xero: no matching payment yet, so this will be created.</div>';
+  const h = x.have;
+  return `<div class="si-dup" style="border-color:var(--sage);background:rgba(52,211,153,.08)"><b>✓ Already in Xero</b>
+    <div>${h.kind === 'Invoices' ? 'A bill' : 'Spend Money'}${h.contact ? ' under <b>' + attrEsc(h.contact) + '</b>' : ''} on ${fmtDMY(h.date)} for ${fmt(h.total, 2)}${h.hadFile ? ' — a file is already attached.' : ' — no file attached yet.'}
+    Saving here will <b>not</b> create a second entry in Xero${h.hadFile ? '' : '; the photo will be attached to the existing one'}.${h.multiple ? ' (More than one similar payment found — check Xero.)' : ''}</div></div>`;
+}
+async function siXeroCheck(r) {
+  SI.xchk = SI.xchk || {};
+  if (r.status !== 'pending') return;
+  const key = siXeroKey(r);
+  if (SI.xchk[key] === undefined) {
+    SI.xchk[key] = null;
+    try {
+      const resp = await fetch('/.netlify/functions/receipt-xero', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'check', id: r.id }) });
+      SI.xchk[key] = await resp.json();
+    } catch (e) { SI.xchk[key] = { error: true }; }
+  }
+  const el = document.getElementById('si-xero');
+  if (el && SI.rows[SI.idx] === r) el.innerHTML = siXeroHtml(r);
+}
+// Same photo imported twice: another card in this pile with the same supplier, date and total.
+function siTwins(r) {
+  const t = Number(r.total_inc), d = (r.receipt_date || '').slice(0, 10), sup = siNorm(siGuessSupplier(r));
+  if (!sup || !d || !(t > 0)) return [];
+  return SI.rows.filter(o => o.id !== r.id && siNorm(siGuessSupplier(o)) === sup && (o.receipt_date || '').slice(0, 10) === d && Math.abs(Number(o.total_inc) - t) < 0.01);
+}
+function siTwinBanner(r) {
+  if ((SI.twinOk || {})[r.id]) return '';
+  const tw = siTwins(r); if (!tw.length) return '';
+  return `<div class="si-dup"><b>⚠ Looks like a copy</b>
+    <div>Another card in this Inbox has the same supplier, date and total (${fmt(Number(r.total_inc), 2)}). It is probably the same receipt added twice.</div>
+    <div class="si-dup-act"><button class="si-primary2" onclick="siTwinRemove()">Remove this copy</button><button onclick="siTwinKeep()">Different receipt — keep both</button></div></div>`;
+}
+function siTwinKeep() { const r = SI.rows[SI.idx]; if (r) { SI.twinOk = SI.twinOk || {}; SI.twinOk[r.id] = true; siRender(); } }
+async function siTwinRemove() {
+  const r = SI.rows[SI.idx]; if (!r) return;
+  try {
+    await siApi({ action: 'update', id: r.id, fields: { status: 'ignored', notes: 'Duplicate of another Inbox card' } });
+    SI.counts.ignored = (SI.counts.ignored || 0) + 1; claudeToast('Copy moved to Not a cost'); siAdvance(r.id);
+  } catch (e) { claudeToast('⚠ ' + e.message, 'error'); }
+}
 function siDupDismiss() { const r = SI.rows[SI.idx]; if (r) { SI.dupDismissed = r.id; SI.dupOk[r.id] = true; siRender(); } }
 // Mark the receipt processed, pointing at existing expenses — nothing new is added to the job.
 async function siDupFinish(r, ids, project, extra) {
@@ -6883,6 +6930,8 @@ function siCardHtml() {
     <div class="si-nav"><button class="hub-pill-btn" onclick="siMove(-1)">‹</button><span class="si-count">${SI.idx+1} / ${rows.length}</span><button class="hub-pill-btn" onclick="siMove(1)">›</button><span class="si-src">${src}</span></div>
     ${r.email_subject ? `<div class="si-subj">${attrEsc(r.email_subject)}</div>` : ''}
     ${siDupBanner(r)}
+    ${siTwinBanner(r)}
+    <div id="si-xero">${siXeroHtml(r)}</div>
     <div id="si-preview" class="si-preview">Loading receipt…</div>
 
     <div class="si-sec">Receipt</div>
@@ -6934,6 +6983,7 @@ function siWireCard() {
   const pi = document.getElementById('si-proj');
   if (pi) pi.addEventListener('input', () => { SI.proj = pi.value.trim(); SI.noProj = false; SI.touched = true; });
   ['si-cat','si-tax'].forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener('change', () => { SI[id === 'si-cat' ? 'cat' : 'tax'] = el.value; }); });
+  siXeroCheck(r);
   siUrl(r.id).then(u => siShowFile(r, u)).catch(() => { const el = document.getElementById('si-preview'); if (el) el.textContent = 'Could not load the receipt'; });
 }
 // Shows the receipt right on the page: photos as pictures, PDFs drawn page by page.

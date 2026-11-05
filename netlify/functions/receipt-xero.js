@@ -77,7 +77,7 @@ async function findExisting(ctx, contactId, date, expectedInc, supplierName) {
     if (!fits.length) return null;
     // prefer one with no file yet, then the closest date
     fits.sort((p, q) => (p.HasAttachments ? 1 : 0) - (q.HasAttachments ? 1 : 0) || dayDiff(p) - dayDiff(q));
-    return { id: fits[0][idKey], kind, contact: (fits[0].Contact && fits[0].Contact.Name) || '', hadFile: !!fits[0].HasAttachments, multiple: fits.length > 1 };
+    return { id: fits[0][idKey], kind, contact: (fits[0].Contact && fits[0].Contact.Name) || '', hadFile: !!fits[0].HasAttachments, multiple: fits.length > 1, total: Number(fits[0].Total), date: String(fits[0].DateString || fits[0].Date || '').slice(0, 10) };
   };
   try {
     if (contactId) {
@@ -88,6 +88,7 @@ async function findExisting(ctx, contactId, date, expectedInc, supplierName) {
     const all = await xeroCall(`BankTransactions?where=${encodeURIComponent(`Type=="SPEND"&&Status!="DELETED"&&${range}`)}`, 'GET', ctx.token, ctx.tenant);
     const mine = (all.BankTransactions || []).filter(x => !ctx.bank || !x.BankAccount || x.BankAccount.AccountID === ctx.bank.AccountID);
     const byName = pick(mine.filter(x => similar(x.Contact && x.Contact.Name, supplierName)), 'BankTransactionID', 'BankTransactions'); if (byName) return byName;
+    if (!contactId) return null;
     const iv = await xeroCall(`Invoices?where=${encodeURIComponent(`Type=="ACCPAY"&&Contact.ContactID==Guid("${contactId}")&&Status!="VOIDED"&&Status!="DELETED"&&${range}`)}`, 'GET', ctx.token, ctx.tenant);
     const b2 = pick(iv.Invoices || [], 'InvoiceID', 'Invoices'); if (b2) return b2;
   } catch (e) { /* if the lookup itself fails, carry on and create */ }
@@ -114,9 +115,9 @@ async function pushOne(ctx, r) {
   const have = await findExisting(ctx, contactId, date, expectedInc, sup);
   if (have) {
     const f0 = await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${r.file_path}`, { headers: sbH() });
-    let att0 = false;
-    if (f0.ok) { const buf0 = Buffer.from(await f0.arrayBuffer()); const nm = String(sup + '-' + date).replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 60) + '.' + ext(r.mime); att0 = (await attach(ctx, have.id, nm, r.mime, buf0, have.kind)).status < 400; }
-    await rest('PATCH', `receipt_inbox?id=eq.${encodeURIComponent(r.id)}`, { xero_status: 'sent', xero_txn_id: have.id, xero_attached: att0, xero_error: `Already in Xero (${have.kind === 'Invoices' ? 'as a bill' : 'as Spend Money'}${have.contact ? ', under ' + have.contact : ''}) — nothing duplicated${att0 ? ', file attached to it' : ''}${have.hadFile ? ' (it already had a file)' : ''}`, xero_sent_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+    let att0 = !!have.hadFile;
+    if (f0.ok && !have.hadFile) { const buf0 = Buffer.from(await f0.arrayBuffer()); const nm = String(sup + '-' + date).replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 60) + '.' + ext(r.mime); att0 = (await attach(ctx, have.id, nm, r.mime, buf0, have.kind)).status < 400; }
+    await rest('PATCH', `receipt_inbox?id=eq.${encodeURIComponent(r.id)}`, { xero_status: 'sent', xero_txn_id: have.id, xero_attached: att0, xero_error: `Already in Xero (${have.kind === 'Invoices' ? 'as a bill' : 'as Spend Money'}${have.contact ? ', under ' + have.contact : ''}) — nothing duplicated${have.hadFile ? ' (it already had a file, so none added)' : att0 ? ', file attached to it' : ''}`, xero_sent_at: new Date().toISOString(), updated_at: new Date().toISOString() });
     return { id: r.id, ok: true, attached: att0, existing: true };
   }
   const mk = (status) => ({ BankTransactions: [{
@@ -171,6 +172,20 @@ exports.handler = async (event) => {
       const accs = (await xeroCall('Accounts', 'GET', c.token, c.tenant)).Accounts || [];
       const list = accs.filter(a => a.Class === 'EXPENSE' && a.Status === 'ACTIVE' && a.Name).map(a => ({ code: a.Code, name: a.Name, type: a.Type }));
       return out(200, { ok: true, accounts: list });
+    }
+    // Review-time look: is this receipt already in Xero? Never creates anything.
+    if (b.action === 'check') {
+      const rr = (await rest('GET', `receipt_inbox?select=*&id=eq.${encodeURIComponent(b.id)}`))[0];
+      if (!rr) return out(404, { error: 'Receipt not found' });
+      const date = String(b.date || rr.receipt_date || '').slice(0, 10), sup = String(b.supplier || rr.supplier || '').trim();
+      const total = b.total != null && b.total !== '' ? Number(b.total) : (rr.total_inc != null ? Number(rr.total_inc) : NaN);
+      if (!date || !sup || !(total > 0)) return out(200, { ok: true, found: false, skipped: true });
+      const c = await xeroContext();
+      const safe = sup.replace(/"/g, '');
+      const f = await xeroCall(`Contacts?where=${encodeURIComponent('Name=="' + safe + '"')}`, 'GET', c.token, c.tenant);
+      const contactId = f.Contacts && f.Contacts.length ? f.Contacts[0].ContactID : null;
+      const have = await findExisting(c, contactId, date, total, sup);
+      return out(200, { ok: true, found: !!have, have: have ? { kind: have.kind, contact: have.contact, hadFile: have.hadFile, total: have.total, date: have.date, multiple: have.multiple } : null });
     }
     if (b.action === 'banks') {
       const c = await xeroContext();
