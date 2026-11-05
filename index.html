@@ -6781,21 +6781,51 @@ function siHabitField(sup, field, minShare, minRows) {
 }
 // ── Duplicate protection ──
 const siNorm = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+// Same supplier even when named differently ("Bunnings" vs "Bunnings Warehouse").
+function siSameSup(a, b) { const x = siNorm(a), y = siNorm(b); return !!x && !!y && (x === y || (x.length >= 5 && y.length >= 5 && (x.startsWith(y.slice(0, 5)) || y.startsWith(x.slice(0, 5))))); }
+const siToks = (t) => new Set(String(t || '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 3));
+function siDescSim(a, b) {
+  const x = siNorm(a), y = siNorm(b);
+  if (x && y && (x === y || x.includes(y) || y.includes(x))) return 1;
+  const A = siToks(a), B = siToks(b); if (!A.size || !B.size) return 0;
+  let n = 0; A.forEach(w => { if (B.has(w)) n++; });
+  return n / Math.max(A.size, B.size);
+}
+// Is this receipt already saved as expenses? Tolerates photo-reading slips (wrong letters), cent rounding and
+// "Bunnings" vs "Bunnings Warehouse"; also recognises it by the whole total landing on one job and day.
 function siDupes(r) {
   const lines = Array.isArray(r.lines) ? r.lines : [];
-  const sup = siNorm(siGuessSupplier(r));
+  const supName = siGuessSupplier(r);
   const date = (r.receipt_date || '').slice(0, 10);
-  if (!lines.length || !sup || !date) return null;
+  if (!lines.length || !supName || !date) return null;
   const t0 = new Date(date + 'T00:00:00').getTime();
   const ref = siNorm(r.reference);
-  const cand = (D.expense_log || []).filter(e => siNorm(e.supplier) === sup && e.id !== undefined && (
+  const cand = (D.expense_log || []).filter(e => siSameSup(e.supplier, supName) && e.id !== undefined && (
     Math.abs(new Date(String(e.date).slice(0,10) + 'T00:00:00').getTime() - t0) <= 3 * 86400000 || (ref && siNorm(e.reference) === ref)));
   if (!cand.length) return null;
   const used = new Set(), matched = [], missing = [];
   lines.forEach(l => {
-    const dn = siNorm(l.description);
-    const k = cand.findIndex((e, i) => !used.has(i) && Math.abs(Number(e.amount) - (parseFloat(l.amount) || 0)) <= 0.05 && (siNorm(e.description) === dn || siNorm(e.description).includes(dn) || dn.includes(siNorm(e.description))));
-    if (k >= 0) { used.add(k); matched.push({ l, e: cand[k] }); } else missing.push(l);
+    const amt = parseFloat(l.amount) || 0, tol = Math.max(0.10, Math.abs(amt) * 0.03);
+    let best = -1, bestScore = 0;
+    cand.forEach((e, i) => {
+      if (used.has(i)) return;
+      const diff = Math.abs(Number(e.amount) - amt); if (diff > tol) return;
+      const sim = siDescSim(e.description, l.description);
+      const score = sim >= 0.4 ? sim + (1 - diff / tol) * 0.2 : (diff <= 0.02 ? 0.15 : 0);   // amount alone only if (near-)exact
+      if (score > bestScore) { bestScore = score; best = i; }
+    });
+    if (best >= 0) { used.add(best); matched.push({ l, e: cand[best] }); } else missing.push(l);
+  });
+  // Whole-receipt check: the saved expenses for one job and day add up to this receipt (within 2.5%).
+  const S = lines.reduce((t, l) => t + (parseFloat(l.amount) || 0), 0);
+  const groups = {};
+  cand.forEach(e => { const k = (e.project || '') + '|' + String(e.date).slice(0, 10); (groups[k] = groups[k] || []).push(e); });
+  Object.values(groups).forEach(g => {
+    const gs = g.reduce((t, e) => t + (Number(e.amount) || 0), 0);
+    if (S > 0 && Math.abs(gs - S) <= Math.max(2, S * 0.025) && g.length >= lines.length * 0.6 && g.length <= lines.length * 1.6 && missing.length) {
+      const left = g.filter(e => !matched.some(m => m.e === e));
+      missing.splice(0).forEach(l => { const e = left.shift(); if (e) matched.push({ l, e }); });
+    }
   });
   if (!matched.length) return null;
   const pc = {}; matched.forEach(m => { const p = m.e.project || ''; pc[p] = (pc[p] || 0) + 1; });
