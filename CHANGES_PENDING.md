@@ -418,3 +418,4 @@ Files: `index.html`, `netlify/functions/hub-write.js` (new), `CLAUDE.md`. Verifi
 - New table receipt_ignore. Receipts whose supplier / sender / subject match a rule (seeded: Matiere = our own sales invoices) go straight to a 'Not a cost' pile instead of Pending. 'Not a cost' button on the card: this one, or always for that supplier (also clears matching ones already waiting).
 - Inbox learns description (single-line receipts) and category per supplier from last time and from past saved expenses.
 - GST: reader now reports whether GST is shown (included / none / unknown) and does not divide by 1.1 when there is none. Card picks GST mode from the invoice, else the supplier's last saved mode (any device), else 10%; says which. Lines adjust correctly if you override.
+- Inbox preview: flex centering was hiding the top of tall PDFs (opened at the bottom of page 3); now always starts at the top of page 1.

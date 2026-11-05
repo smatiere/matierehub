@@ -467,9 +467,10 @@ button,.tab,.hub-pill-btn,select,input[type=checkbox]{-webkit-tap-highlight-colo
 .si-nav{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:12px;color:var(--ink-4)}
 .si-nav .si-count{white-space:nowrap}.si-nav .si-src{margin-left:auto;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .si-subj{font-size:12px;color:var(--ink-3);margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.si-preview{background:var(--bg-2);border-radius:10px;min-height:90px;margin-bottom:10px;overflow:auto;max-height:64vh;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--ink-4);font-size:12px}
+.si-preview{background:var(--bg-2);border-radius:10px;min-height:90px;margin-bottom:10px;overflow:auto;max-height:64vh;display:block;text-align:center;padding:0;color:var(--ink-4);font-size:12px;line-height:90px}
+.si-preview>*{line-height:normal}
 .si-preview img{display:block;width:100%;max-height:64vh;object-fit:contain;background:#000}
-.si-preview canvas{max-width:100%}
+.si-preview canvas{max-width:100%;margin:0 auto}
 .si-sec{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-4);margin:14px 0 6px}
 .si-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
 .si-grid .si-full{grid-column:1/-1}
@@ -6665,6 +6666,7 @@ async function siShowFile(r, u) {
       el.appendChild(cv);
       await page.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
     }
+    el.scrollTop = 0;
     if (pdf.numPages > 4) el.insertAdjacentHTML('beforeend', `<a href="${u.url}" target="_blank" rel="noopener" style="display:block;padding:8px;color:var(--amber);font-size:12px">…${pdf.numPages - 4} more pages — open the PDF</a>`);
   } catch (e) {
     el.innerHTML = `<iframe src="${u.url}" style="width:100%;height:60vh;border:0;background:#fff"></iframe><a href="${u.url}" target="_blank" rel="noopener" style="display:block;padding:8px;color:var(--amber);font-size:12px">Open the PDF in a new tab</a>`;
