@@ -468,6 +468,15 @@ button,.tab,.hub-pill-btn,select,input[type=checkbox]{-webkit-tap-highlight-colo
   .btn-primary,.btn-refresh,.pnl-cat-btn,#claude-send-btn{min-height:44px}
   #claude-add-btn{min-width:44px;min-height:44px}
 }
+/* Claude bar parked (2026-11-06). Remove class "claude-bar-off" from <body> to revive it. */
+body.claude-bar-off #claude-bar{display:none}
+body.claude-bar-off{padding-bottom:0}
+body.claude-bar-off #app{padding-bottom:calc(24px + env(safe-area-inset-bottom))}
+@media (max-width:720px){
+  body.claude-bar-off #app{padding-bottom:calc(84px + env(safe-area-inset-bottom))}
+  body.claude-bar-off #claude-toast{bottom:calc(76px + env(safe-area-inset-bottom))}
+  body.claude-bar-off #sch-snack{bottom:calc(76px + env(safe-area-inset-bottom))}
+}
 @media (max-width:720px){.hide-sm{display:none}}
 @keyframes sheetIn{from{transform:translateY(40px);opacity:0}to{transform:none;opacity:1}}
 
@@ -562,7 +571,7 @@ button,.tab,.hub-pill-btn,select,input[type=checkbox]{-webkit-tap-highlight-colo
 @media (max-width:700px){.pf-grid{padding:0 6px;gap:3px}.pf-cell{min-height:56px;padding:3px 4px}.pf-v{font-size:11px}.pf-h{font-size:8px}.pf-two{grid-template-columns:1fr}.pf-chartbox{height:280px;padding:4px 4px 0}}
 </style>
 </head>
-<body>
+<body class="claude-bar-off"><!-- Claude bar parked 2026-11-06: delete class="claude-bar-off" here to bring it back -->
 
 <div id="hub-gate">
   <div class="hub-gate-card">
