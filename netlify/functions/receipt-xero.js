@@ -36,6 +36,7 @@ async function xeroContext() {
   const banks = accs.filter(a => a.Type === 'BANK' && a.Status === 'ACTIVE');
   let bank = null;
   if (process.env.XERO_RECEIPTS_BANK_ID) bank = banks.find(b => b.AccountID === process.env.XERO_RECEIPTS_BANK_ID);
+  if (!bank && process.env.XERO_RECEIPTS_BANK_NAME) bank = banks.find(b => String(b.Name).toLowerCase().includes(String(process.env.XERO_RECEIPTS_BANK_NAME).toLowerCase()));
   if (!bank && banks.length === 1) bank = banks[0];
   return { token, tenant, expenseMap, banks, bank };
 }
