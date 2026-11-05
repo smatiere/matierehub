@@ -6853,7 +6853,8 @@ function siXeroHtml(r) {
   const h = x.have;
   return `<div class="si-dup" style="border-color:var(--sage);background:rgba(52,211,153,.08)"><b>✓ Already in Xero</b>
     <div>${h.kind === 'Invoices' ? 'A bill' : 'Spend Money'}${h.contact ? ' under <b>' + attrEsc(h.contact) + '</b>' : ''} on ${fmtDMY(h.date)} for ${fmt(h.total, 2)}${h.hadFile ? ' — a file is already attached.' : ' — no file attached yet.'}
-    Saving here will <b>not</b> create a second entry in Xero${h.hadFile ? '' : '; the photo will be attached to the existing one'}.${h.multiple ? ' (More than one similar payment found — check Xero.)' : ''}</div></div>`;
+    Saving here will <b>not</b> create a second entry in Xero${h.hadFile ? '' : '; the photo will be attached to the existing one'}.${h.multiple ? ' (More than one similar payment found — check Xero.)' : ''}</div>
+    <div class="si-dup-act"><button class="si-primary2" onclick="siXeroClose()">${h.hadFile ? '✓ Done — remove from Inbox' : 'Attach photo to Xero &amp; remove'}</button></div></div>`;
 }
 async function siXeroCheck(r) {
   SI.xchk = SI.xchk || {};
@@ -6870,6 +6871,16 @@ async function siXeroCheck(r) {
   if (el && SI.rows[SI.idx] === r) el.innerHTML = siXeroHtml(r);
 }
 // Same photo imported twice: another card in this pile with the same supplier, date and total.
+// Already in Xero: close the card without saving any new expenses (nothing is added to a job, nothing created in Xero).
+async function siXeroClose() {
+  const r = SI.rows[SI.idx]; const x = r && (SI.xchk || {})[siXeroKey(r)]; if (!x || !x.found) return;
+  const h = x.have;
+  try {
+    await siApi({ action: 'update', id: r.id, fields: { status: 'processed', xero_status: h.hadFile ? 'sent' : 'queued', xero_txn_id: h.id || '', xero_attached: !!h.hadFile,
+      xero_error: 'Already in Xero — closed from the Inbox, nothing added' + (h.hadFile ? '' : ' (photo will be attached on the next send)'), notes: 'Already in Xero' } });
+    SI.counts.processed = (SI.counts.processed || 0) + 1; claudeToast('✓ Done — removed from the Inbox'); siAdvance(r.id);
+  } catch (e) { claudeToast('⚠ ' + e.message, 'error'); }
+}
 function siTwins(r) {
   const t = Number(r.total_inc), d = (r.receipt_date || '').slice(0, 10), sup = siNorm(siGuessSupplier(r));
   if (!sup || !d || !(t > 0)) return [];

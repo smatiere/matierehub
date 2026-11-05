@@ -185,7 +185,7 @@ exports.handler = async (event) => {
       const f = await xeroCall(`Contacts?where=${encodeURIComponent('Name=="' + safe + '"')}`, 'GET', c.token, c.tenant);
       const contactId = f.Contacts && f.Contacts.length ? f.Contacts[0].ContactID : null;
       const have = await findExisting(c, contactId, date, total, sup);
-      return out(200, { ok: true, found: !!have, have: have ? { kind: have.kind, contact: have.contact, hadFile: have.hadFile, total: have.total, date: have.date, multiple: have.multiple } : null });
+      return out(200, { ok: true, found: !!have, have: have ? { id: have.id, kind: have.kind, contact: have.contact, hadFile: have.hadFile, total: have.total, date: have.date, multiple: have.multiple } : null });
     }
     if (b.action === 'banks') {
       const c = await xeroContext();
