@@ -486,6 +486,13 @@ body.claude-bar-off #app{padding-bottom:calc(24px + env(safe-area-inset-bottom))
 .ql-step .ql-val{flex:1;text-align:center;font-size:34px;font-weight:700;color:var(--amber)}
 .ql-presets{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
 .ql-presets button{min-height:44px;padding:0 16px;border-radius:22px;background:var(--bg-3);border:1px solid var(--border-2);color:var(--ink-2);font-size:14px;font-weight:600;touch-action:manipulation}
+.sch-today{background:var(--bg-2);border:1px solid var(--amber);border-radius:14px;padding:12px;margin-bottom:14px}
+.sch-today-h{font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);margin-bottom:8px}
+.sch-today-job{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding:8px 0;border-top:1px solid var(--border)}
+.sch-today-job:first-of-type{border-top:none}
+.sch-today-main{flex:1;min-width:200px;display:flex;flex-direction:column;gap:3px;cursor:pointer}
+.sch-today-main b{font-size:16px}.sch-today-main small{font-size:12.5px;color:var(--ink-3)}
+.sch-today-act{display:flex;gap:8px}.sch-today-act .sch-btn{min-height:44px}
 @media (max-width:720px){.hide-sm{display:none}}
 @keyframes sheetIn{from{transform:translateY(40px);opacity:0}to{transform:none;opacity:1}}
 
@@ -2163,6 +2170,25 @@ function schSetupCard() {
     <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="sch-btn pri" onclick="loadData()">Check again</button></div></div></div>`;
 }
 
+// ── Today card (2026-11-06): jobs on site today, with call / map / open buttons ──
+function schToday() {
+  const t = todayStr();
+  const jobs = ((D && D.bookings) || []).filter(b => b.start_date && !['done', 'cancelled'].includes(b.status) && b.start_date <= t && t <= (b.end_date || b.start_date));
+  if (!jobs.length) return '';
+  const card = b => {
+    const maps = b.site_address ? 'https://maps.apple.com/?q=' + encodeURIComponent(b.site_address) : '';
+    const open = (b.constraints || []).filter(c => !c.done).length;
+    return `<div class="sch-today-job">
+      <div class="sch-today-main" onclick="schOpen('${b.id}')"><b>${attrEsc(b.project || b.title || 'Job')}</b>
+        <small>${attrEsc(b.title || '')}${b.hours ? ' · ' + b.hours + 'h' : ''}${b.start_time ? ' · from ' + attrEsc(b.start_time) : ''}${open ? ' · ' + open + ' open item' + (open > 1 ? 's' : '') : ''}</small>
+        ${b.site_address ? '<small>📍 ' + attrEsc(b.site_address) + '</small>' : ''}</div>
+      <div class="sch-today-act">
+        ${maps ? `<a class="sch-btn" href="${maps}" target="_blank" rel="noopener">Map</a>` : ''}
+        ${b.client_phone ? `<a class="sch-btn" href="tel:${attrEsc(String(b.client_phone).replace(/[^\d+]/g, ''))}">Call</a>` : ''}
+        <button class="sch-btn pri" onclick="schOpen('${b.id}')">Open</button></div></div>`;
+  };
+  return `<div class="sch-today"><div class="sch-today-h">Today · ${jobs.length} job${jobs.length > 1 ? 's' : ''}</div>${jobs.map(card).join('')}</div>`;
+}
 function schRender() {
   const page = document.getElementById('page-schedule');
   if (!page) return;
@@ -2171,7 +2197,7 @@ function schRender() {
   schLoadWeather();
   if (D && D.bookings === null) { page.innerHTML = schHeader().replace(/<div class="sch-top-act">[\s\S]*<\/div><\/div>$/, '</div>') + schSetupCard(); return; }
   const banner = SCH.placing ? `<div class="sch-banner">Tap a day to place <b>${attrEsc((schGet(SCH.placing) || {}).project || '')}</b><button onclick="SCH.placing=null;schRender()">Cancel</button></div>` : '';
-  page.innerHTML = schHeader() + banner + schAttention() + `<div class="sch-layout"><div class="sch-col-pipe">${schPipeline()}</div><div class="sch-col-cal">${schCalendar()}${schDayPlanPanel()}</div></div>`;
+  page.innerHTML = schHeader() + banner + schToday() + schAttention() + `<div class="sch-layout"><div class="sch-col-pipe">${schPipeline()}</div><div class="sch-col-cal">${schCalendar()}${schDayPlanPanel()}</div></div>`;
 }
 
 // ═══ BOOKING SHEET ══════════════════════════════════════════════════════════
