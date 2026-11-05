@@ -480,7 +480,8 @@ button,.tab,.hub-pill-btn,select,input[type=checkbox]{-webkit-tap-highlight-colo
 .si-note{font-size:11px;margin:6px 0 2px}
 .si-chips{display:flex;flex-wrap:wrap;gap:6px}
 .si-lines{margin:12px 0}.si-lines>summary{cursor:pointer;color:var(--ink-3);font-size:13px}
-.si-line{display:grid;grid-template-columns:minmax(0,1fr) 52px 72px 22px;gap:4px;margin-top:5px;align-items:center}
+.si-line{display:grid;grid-template-columns:52px 72px minmax(0,1fr) 22px;gap:4px;margin:8px 0 0;align-items:center}
+.si-line .si-ld{grid-column:1/-1}.si-line .si-lp{font-size:11px;color:var(--ink-3)}
 .si-line input{width:100%;min-width:0;box-sizing:border-box;padding:6px 7px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:12px}
 .si-line .si-ln{text-align:right}.si-x{cursor:pointer;color:var(--ink-4);text-align:center}
 .si-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
@@ -6590,13 +6591,15 @@ function siCardHtml() {
     </div>
     <input id="si-proj" class="si-wide" placeholder="Or type a project…" value="${attrEsc(SI.noProj?'':SI.proj)}">
 
-    <details ${SI.showLines?'open':''} ontoggle="SI.showLines=this.open" class="si-lines"><summary>${lines.length} line${lines.length===1?'':'s'} read from the receipt · ${fmt(sumInc,2)} inc GST — edit</summary>
+    <details ${SI.showLines?'open':''} ontoggle="SI.showLines=this.open" class="si-lines"><summary>${lines.length} line${lines.length===1?'':'s'} read from the receipt · ${fmt(sumInc,2)} inc GST${lines.some(l => l.project) ? ' · some on other jobs' : ''} — edit</summary>
+      <datalist id="si-projs">${ssProjectNames().map(x => `<option value="${attrEsc(x)}">`).join('')}</datalist>
       ${lines.map((l,i) => `<div class="si-line">
           <input class="si-ld" value="${attrEsc(l.description||'')}" onchange="siLine(${i},'description',this.value)">
           <input class="si-ln" inputmode="decimal" value="${l.qty!=null?l.qty:1}" onchange="siLine(${i},'qty',this.value)" title="Qty">
           <input class="si-ln" inputmode="decimal" value="${l.unit_price!=null?l.unit_price:''}" onchange="siLine(${i},'unit_price',this.value)" title="Unit price ex GST">
+          <input class="si-lp" list="si-projs" value="${attrEsc(l.project||'')}" placeholder="same job" onchange="siLine(${i},'project',this.value)" title="Only fill in if this line belongs to a different job">
           <span onclick="siLineDel(${i})" class="si-x">✕</span></div>`).join('')}
-      <div class="si-note">Unit price is ex GST. Qty × unit = line.</div>
+      <div class="si-note">Unit price is ex GST. Leave “same job” empty unless a line belongs to a different job.</div>
     </details>
 
     <div class="si-note" style="padding:9px 12px;background:var(--bg-2);border-radius:8px;color:var(--ink-3)">Save puts it in your expenses. It goes to Xero (with the file attached) in the next batch — see <b>Processed</b>.</div>
@@ -6665,7 +6668,7 @@ function siSupChanged(v) { const r = SI.rows[SI.idx]; if (r) r.supplier = v.trim
 function siDateChanged(v) { const r = SI.rows[SI.idx]; if (r) { r.receipt_date = v; (r.lines||[]).forEach(l => l.date = v); } if (!SI.touched) { SI.proj = ''; SI.noProj = false; } SI.ref = (document.getElementById('si-ref')||{}).value || null; SI.desc = (document.getElementById('si-desc')||{}).value || null; siRender(); }
 function siReset() { SI.proj = ''; SI.noProj = false; SI.touched = false; SI.cat = null; SI.tax = ''; SI.ref = null; SI.desc = null; }
 function siMove(d) { if (!SI.rows.length) return; SI.idx = (SI.idx + d + SI.rows.length) % SI.rows.length; siReset(); siRender(); window.scrollTo({ top: 0 }); }
-function siLine(i, f, v) { const r = SI.rows[SI.idx]; const l = r.lines[i]; if (f === 'description') l.description = v.trim(); else { l[f] = parseFloat(v) || 0; l.amount = Math.round((parseFloat(l.qty)||1) * (parseFloat(l.unit_price)||0) * 100) / 100; } }
+function siLine(i, f, v) { const r = SI.rows[SI.idx]; const l = r.lines[i]; if (f === 'description') l.description = v.trim(); else if (f === 'project') { l.project = v.trim(); siRender(); } else { l[f] = parseFloat(v) || 0; l.amount = Math.round((parseFloat(l.qty)||1) * (parseFloat(l.unit_price)||0) * 100) / 100; } }
 function siLineDel(i) { const r = SI.rows[SI.idx]; r.lines.splice(i, 1); SI.showLines = true; siRender(); }
 
 async function siAdvance(removedId) {
@@ -6702,7 +6705,7 @@ async function siSave() {
     lines = lines.map(l => { const u = Math.round((parseFloat(l.unit_price)||0) * 1.1 * 100) / 100; return { ...l, unit_price: u, amount: Math.round(u * (parseFloat(l.qty)||1) * 100) / 100 }; });
   }
   lines.forEach(l => { if (cat) l.category = cat; });
-  const items = lines.map(l => ({ action:'new', type:'expense', date, supplier: sup, description: l.description || '', category: l.category || '', project: project || '',
+  const items = lines.map(l => ({ action:'new', type:'expense', date, supplier: sup, description: l.description || '', category: l.category || '', project: (l.project || '').trim() || project || '',
     qty: parseFloat(l.qty)||1, unit_price: parseFloat(l.unit_price)||0, amount: Math.round((parseFloat(l.qty)||1)*(parseFloat(l.unit_price)||0)*100)/100 }));
   SI.busy = true; const btn = document.getElementById('si-save'); if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
   try {
@@ -6712,7 +6715,7 @@ async function siSave() {
     if (data.entries && D) { D.expense_log = D.expense_log || []; data.entries.forEach(e => D.expense_log.push(e)); }
     const ids = (data.entries || []).map(e => e.id);
     siMemSave(sup, { cat: cat || undefined, tax, project: project || undefined, noProj: !project });
-    await siApi({ action:'update', id:r.id, fields:{ status:'processed', supplier:sup, receipt_date:date, total_inc: isNaN(total) ? r.total_inc : total, lines: items.map(i => ({ description:i.description, qty:i.qty, unit_price:i.unit_price, amount:i.amount, category:i.category })), project, no_project:!project, expense_ids:ids, notes: desc || '', reference: ref, tax_mode: tax, xero_status: 'queued', xero_error: '' } });
+    await siApi({ action:'update', id:r.id, fields:{ status:'processed', supplier:sup, receipt_date:date, total_inc: isNaN(total) ? r.total_inc : total, lines: items.map(i => ({ description:i.description, qty:i.qty, unit_price:i.unit_price, amount:i.amount, category:i.category, project: i.project !== (project || '') ? i.project : '' })), project, no_project:!project, expense_ids:ids, notes: desc || '', reference: ref, tax_mode: tax, xero_status: 'queued', xero_error: '' } });
     SI.counts.processed = (SI.counts.processed||0) + 1;
     claudeToast(`✓ ${items.length} line${items.length>1?'s':''} saved${project?' to '+project:''}`, 'success');
     siAdvance(r.id);

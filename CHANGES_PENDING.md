@@ -412,3 +412,4 @@ Files: `index.html`, `netlify/functions/hub-write.js` (new), `CLAUDE.md`. Verifi
 - Processed pile: shows Waiting / In Xero ✓ (+file) / Failed (reason) per receipt, "Send N to Xero now", per-receipt Send/Retry.
 - Workflow `receipts-to-xero.yml`: manual for now; schedule lines ready to un-comment (twice daily) after the first batch is checked.
 - Needs supabase columns xero_status, xero_error, tax_mode, reference, xero_sent_at (already run).
+- Inbox card: per-line job override (inside the collapsed lines list, 'same job' by default). Every saved line still goes to expenses (per line) and the price library.
