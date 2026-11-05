@@ -493,6 +493,16 @@ body.claude-bar-off #app{padding-bottom:calc(24px + env(safe-area-inset-bottom))
 .sch-today-main{flex:1;min-width:200px;display:flex;flex-direction:column;gap:3px;cursor:pointer}
 .sch-today-main b{font-size:16px}.sch-today-main small{font-size:12.5px;color:var(--ink-3)}
 .sch-today-act{display:flex;gap:8px}.sch-today-act .sch-btn{min-height:44px}
+@media (max-width:720px){
+  /* Expenses and Transactions: each row becomes a card */
+  table.mcards,table.mcards tbody,table.mcards tr,table.mcards td{display:block;width:100%}
+  table.mcards thead{display:none}
+  table.mcards tr{background:var(--bg-2)!important;border:1px solid var(--border)!important;border-radius:12px;padding:8px 12px;margin-bottom:8px}
+  table.mcards td{display:flex!important;justify-content:space-between;align-items:center;gap:10px;padding:5px 0!important;max-width:none!important;white-space:normal!important;text-align:left!important;overflow:visible!important}
+  table.mcards td::before{content:attr(data-l);flex:none;width:76px;font-size:11px;color:var(--ink-4);letter-spacing:.04em}
+  table.mcards td.hide-sm{display:none!important}
+  table.mcards td input{flex:1;width:auto!important;min-width:0!important;min-height:40px;background:var(--bg-1)!important;border:1px solid var(--border-2)!important;border-radius:8px!important;padding:0 10px!important;color:var(--ink)!important}
+}
 @media (max-width:720px){.hide-sm{display:none}}
 @keyframes sheetIn{from{transform:translateY(40px);opacity:0}to{transform:none;opacity:1}}
 
@@ -682,7 +692,7 @@ body.claude-bar-off #app{padding-bottom:calc(24px + env(safe-area-inset-bottom))
   <button data-tab="timesheet" onclick="hubGo('timesheet')"><span class="ni">⏱</span>Timesheets</button>
   <button data-tab="projects" onclick="hubGo('projects')"><span class="ni">📁</span>Projects</button>
   <button data-tab="schedule" onclick="hubGo('schedule')"><span class="ni">📅</span>Schedule<span class="nbadge" id="nb-schedule"></span></button>
-  <button data-tab="receipts" onclick="hubGo('receipts')"><span class="ni">🧾</span>Receipts</button>
+  <button data-tab="receipts" onclick="hubGo('receipts')"><span class="ni">🧾</span>Receipts<span class="nbadge" id="nb-receipts"></span></button>
   <button data-tab="more" onclick="hubMore(true)"><span class="ni">☰</span>More<span class="nbadge" id="nb-more"></span></button>
 </nav>
 <div id="hub-more" onclick="if(event.target===this)hubMore(false)">
@@ -6278,7 +6288,7 @@ function txRenderTable() {
       <span style="font-size:13px;color:var(--sage)">▲ ${fmt(totalIn)} in</span>
       <span style="font-size:13px;color:var(--pink)">▼ ${fmt(totalOut)} out</span>
     </div>
-    <table style="width:100%;border-collapse:collapse;font-size:12px">
+    <table class="mcards" style="width:100%;border-collapse:collapse;font-size:12px">
       <thead>
         <tr style="background:var(--bg-2);text-align:left">
           <th style="padding:8px 10px;font-weight:600;white-space:nowrap">Date</th>
@@ -6295,15 +6305,15 @@ function txRenderTable() {
       <tbody>
         ${rows.map((r, i) => `
           <tr style="border-top:1px solid var(--border);background:${i%2===0?'var(--bg-1)':'var(--bg-2)'}${r.expense_log_id?' border-left:3px solid var(--sage)':''}">
-            <td style="padding:7px 10px;white-space:nowrap;color:var(--ink-3)">${fmtDMY(r.date)}</td>
-            <td style="padding:7px 10px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.contact||'—'}</td>
-            <td style="padding:7px 10px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-3)">${r.account_name||r.account_code||'—'}</td>
-            <td style="padding:7px 10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-4)">${r.description||''}</td>
-            <td style="padding:7px 10px;color:var(--ink-4)">${r.reference||''}</td>
-            <td style="padding:7px 10px;text-align:right;color:var(--pink);font-weight:${r.debit?'600':'400'}">${r.debit?fmt(r.debit):'—'}</td>
-            <td style="padding:7px 10px;text-align:right;color:var(--sage);font-weight:${r.credit?'600':'400'}">${r.credit?fmt(r.credit):'—'}</td>
-            <td style="padding:5px 6px"><input class="tx-cell" data-id="${attrEsc(r.id)}" data-field="project" value="${attrEsc(r.project||'')}" placeholder="" style="width:110px;padding:4px 6px;border:1px solid transparent;border-radius:5px;background:transparent;color:var(--ink-3);font-size:11px"></td>
-            <td style="padding:5px 6px"><input class="tx-cell" data-id="${attrEsc(r.id)}" data-field="notes" value="${attrEsc(r.notes||'')}" placeholder="" style="width:150px;padding:4px 6px;border:1px solid transparent;border-radius:5px;background:transparent;color:var(--ink-4);font-size:11px"></td>
+            <td data-l="Date" style="padding:7px 10px;white-space:nowrap;color:var(--ink-3)">${fmtDMY(r.date)}</td>
+            <td data-l="Contact" style="padding:7px 10px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.contact||'—'}</td>
+            <td data-l="Account" class="hide-sm" style="padding:7px 10px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-3)">${r.account_name||r.account_code||'—'}</td>
+            <td data-l="Description" style="padding:7px 10px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-4)">${r.description||''}</td>
+            <td data-l="Reference" class="hide-sm" style="padding:7px 10px;color:var(--ink-4)">${r.reference||''}</td>
+            <td data-l="Out" style="padding:7px 10px;text-align:right;color:var(--pink);font-weight:${r.debit?'600':'400'}">${r.debit?fmt(r.debit):'—'}</td>
+            <td data-l="In" style="padding:7px 10px;text-align:right;color:var(--sage);font-weight:${r.credit?'600':'400'}">${r.credit?fmt(r.credit):'—'}</td>
+            <td data-l="Project" style="padding:5px 6px"><input class="tx-cell" data-id="${attrEsc(r.id)}" data-field="project" value="${attrEsc(r.project||'')}" placeholder="" style="width:110px;padding:4px 6px;border:1px solid transparent;border-radius:5px;background:transparent;color:var(--ink-3);font-size:11px"></td>
+            <td data-l="Notes" style="padding:5px 6px"><input class="tx-cell" data-id="${attrEsc(r.id)}" data-field="notes" value="${attrEsc(r.notes||'')}" placeholder="" style="width:150px;padding:4px 6px;border:1px solid transparent;border-radius:5px;background:transparent;color:var(--ink-4);font-size:11px"></td>
           </tr>`).join('')}
       </tbody>
     </table>`;
@@ -6435,7 +6445,7 @@ function exRenderTable() {
       <span style="font-size:13px;color:var(--ink-4)">${rows.length} expenses</span>
       <span style="font-size:13px;color:var(--orange)">${fmt(total)} total (ex GST)</span>
     </div>
-    <table style="width:100%;border-collapse:collapse;font-size:12px">
+    <table class="mcards" style="width:100%;border-collapse:collapse;font-size:12px">
       <thead><tr style="background:var(--bg-2);text-align:left">
         <th style="padding:8px 10px;font-weight:600;white-space:nowrap">Date</th>
         <th style="padding:8px 10px;font-weight:600">Supplier</th>
@@ -6450,15 +6460,15 @@ function exRenderTable() {
       <tbody>
         ${rows.map((e,i) => `
           <tr style="border-top:1px solid var(--border);background:${i%2===0?'var(--bg-1)':'var(--bg-2)'}">
-            <td style="padding:7px 10px;white-space:nowrap;color:var(--ink-3)">${fmtDMY(e.date)}</td>
-            <td style="padding:7px 10px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.supplier||'—'}</td>
-            <td style="padding:5px 6px"><input class="ex-cell" data-id="${attrEsc(e.id)}" data-field="description" value="${attrEsc(e.description||'')}" style="${cell}"></td>
-            <td style="padding:5px 6px"><input class="ex-cell" data-id="${attrEsc(e.id)}" data-field="category" value="${attrEsc(e.category||'')}" style="${cell};min-width:110px"></td>
-            <td style="padding:5px 6px"><input class="ex-cell" data-id="${attrEsc(e.id)}" data-field="project" value="${attrEsc(e.project||'')}" style="${cell};min-width:110px;color:var(--ink-3)"></td>
-            <td style="padding:7px 10px;text-align:right;color:var(--ink-3)">${e.qty!=null?e.qty:''}</td>
-            <td style="padding:7px 10px;text-align:right;color:var(--ink-3)">${e.unit_price!=null?fmt(e.unit_price):''}</td>
-            <td style="padding:7px 10px;text-align:right;color:var(--orange);font-weight:600">${fmt(e.amount)}</td>
-            <td style="padding:5px 6px"><input class="ex-cell" data-id="${attrEsc(e.id)}" data-field="notes" value="${attrEsc(e.notes||'')}" style="${cell};min-width:130px;color:var(--ink-4)"></td>
+            <td data-l="Date" style="padding:7px 10px;white-space:nowrap;color:var(--ink-3)">${fmtDMY(e.date)}</td>
+            <td data-l="Supplier" style="padding:7px 10px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.supplier||'—'}</td>
+            <td data-l="Description" style="padding:5px 6px"><input class="ex-cell" data-id="${attrEsc(e.id)}" data-field="description" value="${attrEsc(e.description||'')}" style="${cell}"></td>
+            <td data-l="Category" style="padding:5px 6px"><input class="ex-cell" data-id="${attrEsc(e.id)}" data-field="category" value="${attrEsc(e.category||'')}" style="${cell};min-width:110px"></td>
+            <td data-l="Project" style="padding:5px 6px"><input class="ex-cell" data-id="${attrEsc(e.id)}" data-field="project" value="${attrEsc(e.project||'')}" style="${cell};min-width:110px;color:var(--ink-3)"></td>
+            <td data-l="Qty" class="hide-sm" style="padding:7px 10px;text-align:right;color:var(--ink-3)">${e.qty!=null?e.qty:''}</td>
+            <td data-l="Unit" class="hide-sm" style="padding:7px 10px;text-align:right;color:var(--ink-3)">${e.unit_price!=null?fmt(e.unit_price):''}</td>
+            <td data-l="Amount" style="padding:7px 10px;text-align:right;color:var(--orange);font-weight:600">${fmt(e.amount)}</td>
+            <td data-l="Notes" style="padding:5px 6px"><input class="ex-cell" data-id="${attrEsc(e.id)}" data-field="notes" value="${attrEsc(e.notes||'')}" style="${cell};min-width:130px;color:var(--ink-4)"></td>
           </tr>`).join('')}
       </tbody>
     </table>`;
@@ -7977,6 +7987,19 @@ async function qlSave() {
     claudeToast('⚠ ' + e.message, 'error');
   }
 }
+
+// Receipts badge: how many are waiting in the Inbox (checked once the Hub is open, then every few minutes)
+async function hubInboxBadge() {
+  try {
+    if (!localStorage.getItem('hub_auth_token')) return;
+    const j = await siApi({ action: 'list', status: 'pending' });
+    const n = (j.rows || []).length;
+    SI.counts.pending = n;
+    const e = document.getElementById('nb-receipts');
+    if (e) { e.textContent = n; e.style.display = n ? '' : 'none'; }
+  } catch (e) {}
+}
+setTimeout(hubInboxBadge, 2500); setInterval(hubInboxBadge, 300000);
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 hubCheckAuth();
