@@ -143,6 +143,33 @@ exports.handler = async (event) => {
       try { const c = await xeroContext(); bank = c.bank ? c.bank.Name : null; if (!c.bank) note = c.banks.length ? 'More than one bank account' : 'No bank account'; } catch (e) { note = e.message; }
       return out(200, { ok: true, queued: n('queued'), failed: n('failed'), sent: n('sent'), bank, note });
     }
+    if (b.action === 'banks') {
+      const c = await xeroContext();
+      return out(200, { ok: true, chosen: c.bank ? c.bank.Name : null, banks: c.banks.map(x => ({ id: x.AccountID, name: x.Name, code: x.Code, bank_type: x.BankAccountType, currency: x.CurrencyCode })) });
+    }
+    // Xero payments (Spend Money) from the last 90 days with no file attached, and any Inbox receipt that looks like each one.
+    if (b.action === 'needs_receipt') {
+      const c = await xeroContext();
+      const since = new Date(Date.now() - 90 * 86400000), pad = (n) => String(n).padStart(2, '0');
+      const where = encodeURIComponent(`Type=="SPEND"&&Status!="DELETED"&&Date>=DateTime(${since.getUTCFullYear()},${pad(since.getUTCMonth() + 1)},${pad(since.getUTCDate())})`);
+      let txns = [];
+      for (let page = 1; page <= 4; page++) {
+        const r = await xeroCall(`BankTransactions?where=${where}&page=${page}`, 'GET', c.token, c.tenant);
+        const got = r.BankTransactions || []; txns = txns.concat(got); if (got.length < 100) break;
+      }
+      const bare = txns.filter(x => !x.HasAttachments);
+      const inbox = await rest('GET', 'receipt_inbox?select=id,status,supplier,receipt_date,total_inc,xero_status,xero_txn_id&status=in.(pending,processed)');
+      const norm = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+      const day = (s) => new Date(String(s).slice(0, 10) + 'T00:00:00Z').getTime();
+      const items = bare.map(x => {
+        const name = (x.Contact && x.Contact.Name) || '';
+        const xd = day(String(x.DateString || x.Date || '').slice(0, 10) || '1970-01-01');
+        const cands = inbox.filter(r => r.total_inc != null && Math.abs(Number(r.total_inc) - Number(x.Total)) <= 0.06 && r.receipt_date && Math.abs(day(r.receipt_date) - xd) <= 6 * 86400000 &&
+          (norm(r.supplier).includes(norm(name).slice(0, 5)) || norm(name).includes(norm(r.supplier).slice(0, 5)))).map(r => ({ id: r.id, status: r.status, xero_status: r.xero_status }));
+        return { id: x.BankTransactionID, date: String(x.DateString || '').slice(0, 10), contact: name, total: Number(x.Total), reference: x.Reference || '', candidates: cands };
+      });
+      return out(200, { ok: true, checked: txns.length, without_receipt: items.length, items });
+    }
     if (b.action === 'push') {
       const ids = Array.isArray(b.ids) && b.ids.length ? b.ids : null;
       const filter = ids ? `id=in.(${ids.map(encodeURIComponent).join(',')})` : `xero_status=eq.queued`;
