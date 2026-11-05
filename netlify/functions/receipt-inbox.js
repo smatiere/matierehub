@@ -75,7 +75,7 @@ exports.handler = async (event) => {
       const buf = Buffer.from(String(b.data || ''), 'base64');
       if (!buf.length) return out(400, { error: 'Empty file' });
       if (buf.length > 4.5 * 1024 * 1024) return out(413, { error: 'File is over 4.5 MB' });
-      const hash = crypto.createHash('sha256').update(buf).digest('hex');
+      const hash = crypto.createHash('sha256').update(buf).update(String(b.salt || '')).digest('hex');
       const dup = await rest('GET', `receipt_inbox?select=id,status,supplier,receipt_date,total_inc&file_hash=eq.${hash}`);
       if (dup.length) return out(200, { ok: true, duplicate: true, row: dup[0] });
       const day = new Date().toISOString().slice(0, 7);
@@ -84,7 +84,10 @@ exports.handler = async (event) => {
         method: 'POST', headers: sbHeaders({ 'Content-Type': mime, 'x-upsert': 'true' }), body: buf
       });
       if (!up.ok) throw new Error('File upload failed: ' + (await up.text()).slice(0, 200));
-      const parsed = await readReceipt(event, b.name || 'receipt', mime, String(b.data));
+      // prefill = already read by the multi-receipt import (no second reading)
+      const parsed = b.prefill && Array.isArray(b.prefill.items) && b.prefill.items.length
+        ? { items: b.prefill.items, supplier: b.prefill.supplier || '', check: b.prefill.check || null }
+        : await readReceipt(event, b.name || 'receipt', mime, String(b.data));
       const items = parsed ? parsed.items : [];
       const first = items[0] || {};
       const supplierRead = parsed ? (parsed.supplier || first.supplier || '') : '';
@@ -98,6 +101,35 @@ exports.handler = async (event) => {
         lines: items, check_info: parsed ? parsed.check : null, reference: parsed && parsed.check && parsed.check.invoice_no ? parsed.check.invoice_no : ''
       }))[0];
       return out(200, { ok: true, row, read: !!parsed });
+    }
+
+    // Reads a PDF (a few pages of a combined export) that holds SEVERAL receipts; returns each with its page range.
+    if (b.action === 'read_multi') {
+      const key = process.env.ANTHROPIC_API_KEY;
+      if (!key || !b.data) return out(400, { error: 'Missing data' });
+      const prompt = `This PDF holds several separate receipts / tax invoices one after another (e.g. Bunnings). A receipt may run over several pages; two short receipts may share a page. Return ONLY a JSON array, one object per receipt, in order:
+[{"first_page":1,"last_page":1,"complete":true,"supplier":"Bunnings","date":"YYYY-MM-DD","invoice_number":"","gst_status":"included","receipt_total":123.45,"lines":[{"description":"","qty":1,"unit_price":0.00,"amount":0.00}]}]
+Rules: pages are numbered from 1 within this PDF. "complete" is false only if the LAST receipt is cut off at the end of this PDF (its total is not shown yet). Include EVERY product line, none merged or skipped. unit_price and amount are EX-GST (divide printed GST-inclusive prices by 1.1 and round to 2dp; if gst_status is "none" because the receipt shows no GST, use printed prices). gst_status: "included", "none" or "unknown". receipt_total = the grand total paid as printed (inc GST) or null. date = printed date as YYYY-MM-DD; Australian receipts print DAY first (02/11/2026 = 2 November 2026). Include returns and credit notes with negative amounts. Do not include totals, GST, rounding, change or payment lines as products.`;
+      const run = async (model) => {
+        const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+          body: JSON.stringify({ model, max_tokens: 8000, messages: [{ role: 'user', content: [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: String(b.data) } }, { type: 'text', text: prompt }] }] }) });
+        const d = await r.json();
+        if (!r.ok) throw new Error((d.error && d.error.message) || 'Claude error ' + r.status);
+        const raw = d.content[0].text.trim().replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim();
+        const arr = JSON.parse(raw.slice(raw.indexOf('['), raw.lastIndexOf(']') + 1));
+        return Array.isArray(arr) ? arr : [];
+      };
+      let arr;
+      try { arr = await run('claude-haiku-4-5-20251001'); } catch (e) { arr = await run('claude-sonnet-4-6'); }
+      const receipts = arr.filter(x => x && Array.isArray(x.lines) && x.lines.length).map(x => {
+        const sum = x.lines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
+        const tot = x.receipt_total != null ? parseFloat(x.receipt_total) : null;
+        const tol = tot ? Math.max(1, Math.abs(tot) * 0.03) : 0;
+        const ok = !tot || Math.abs(sum * 1.1 - tot) <= tol || Math.abs(sum - tot) <= tol;
+        return { first_page: x.first_page, last_page: x.last_page, complete: x.complete !== false, supplier: x.supplier || '', date: x.date || '', invoice_number: x.invoice_number || '',
+          gst_status: x.gst_status || 'unknown', receipt_total: tot, check_ok: ok, lines: x.lines.map(l => ({ description: String(l.description || ''), qty: parseFloat(l.qty) || 1, unit_price: parseFloat(l.unit_price) || 0, amount: parseFloat(l.amount) || 0 })) };
+      });
+      return out(200, { ok: true, receipts });
     }
 
     if (b.action === 'list') {

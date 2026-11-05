@@ -6496,6 +6496,8 @@ async function siRender() {
       ${siPileTab('pending','Pending', c.pending||0)}${siPileTab('processed','Processed', c.processed||0)}${siPileTab('personal','Personal', c.personal||0)}${c.ignored ? siPileTab('ignored','Not a cost', c.ignored) : ''}${siPileTab('missing','Missing receipts','')}
       <button onclick="document.getElementById('si-file').click()" class="hub-pill-btn" style="margin-left:auto;background:var(--amber);color:#000;font-weight:700">＋ Add receipts</button>
       <input id="si-file" type="file" accept="image/*,.pdf" multiple style="display:none" onchange="siAddFiles(this.files);this.value=''">
+      <button onclick="document.getElementById('si-multi').click()" class="hub-pill-btn" title="A PDF holding many receipts (e.g. Bunnings PowerPass 'Print Selected')">📚 Combined PDF</button>
+      <input id="si-multi" type="file" accept="application/pdf,.pdf" multiple style="display:none" onchange="siImportMulti(this.files);this.value=''">
     </div>`;
   if (SI.pile === 'pending') body.innerHTML = head + siCardHtml();
   else if (SI.pile === 'missing') { body.innerHTML = head + '<div style="color:var(--ink-4);padding:20px;text-align:center"><span class="spinner-sm"></span> Checking your bank spending…</div>'; body.innerHTML = head + await siMissingHtml(); return; }
@@ -6523,6 +6525,65 @@ async function siAddFiles(files) {
   const q = [...list];
   await Promise.all([0,1].map(async () => { while (q.length) await one(q.shift()); }));
   claudeToast(`✓ ${done} added${dup?`, ${dup} already in`:''}${fail?`, ${fail} failed`:''}`, fail ? 'unclear' : 'success');
+  SI.pile = 'pending'; SI.idx = 0;
+  await siLoad('pending').catch(() => {});
+  renderReceipts();
+}
+
+// ── Combined PDF import: one PDF holding many receipts -> one Inbox card per receipt ──
+async function siLoadPdfLib() {
+  if (window.PDFLib) return;
+  await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js'; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc); });
+}
+function siB64(u8) { let s = ''; const CH = 0x8000; for (let i = 0; i < u8.length; i += CH) s += String.fromCharCode.apply(null, u8.subarray(i, i + CH)); return btoa(s); }
+async function siSubPdf(src, idxs) { const out = await PDFLib.PDFDocument.create(); const pgs = await out.copyPages(src, idxs); pgs.forEach(p => out.addPage(p)); return await out.save(); }
+async function siImportMulti(files) {
+  const list = [...files].filter(f => f.type === 'application/pdf' || /\.pdf$/i.test(f.name));
+  if (!list.length) return;
+  if (SI.importing) { claudeToast('An import is already running', 'unclear'); return; }
+  SI.importing = true;
+  const st = { added: 0, dup: 0, fail: 0, bad: 0 };
+  try {
+    await siLoadPdfLib();
+    for (const f of list) {
+      const src = await PDFLib.PDFDocument.load(await f.arrayBuffer(), { ignoreEncryption: true });
+      const n = src.getPageCount();
+      let start = 0, win = 4, guard = 0;
+      while (start < n && guard++ < 120) {
+        const end = Math.min(start + win, n);
+        claudeToast(`📚 ${f.name}: reading pages ${start + 1}–${end} of ${n} · ${st.added} receipts added so far…`);
+        let j;
+        try { j = await siApi({ action: 'read_multi', data: siB64(await siSubPdf(src, Array.from({ length: end - start }, (_, i) => start + i))) }); }
+        catch (e) { st.fail++; start = end; win = 4; continue; }
+        let recs = j.receipts || [];
+        const last = recs[recs.length - 1];
+        let cut = !!(last && last.complete === false && end < n);
+        if (cut) {
+          const rel = (last.first_page || 1) - 1;
+          if (rel === 0) { if (win < 16) { win += 4; continue; } cut = false; }
+          else recs = recs.slice(0, -1);
+        }
+        for (const r of recs) {
+          const a = Math.max(1, r.first_page || 1), z = Math.min(end - start, r.last_page || a);
+          const idx = Array.from({ length: z - a + 1 }, (_, i) => start + a - 1 + i);
+          try {
+            const bytes = await siSubPdf(src, idx);
+            if (bytes.length > 4.4 * 1024 * 1024) { st.fail++; continue; }
+            const items = r.lines.map(l => ({ description: l.description, qty: l.qty, unit_price: l.unit_price, amount: l.amount, date: r.date, supplier: r.supplier, category: '' }));
+            const sumEx = items.reduce((t, l) => t + l.amount, 0);
+            const res = await siApi({ action: 'add', name: `${f.name.replace(/\.pdf$/i, '')} p${start + a}-${start + z}.pdf`, mime: 'application/pdf', data: siB64(bytes), source: 'upload',
+              salt: [r.invoice_number, r.date, r.receipt_total].join('|'),
+              prefill: { supplier: r.supplier, items, check: { ok: r.check_ok, total: r.receipt_total, gst_status: r.gst_status, invoice_no: r.invoice_number, lines_inc_gst: r.gst_status === 'none' ? sumEx : Math.round(sumEx * 110) / 100 } } });
+            if (res.duplicate) st.dup++; else { st.added++; if (!r.check_ok) st.bad++; }
+          } catch (e) { st.fail++; }
+        }
+        start = cut && last ? start + ((last.first_page || 1) - 1) : end;
+        if (!cut) win = 4;
+      }
+    }
+    claudeToast(`✓ ${st.added} receipts added${st.dup ? `, ${st.dup} already in` : ''}${st.bad ? `, ${st.bad} don't add up to their total (check those)` : ''}${st.fail ? `, ${st.fail} failed` : ''}`, st.fail || st.bad ? 'unclear' : 'success');
+  } catch (e) { claudeToast('⚠ Import failed: ' + (e.message || e), 'error'); }
+  SI.importing = false;
   SI.pile = 'pending'; SI.idx = 0;
   await siLoad('pending').catch(() => {});
   renderReceipts();

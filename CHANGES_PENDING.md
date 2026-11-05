@@ -426,3 +426,6 @@ Files: `index.html`, `netlify/functions/hub-write.js` (new), `CLAUDE.md`. Verifi
 - receipt-xero: before creating Spend Money it looks for an existing Xero entry or bill (same supplier, total, ±5 days) and attaches the file to that instead.
 - Lines list opens by default. PolyGuru fixed: EXP-280 (shipping $75.96) added to Aanya - Fairlight - porch; invoice linked to its 7 expenses.
 - Missing receipts pile now asks Xero: payments (last 90 days) with no file attached, with matching Inbox receipts offered (Open / Attach).
+
+## Batch — combined PDF import (2026-11-05)
+- Inbox "📚 Combined PDF": drop a PDF holding many receipts (e.g. Bunnings PowerPass "Print Selected"); it is read 4 pages at a time (a receipt cut at a window edge is carried into the next), split into one PDF per receipt in the browser (pdf-lib), and each becomes its own Pending card with supplier, date, lines, total check, invoice number. Server: receipt-inbox `read_multi`; `add` accepts prefill + salt. Re-importing the same PDF is ignored (same files).
