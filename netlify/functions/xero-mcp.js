@@ -364,13 +364,10 @@ async function toolCreateQuote(args) {
     createShoppingList({ job_name: job_name || contact_name || q.Contact?.Name, client_name: contact_name || q.Contact?.Name, materials: materialsForList }).catch(e => ({ error: e.message }))
   ]);
 
+  // 2026-11-05: NO schedule booking at quote time — a sent quote is not a won job. The Hub adds the job
+  // to the Schedule when the quote is accepted in Xero or the project is marked Won.
   const cd = await contactDetails(accessToken, tenantId, contactRef);
-  const booking = await createBooking({
-    job_name: job_name || contact_name || q.Contact?.Name,
-    client_name: contact_name || q.Contact?.Name,
-    quote_number: q.QuoteNumber, labour_hours, title: summary || title,
-    site_address: cd.address, client_phone: cd.phone, client_email: cd.email
-  }).catch(e => ({ error: e.message }));
+  const booking = null;
   // Also keep the address on the project card (column added by supabase_projects_address.sql; ignored until it exists).
   if (cd.address) {
     sbPatch('projects', `?name=ilike.${encodeURIComponent(job_name || contact_name || q.Contact?.Name || '')}`, { site_address: cd.address }).catch(() => {});

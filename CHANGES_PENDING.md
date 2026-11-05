@@ -395,3 +395,8 @@ Files: `index.html`, `netlify/functions/hub-write.js` (new), `CLAUDE.md`. Verifi
 - Scan Receipt tab → "📥 Inbox": Pending / Processed / Personal / Missing receipts. Swipe card: photo, supplier/date/total, project chips from that day's timesheets, No project, Personal, Skip, Save & next (expenses + price library) with optional Xero draft + the original file attached.
 - Missing receipts: bank money-out in the last 90 days with no matching receipt.
 - Fix: login token now sent to hub-read / smart-note / receipt-inbox (bookings were refused → schedule showed the setup card).
+
+## Batch — quotes are not won jobs (2026-11-05)
+- create_quote no longer adds a Schedule booking. Jobs enter the Schedule only when Won (Xero ACCEPTED or status set by hand).
+- "✕ Not won" on cards and in the job sheet takes a job off (Undo; returns if later Won). Finished/Paid jobs auto-close, Lost/Inactive auto-cancel.
+- Sam - Fairlight (3 quotes) removed from the schedule.

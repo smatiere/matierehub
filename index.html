@@ -1721,12 +1721,22 @@ async function schGapFill() {
     for (const c of won) { try { await schAddFromQuote(c.quote_number, false); n++; } catch (e) {} }
     // Every Won project has a place in the pipeline.
     for (const p of (D.projects || []).filter(x => x.status === 'Won')) {
+      const back = D.bookings.find(b => b.status === 'cancelled' && /^Not won yet/.test(b.notes || '') && ((b.project || '').toLowerCase() === (p.name || '').toLowerCase() || (schProjectOf(b) || {}).id === p.id));
+      if (back) { await schSave(back.id, { status: 'approved', notes: '' }, true); n++; continue; }
       const has = D.bookings.some(b => b.status !== 'cancelled' && (schProjectOf(b) || {}).id === p.id || (b.project || '').toLowerCase() === (p.name || '').toLowerCase());
       if (has) continue;
       try {
         const nb = await schCreate({ project: p.name, title: p.baseline_scope || '', approval_source: 'hub', approved_at: todayStr(), status: 'approved', client_name: p.name, hours: Number(p.baseline_labour_hours) || null });
         n++; schFillFromContact(nb.id);
       } catch (e) {}
+    }
+    // Jobs that are finished, paid, lost or inactive do not belong in the to-schedule list.
+    for (const b of D.bookings) {
+      if (b.status !== 'approved' || b.start_date) continue;
+      const pr = schProjectOf(b);
+      if (!pr) continue;
+      if (['Finished', 'Paid'].includes(pr.status)) { await schSave(b.id, { status: 'done' }, true); n++; }
+      else if (['Lost', 'Inactive'].includes(pr.status)) { await schSave(b.id, { status: 'cancelled', notes: b.notes || 'Not won yet — ' + pr.status }, true); n++; }
     }
     for (const b of D.bookings) {
       if (['done', 'cancelled'].includes(b.status)) continue;
@@ -1915,7 +1925,7 @@ function schCard(b) {
     <div class="sch-card-sub">${attrEsc(b.title || b.client_name || '')}</div>
     <div class="sch-meta"><span>${schEnvIcon(b.env)} ${b.env || 'indoor'}</span><span>${b.hours ? hrsText(Number(b.hours)) : 'hours?'}</span>${b.start_date ? '<span>' + fmtDay(b.start_date) + '</span>' : ''}${b.site_address ? '<span class="trunc">' + attrEsc(b.site_address) + '</span>' : ''}</div>
     <div class="sch-chips">${schIssueChips(b, 2)}</div>
-    ${!b.start_date ? `<div class="sch-card-act"><button class="sch-btn" onclick="event.stopPropagation();schMove('${b.id}','${sugg}','Tentatively booked ')">Suggest ${fmtShort(sugg)}</button><button class="sch-btn" onclick="event.stopPropagation();schPlace('${b.id}')">Pick a day</button></div>` : ''}
+    ${!b.start_date ? `<div class="sch-card-act"><button class="sch-btn" onclick="event.stopPropagation();schMove('${b.id}','${sugg}','Tentatively booked ')">Suggest ${fmtShort(sugg)}</button><button class="sch-btn" onclick="event.stopPropagation();schPlace('${b.id}')">Pick a day</button><button class="sch-btn" title="Not won yet — take it off the schedule" onclick="event.stopPropagation();schRemove('${b.id}')">✕ Not won</button></div>` : ''}
   </div>`;
 }
 
@@ -2234,7 +2244,8 @@ function schOpen(id, focus, keepScroll) {
   const maps = b.site_address ? 'https://maps.apple.com/?q=' + encodeURIComponent(b.site_address) : '';
   openModal(attrEsc(b.project || b.id), `
     <div class="sch-sheet">
-      <button class="sch-btn pri" style="width:100%;margin-bottom:10px" onclick="schOpenProject('${id}')">Open project card →</button>
+      <button class="sch-btn pri" style="width:100%;margin-bottom:8px" onclick="schOpenProject('${id}')">Open project card →</button>
+      <button class="sch-btn" style="width:100%;margin-bottom:10px" onclick="schRemove('${id}');closeModal()">✕ Not won yet — take off the schedule</button>
       <div class="sch-pills">${Object.entries(SCH_STATUS).filter(([k]) => k !== 'cancelled').map(([k, v]) => `<button class="sch-pill${b.status === k ? ' on' : ''}" style="--c:${v.color}" onclick="schSetStatus('${id}','${k}')">${v.label}</button>`).join('')}</div>
       ${issues.length ? `<div class="sch-issues">${issues.map(i => `<div class="sch-iss ${i.level}">${i.level === 'bad' ? '⛔' : i.level === 'warn' ? '⚠️' : 'ℹ︎'} ${attrEsc(i.text)}</div>`).join('')}</div>` : ''}
 
@@ -2296,6 +2307,15 @@ async function schNote(id, val) {
     }
   } catch (e) {}
   if (SCH.openId === id) schOpen(id, undefined, true);
+}
+// Takes a job off the schedule because it is not won (or no longer going ahead). It comes back by itself
+// if the project is later marked Won.
+async function schRemove(id) {
+  const b = schGet(id); if (!b) return;
+  const res = await schSave(id, { status: 'cancelled', start_date: null, end_date: null, notes: b.notes || 'Not won yet — taken off the schedule' }, true);
+  if (!res) return;
+  schRender();
+  schSnack('Taken off the schedule — it returns if the job is marked Won', [{ label: 'Undo', run: async () => { await schSave(id, { status: res.before.status, start_date: res.before.start_date, end_date: res.before.end_date, notes: res.before.notes }, true); schRender(); } }]);
 }
 async function schCancel(id) { await schSetStatus(id, 'cancelled'); closeModal(); }
 
