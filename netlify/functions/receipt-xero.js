@@ -110,7 +110,12 @@ async function pushOne(ctx, r) {
   }] });
   let res, used = 'DRAFT';
   try { res = await xeroCall('BankTransactions', 'POST', ctx.token, ctx.tenant, mk('DRAFT')); }
-  catch (e) { if (!/status/i.test(e.message)) throw e; used = 'AUTHORISED'; res = await xeroCall('BankTransactions', 'POST', ctx.token, ctx.tenant, mk('AUTHORISED')); }
+  catch (e1) {
+    // Xero may not allow a draft Spend Money: try again as an approved entry, and report BOTH reasons if that fails too.
+    used = 'AUTHORISED';
+    try { res = await xeroCall('BankTransactions', 'POST', ctx.token, ctx.tenant, mk('AUTHORISED')); }
+    catch (e2) { throw new Error(`Xero said: ${String(e2.message).replace(/^Xero API error \d+ on POST BankTransactions: /, '')} (draft attempt: ${String(e1.message).replace(/^Xero API error \d+ on POST BankTransactions: /, '').slice(0, 160)})`); }
+  }
   const txn = res.BankTransactions && res.BankTransactions[0];
   if (!txn || !txn.BankTransactionID) throw new Error('Xero did not return the new transaction');
   // the original file

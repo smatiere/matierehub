@@ -105,7 +105,12 @@ async function xeroCall(endpoint, method, accessToken, tenantId, body) {
   const headers = { 'Authorization': `Bearer ${accessToken}`, 'Xero-Tenant-Id': tenantId, 'Accept': 'application/json' };
   if (bodyStr) { headers['Content-Type'] = 'application/json'; headers['Content-Length'] = Buffer.byteLength(bodyStr); }
   const result = await httpRequest({ hostname: 'api.xero.com', path: `/api.xro/2.0/${endpoint}`, method, headers }, bodyStr);
-  if (result.status >= 400) throw new Error(`Xero API error ${result.status} on ${method} ${endpoint}: ${result.body.slice(0, 400)}`);
+  if (result.status >= 400) {
+    // surface the actual validation messages first (they sit at the end of Xero's long reply)
+    let why = '';
+    try { const j = JSON.parse(result.body); const msgs = []; (j.Elements || []).forEach(e => (e.ValidationErrors || []).forEach(v => msgs.push(v.Message))); why = msgs.join(' | ') || j.Message || j.Detail || ''; } catch (e) { /* not JSON */ }
+    throw new Error(`Xero API error ${result.status} on ${method} ${endpoint}: ${why || result.body.slice(0, 400)}`);
+  }
   return JSON.parse(result.body);
 }
 
