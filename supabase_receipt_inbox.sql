@@ -19,3 +19,7 @@ create table if not exists receipt_inbox (
 alter table receipt_inbox enable row level security;   -- no policies: only the gated function (service key) can read it
 grant all on receipt_inbox to service_role;
 insert into storage.buckets (id, name, public) values ('receipts', 'receipts', false) on conflict (id) do nothing;
+
+-- 2026-11-05 (b): Xero queue columns
+alter table receipt_inbox add column if not exists xero_status text default '', add column if not exists xero_error text default '',
+  add column if not exists tax_mode text default 'gst', add column if not exists reference text default '', add column if not exists xero_sent_at timestamptz;

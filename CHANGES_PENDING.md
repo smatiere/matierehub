@@ -406,3 +406,9 @@ Files: `index.html`, `netlify/functions/hub-write.js` (new), `CLAUDE.md`. Verifi
 - Card redesign (phone-first, aligned grid): PDF drawn inline (pdf.js, up to 4 pages) / photo inline; supplier suggested (from reading, else the sender's domain) with a list of known suppliers; total suggested from the read; reference/invoice no.; description; Xero account (category), GST mode (10% / GST-free / BAS excluded); Paid from (remembered); job chips. Per-supplier memory (category, GST, project/no project).
 - No lines read? Enter the total + what it was for and it saves as one line. Xero draft uses Reference, tax type and attaches the file.
 - Inbox learns: suppliers usually saved with no project (80%+ of 3+ past expenses, any device) default to No project; bank account remembered per supplier; clear hint when Xero is not connected on the device.
+
+## Batch — Receipts queue to Xero in batches (2026-11-05)
+- No more per-receipt Xero step or "Connect Xero" on the phone. Save & next saves to expenses and marks the receipt "queued". New `receipt-xero.js` sends queued receipts to Xero as Spend Money (file attached) using the server's own Xero link (same as the quoting connector); bank account auto-picked (only active bank account, or XERO_RECEIPTS_BANK_ID).
+- Processed pile: shows Waiting / In Xero ✓ (+file) / Failed (reason) per receipt, "Send N to Xero now", per-receipt Send/Retry.
+- Workflow `receipts-to-xero.yml`: manual for now; schedule lines ready to un-comment (twice daily) after the first batch is checked.
+- Needs supabase columns xero_status, xero_error, tax_mode, reference, xero_sent_at (already run).

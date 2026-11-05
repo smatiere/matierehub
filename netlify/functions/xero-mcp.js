@@ -565,3 +565,6 @@ exports.handler = async function (event) {
     return respondErr(-32603, e.message);
   }
 };
+
+// Shared with receipt-xero.js (same server-side Xero connection, no browser sign-in needed).
+exports.xeroServer = { getAccessToken, getTenantId, xeroCall };

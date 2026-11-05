@@ -11,6 +11,9 @@
 [functions."receipt-inbox"]
   timeout = 26
 
+[functions."receipt-xero"]
+  timeout = 26
+
 [functions."xero-mcp"]
   timeout = 26
 

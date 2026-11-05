@@ -13,7 +13,7 @@ const { guardHub } = require('../lib/hub-guard');
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const KEY = process.env.SUPABASE_SERVICE_KEY;
 const BUCKET = 'receipts';
-const EDITABLE = ['status', 'supplier', 'receipt_date', 'total_inc', 'lines', 'project', 'no_project', 'expense_ids', 'xero_txn_id', 'xero_attached', 'notes'];
+const EDITABLE = ['status', 'supplier', 'receipt_date', 'total_inc', 'lines', 'project', 'no_project', 'expense_ids', 'xero_txn_id', 'xero_attached', 'notes', 'xero_status', 'xero_error', 'tax_mode', 'reference'];
 const ALLOWED_MIME = /^(image\/(jpeg|png|webp|heic|heif)|application\/pdf)$/;
 
 const sbHeaders = (extra) => ({ apikey: KEY, Authorization: `Bearer ${KEY}`, ...(extra || {}) });

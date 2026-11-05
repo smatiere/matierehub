@@ -628,7 +628,7 @@ button,.tab,.hub-pill-btn,select,input[type=checkbox]{-webkit-tap-highlight-colo
   const plainFetch = window.fetch.bind(window);
   window.fetch = function (input, init) {
     const url = typeof input === 'string' ? input : (input && input.url) || '';
-    if (/\/\.netlify\/functions\/(hub-write|claude-parse|hub-read|smart-note|receipt-inbox)/.test(url)) {
+    if (/\/\.netlify\/functions\/(hub-write|claude-parse|hub-read|smart-note|receipt-inbox|receipt-xero)/.test(url)) {
       const token = localStorage.getItem('hub_auth_token');
       if (token) {
         const headers = new Headers((init && init.headers) || (typeof input !== 'string' && input.headers) || {});
@@ -6481,7 +6481,10 @@ async function siRender() {
     </div>`;
   if (SI.pile === 'pending') body.innerHTML = head + siCardHtml();
   else if (SI.pile === 'missing') { body.innerHTML = head + '<div style="color:var(--ink-4);padding:20px;text-align:center"><span class="spinner-sm"></span> Checking your bank spending…</div>'; body.innerHTML = head + await siMissingHtml(); return; }
-  else body.innerHTML = head + siListHtml();
+  else {
+    body.innerHTML = head + siListHtml();
+    if (SI.pile === 'processed') siXeroStatus().then(j => { const el = document.getElementById('si-xbar'); if (el && j.bank) el.insertAdjacentHTML('beforeend', ` <span style="color:var(--ink-4)">· paid from ${attrEsc(j.bank)}</span>`); else if (el && j.note) el.insertAdjacentHTML('beforeend', ` <span style="color:var(--pink)">· ${attrEsc(j.note)}</span>`); });
+  }
   if (SI.pile === 'pending' && SI.rows[SI.idx]) { siWireCard(); siRereadEmpty(); }
 }
 
@@ -6596,7 +6599,7 @@ function siCardHtml() {
       <div class="si-note">Unit price is ex GST. Qty × unit = line.</div>
     </details>
 
-    ${localStorage.getItem('xero_access_token') ? rcRenderXeroExportBox() : '<div class="si-note" style="padding:10px 12px;background:var(--bg-2);border-radius:8px;color:var(--amber)">Xero is not connected on this device, so Save only saves here. Tap <b>Connect Xero</b> (top right) to also create the Xero entry and attach the receipt.</div>'}
+    <div class="si-note" style="padding:9px 12px;background:var(--bg-2);border-radius:8px;color:var(--ink-3)">Save puts it in your expenses. It goes to Xero (with the file attached) in the next batch — see <b>Processed</b>.</div>
     <div class="si-actions">
       <button id="si-save" class="si-primary" onclick="siSave()">Save &amp; next</button>
       <button onclick="siPersonal()">Personal</button>
@@ -6610,7 +6613,6 @@ function siWireCard() {
   const pi = document.getElementById('si-proj');
   if (pi) pi.addEventListener('input', () => { SI.proj = pi.value.trim(); SI.noProj = false; SI.touched = true; });
   ['si-cat','si-tax'].forEach(id => { const el = document.getElementById(id); if (el) el.addEventListener('change', () => { SI[id === 'si-cat' ? 'cat' : 'tax'] = el.value; }); });
-  rcPopulateXeroPayment().then(() => { const m = siMem(siGuessSupplier(r)); const sel = document.getElementById('rc-xero-payment'); if (sel && m.bank && [...sel.options].some(o => o.value === m.bank)) { sel.value = m.bank; RC.xeroBankAccountId = m.bank; } });
   siUrl(r.id).then(u => siShowFile(r, u)).catch(() => { const el = document.getElementById('si-preview'); if (el) el.textContent = 'Could not load the receipt'; });
 }
 // Shows the receipt right on the page: photos as pictures, PDFs drawn page by page.
@@ -6702,7 +6704,6 @@ async function siSave() {
   lines.forEach(l => { if (cat) l.category = cat; });
   const items = lines.map(l => ({ action:'new', type:'expense', date, supplier: sup, description: l.description || '', category: l.category || '', project: project || '',
     qty: parseFloat(l.qty)||1, unit_price: parseFloat(l.unit_price)||0, amount: Math.round((parseFloat(l.qty)||1)*(parseFloat(l.unit_price)||0)*100)/100 }));
-  const wantsXero = !!(document.getElementById('rc-xero-export') || {}).checked;
   SI.busy = true; const btn = document.getElementById('si-save'); if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
   try {
     const res = await fetch('/.netlify/functions/claude-parse', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ pendingAction:{ action:'expense_batch', items } }) });
@@ -6710,50 +6711,61 @@ async function siSave() {
     if (data.status !== 'success') throw new Error(data.message || 'Save failed');
     if (data.entries && D) { D.expense_log = D.expense_log || []; data.entries.forEach(e => D.expense_log.push(e)); }
     const ids = (data.entries || []).map(e => e.id);
-    siMemSave(sup, { cat: cat || undefined, tax, project: project || undefined, noProj: !project, bank: RC.xeroBankAccountId || undefined });
-    await siApi({ action:'update', id:r.id, fields:{ status:'processed', supplier:sup, receipt_date:date, total_inc: isNaN(total) ? r.total_inc : total, lines: items.map(i => ({ description:i.description, qty:i.qty, unit_price:i.unit_price, amount:i.amount, category:i.category })), project, no_project:!project, expense_ids:ids, notes: [ref && ('Ref ' + ref), desc].filter(Boolean).join(' · ') } });
+    siMemSave(sup, { cat: cat || undefined, tax, project: project || undefined, noProj: !project });
+    await siApi({ action:'update', id:r.id, fields:{ status:'processed', supplier:sup, receipt_date:date, total_inc: isNaN(total) ? r.total_inc : total, lines: items.map(i => ({ description:i.description, qty:i.qty, unit_price:i.unit_price, amount:i.amount, category:i.category })), project, no_project:!project, expense_ids:ids, notes: desc || '', reference: ref, tax_mode: tax, xero_status: 'queued', xero_error: '' } });
     SI.counts.processed = (SI.counts.processed||0) + 1;
     claudeToast(`✓ ${items.length} line${items.length>1?'s':''} saved${project?' to '+project:''}`, 'success');
-    if (wantsXero) await siXero(r.id, items, sup + ' ' + date, { reference: ref, tax });
     siAdvance(r.id);
   } catch (e) { claudeToast('⚠ ' + (e.message||'Save failed'), 'error'); }
   finally { SI.busy = false; const b2 = document.getElementById('si-save'); if (b2) { b2.disabled = false; b2.textContent = 'Save & next'; } }
 }
-// Creates the Xero draft (Spend Money) and attaches the original file to it.
-async function siXero(id, items, label, opts) {
-  const txn = await rcExportToXero(items, label, opts);
-  if (!txn || !txn.BankTransactionID) return false;
-  try {
-    const tok = await getXeroToken();
-    await siApi({ action:'xero_attach', id, txn_id: txn.BankTransactionID, access_token: tok, tenant_id: localStorage.getItem('xero_tenant_id') });
-    claudeToast('📎 Receipt attached to the Xero draft', 'success');
-    return true;
-  } catch (e) { claudeToast('⚠ Draft made in Xero, but the file did not attach: ' + e.message, 'error'); return false; }
-}
-
 // ── Processed / Personal lists ──
 function siListHtml() {
   if (!SI.rows.length) return `<div style="padding:40px 20px;text-align:center;color:var(--ink-4)">Nothing here yet.</div>`;
   const proc = SI.pile === 'processed';
-  return `<div style="max-width:760px;margin:0 auto">` + SI.rows.map(r => {
-    const xero = r.xero_attached ? '<span style="color:var(--sage)">Xero ✓ attached</span>' : (r.xero_txn_id ? '<span style="color:var(--amber)">in Xero, no file</span>' : '<span style="color:var(--ink-4)">not in Xero</span>');
+  const queued = SI.rows.filter(r => r.xero_status === 'queued').length;
+  const failed = SI.rows.filter(r => r.xero_status === 'failed').length;
+  const bar = proc ? `<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 12px;margin-bottom:10px;background:var(--bg-2);border-radius:8px;font-size:12px;color:var(--ink-3)">
+      <span id="si-xbar" style="flex:1;min-width:160px">${queued ? `<b style="color:var(--amber)">${queued} waiting for Xero</b>` : 'Nothing waiting for Xero'}${failed ? ` · <b style="color:var(--pink)">${failed} failed</b>` : ''}</span>
+      <button class="hub-pill-btn active" onclick="siPush()" ${queued ? '' : 'disabled style="opacity:.4"'}>Send ${queued || ''} to Xero now</button></div>` : '';
+  return `<div style="max-width:760px;margin:0 auto">` + bar + SI.rows.map(r => {
+    const st = r.xero_status || '';
+    const xero = st === 'sent' ? `<span style="color:var(--sage)">In Xero ✓${r.xero_attached ? ' · file attached' : ' · no file'}</span>${r.xero_error ? ` <span style="color:var(--amber)">· ${attrEsc(r.xero_error)}</span>` : ''}`
+      : st === 'queued' ? '<span style="color:var(--amber)">Waiting for Xero</span>'
+      : st === 'failed' ? `<span style="color:var(--pink)">⚠ Xero failed: ${attrEsc(r.xero_error || 'unknown')}</span>`
+      : '<span style="color:var(--ink-4)">Not sent to Xero</span>';
     return `<div style="display:flex;gap:10px;align-items:center;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;background:var(--bg-1)">
       <div style="flex:1;min-width:0"><div style="font-weight:600;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${attrEsc(r.supplier||r.file_name||'Receipt')} <span style="color:var(--ink-4);font-weight:400">· ${fmtDMY((r.receipt_date||'').slice(0,10))} · ${r.total_inc!=null?fmt(r.total_inc,2):''}</span></div>
         <div style="font-size:11px;color:var(--ink-4)">${proc ? (r.no_project ? 'No project' : attrEsc(r.project||'')) + ' · ' + xero : (r.source==='email'?'✉️ email':'📸')}</div></div>
       <button class="hub-pill-btn" onclick="siOpenFile('${r.id}')">View</button>
-      ${proc && !r.xero_attached ? `<button class="hub-pill-btn" onclick="siSendXero('${r.id}')">To Xero</button>` : ''}
+      ${proc && st !== 'sent' ? `<button class="hub-pill-btn" onclick="siPush(['${r.id}'])">${st === 'failed' ? 'Retry' : 'To Xero'}</button>` : ''}
       ${!proc ? `<button class="hub-pill-btn" onclick="siRestore('${r.id}')">Restore</button>` : ''}
     </div>`; }).join('') + `</div>`;
 }
 async function siOpenFile(id) { try { const u = await siUrl(id); window.open(u.url, '_blank'); } catch (e) { claudeToast('⚠ ' + e.message, 'error'); } }
 async function siRestore(id) { try { await siApi({ action:'update', id, fields:{ status:'pending' } }); await siLoad(SI.pile); SI.counts.pending = (SI.counts.pending||0)+1; siRender(); } catch (e) { claudeToast('⚠ ' + e.message, 'error'); } }
-async function siSendXero(id) {
-  const r = SI.rows.find(x => x.id === id); if (!r) return;
-  if (!localStorage.getItem('xero_access_token')) { claudeToast('Connect Xero first (top right)', 'unclear'); return; }
-  if (!RC.xeroBankAccountId) { try { await rcLoadXeroAccounts(); const { bankAccounts } = await rcLoadXeroAccounts(); if (bankAccounts.length) RC.xeroBankAccountId = bankAccounts[0].AccountID; } catch (e) {} }
-  claudeToast('Sending to Xero…');
-  const ok = await siXero(id, siItems(r, r.project), (r.supplier||'') + ' ' + (r.receipt_date||''), { tax: siMem(r.supplier).tax || 'gst', reference: String(r.notes||'').match(/Ref ([^·]+)/) ? RegExp.$1.trim() : '' });
-  if (ok) { r.xero_attached = true; siRender(); }
+// Sends queued receipts to Xero (server-side: no Xero sign-in on the phone). Loops until none are left.
+async function siPush(ids) {
+  if (SI.pushing) return;
+  SI.pushing = true; let ok = 0, bad = 0, left = 1, guard = 0;
+  try {
+    claudeToast('Sending to Xero…');
+    while (left > 0 && guard++ < 15) {
+      const r = await fetch('/.netlify/functions/receipt-xero', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ action:'push', ids: ids || undefined }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.error || 'Xero error ' + r.status);
+      (j.results || []).forEach(x => x.ok ? ok++ : bad++);
+      left = ids ? 0 : j.remaining;
+      if (!(j.results || []).length) break;
+    }
+    claudeToast(`✓ ${ok} sent to Xero${bad ? `, ${bad} failed — see Processed` : ''}`, bad ? 'unclear' : 'success');
+  } catch (e) { claudeToast('⚠ ' + e.message, 'error'); }
+  SI.pushing = false;
+  await siLoad('processed').catch(() => {});
+  siRender();
+}
+async function siXeroStatus() {
+  try { const r = await fetch('/.netlify/functions/receipt-xero', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ action:'status' }) }); return await r.json(); } catch (e) { return {}; }
 }
 
 // ── Missing receipts: money out of the bank with no receipt anywhere ──
