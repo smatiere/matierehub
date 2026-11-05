@@ -6470,9 +6470,21 @@ async function siSetPile(v) {
   try { await siLoad(v); } catch (e) { claudeToast('⚠ ' + e.message, 'error'); }
   siRender();
 }
+async function siLoadTaxHist() {
+  if (SI.taxHist !== undefined) return;
+  SI.taxHist = null;
+  try {
+    const j = await siApi({ action:'list', status:'processed' });
+    const m = {};
+    j.rows.slice().sort((a, b) => String(a.updated_at).localeCompare(String(b.updated_at))).forEach(r => { if (r.supplier && r.tax_mode) m[String(r.supplier).toLowerCase()] = r.tax_mode; });
+    SI.taxHist = m;
+    if (SI.pile === 'pending' && RC.view === 'inbox') siRender();
+  } catch (e) { SI.taxHist = {}; }
+}
 async function siRender() {
   const body = document.getElementById('rc-body');
   if (!body) return;
+  siLoadTaxHist();
   const c = SI.counts;
   const head = `
     <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px">
@@ -6563,7 +6575,12 @@ function siCardHtml() {
   const cats = (typeof EX_CATEGORIES !== 'undefined' && EX_CATEGORIES) ? EX_CATEGORIES : [];
   const lineCat = (lines.find(l => l.category) || {}).category || '';
   const cat = SI.cat != null ? SI.cat : (mem.cat || lineCat || siHabitField(sup, 'category', 0.6) || '');
-  const tax = SI.tax || mem.tax || 'gst';
+  // GST mode: what this receipt says, else what we learned from this supplier, else 10%.
+  const detected = (r.check_info && r.check_info.gst_status) || 'unknown';
+  const hist = (SI.taxHist || {})[String(sup).toLowerCase()] || '';
+  const fromReceipt = detected === 'none' ? 'free' : detected === 'included' ? 'gst' : '';
+  const tax = SI.tax || fromReceipt || mem.tax || hist || 'gst';
+  const taxWhy = SI.tax ? '' : fromReceipt ? (detected === 'none' ? 'no GST shown on this invoice' : 'GST shown on this invoice') : (mem.tax || hist) ? 'learned from this supplier\'s past invoices' : 'assumed — nothing to go on';
   const src = r.source === 'email' ? `✉️ ${attrEsc(r.email_from || 'email')}` : r.source === 'photo' ? '📸 Photo' : '⬆️ Upload';
   const sug = siSuggest((r.receipt_date||'').slice(0,10));
   const habit = siHabit(sup);
@@ -6591,7 +6608,7 @@ function siCardHtml() {
     <div class="si-sec">Accounting</div>
     <div class="si-grid">
       <label>Category (Xero account)<select id="si-cat"><option value="">— choose —</option>${cats.map(c => `<option ${c===cat?'selected':''}>${attrEsc(c)}</option>`).join('')}${cat && !cats.includes(cat) ? `<option selected>${attrEsc(cat)}</option>` : ''}</select></label>
-      <label>GST<select id="si-tax"><option value="gst" ${tax==='gst'?'selected':''}>GST 10% included</option><option value="free" ${tax==='free'?'selected':''}>No GST (GST-free)</option><option value="excl" ${tax==='excl'?'selected':''}>BAS excluded</option></select></label>
+      <label>GST<select id="si-tax"><option value="gst" ${tax==='gst'?'selected':''}>GST 10% included</option><option value="free" ${tax==='free'?'selected':''}>No GST (GST-free)</option><option value="excl" ${tax==='excl'?'selected':''}>BAS excluded</option></select><small style="color:var(--ink-4)">${taxWhy}</small></label>
     </div>
 
     <div class="si-sec">Which job?</div>
@@ -6724,9 +6741,12 @@ async function siSave() {
     if (!(total > 0)) { claudeToast('Enter the total so there is something to save', 'unclear'); return; }
     const ex = tax === 'gst' ? Math.round(total / 1.1 * 100) / 100 : total;
     lines = [{ description: desc || sup, qty: 1, unit_price: ex, amount: ex }];
-  } else if (tax !== 'gst') {
-    // the reader divides printed prices by 1.1; with no GST the printed price IS the cost
-    lines = lines.map(l => { const u = Math.round((parseFloat(l.unit_price)||0) * 1.1 * 100) / 100; return { ...l, unit_price: u, amount: Math.round(u * (parseFloat(l.qty)||1) * 100) / 100 }; });
+  } else {
+    // The reader gives prices ex GST by dividing by 1.1, EXCEPT when it saw no GST on the invoice (then prices are as printed).
+    const readerDivided = !(r.check_info && r.check_info.gst_status === 'none');
+    const wantDivided = tax === 'gst';
+    if (readerDivided && !wantDivided) lines = lines.map(l => { const u = Math.round((parseFloat(l.unit_price)||0) * 1.1 * 100) / 100; return { ...l, unit_price: u, amount: Math.round(u * (parseFloat(l.qty)||1) * 100) / 100 }; });
+    else if (!readerDivided && wantDivided) lines = lines.map(l => { const u = Math.round((parseFloat(l.unit_price)||0) / 1.1 * 100) / 100; return { ...l, unit_price: u, amount: Math.round(u * (parseFloat(l.qty)||1) * 100) / 100 }; });
   }
   lines.forEach(l => { if (cat) l.category = cat; });
   const items = lines.map(l => ({ action:'new', type:'expense', date, supplier: sup, description: l.description || '', category: l.category || '', project: (l.project || '').trim() || project || '',
