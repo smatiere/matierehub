@@ -634,7 +634,7 @@ button,.tab,.hub-pill-btn,select,input[type=checkbox]{-webkit-tap-highlight-colo
   const plainFetch = window.fetch.bind(window);
   window.fetch = function (input, init) {
     const url = typeof input === 'string' ? input : (input && input.url) || '';
-    if (/\/\.netlify\/functions\/(hub-write|claude-parse|hub-read|smart-note|receipt-inbox|receipt-xero)/.test(url)) {
+    if (/\/\.netlify\/functions\/(hub-write|claude-parse|hub-read|hub-track|smart-note|receipt-inbox|receipt-xero)/.test(url)) {
       const token = localStorage.getItem('hub_auth_token');
       if (token) {
         const headers = new Headers((init && init.headers) || (typeof input !== 'string' && input.headers) || {});
@@ -1108,6 +1108,7 @@ function fmt(n, decimals=0) {
 function pct(n) { return (n||0).toFixed(1) + '%'; }
 
 function showTab(name, el) {
+  try { hubTrack('view', name); } catch (e) {}
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   (el || event.target).classList.add('active');
@@ -7791,6 +7792,38 @@ async function bootHub() {
   updateXeroBtn();
   loadData();
 }
+
+// ── Usage tracking (2026-11-06) ───────────────────────────────────────────
+// Records which tabs are opened and which buttons are tapped (function name only,
+// never text or client names) into usage_events via hub-track. Failures are silent.
+const HUB_SESSION = Math.random().toString(36).slice(2, 10);
+const HUB_DEVICE = /iPhone/.test(navigator.userAgent) ? 'iphone' : /iPad/.test(navigator.userAgent) ? 'ipad'
+  : /Android/.test(navigator.userAgent) ? 'android' : /Mac/.test(navigator.userAgent) ? (navigator.maxTouchPoints > 1 ? 'ipad' : 'mac') : 'other';
+let hubTrackTab = 'timesheet', hubTrackQ = [];
+function hubTrack(kind, name) {
+  if (kind === 'view') hubTrackTab = name;
+  hubTrackQ.push({ session: HUB_SESSION, device: HUB_DEVICE, standalone: !!(navigator.standalone || matchMedia('(display-mode: standalone)').matches),
+    tab: hubTrackTab, kind, name, ts: new Date().toISOString() });
+  if (hubTrackQ.length >= 10) hubTrackFlush();
+}
+function hubTrackFlush() {
+  if (!hubTrackQ.length || !localStorage.getItem('hub_auth_token')) return;
+  const events = hubTrackQ.splice(0, 50);
+  fetch('/.netlify/functions/hub-track', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ events }) }).catch(() => {});
+}
+document.addEventListener('click', function (e) {
+  try {
+    const el = e.target.closest && e.target.closest('button,[onclick],a,summary,.tab,.hub-pill-btn,.ts-range-btn');
+    if (!el) return;
+    const m = (el.getAttribute('onclick') || '').match(/^\s*(?:return\s+)?([A-Za-z_$][\w$]*)\s*\(/);
+    const name = m ? m[1] : (el.id || '');
+    if (!name || name === 'showTab') return;   // tab opens are recorded as views
+    hubTrack('tap', name);
+  } catch (err) {}
+}, true);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') hubTrackFlush(); });
+setInterval(hubTrackFlush, 20000);
+hubTrack('open', HUB_DEVICE);
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 hubCheckAuth();

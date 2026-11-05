@@ -2,6 +2,14 @@
 
 **Purpose:** accumulate many edits locally, deploy ONCE. Editing files is free; only a push to `main` triggers a Netlify build (= credits). See CLAUDE.md → "Deploying changes" for the full workflow.
 
+## Feature — 2026-11-06 (usage tracking, to learn what gets used on iPhone)
+
+Records tab opens and button taps (function name only, no text, no client names) so the HUB can be
+improved from real usage. **RUN ONCE in Supabase SQL editor: `supabase_usage_events.sql`** (until then
+tracking fails silently, nothing breaks). New `netlify/functions/hub-track.js` (insert-only, password-gated);
+`hub-read.js` can read `usage_events`; `index.html` has `hubTrack()` + a click listener before `// ── Boot`.
+Review after 2-3 weeks: rank tabs/buttons by device, then re-score iPhone UX.
+
 ## Feature — 2026-11-01 (Schedule tab: pipeline + bookings calendar)
 
 Seb asked for a pipeline / future-bookings tool: approved quotes (Xero or direct in the Hub)

@@ -3,7 +3,7 @@
 const { guardHub } = require('../lib/hub-guard');
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
-const READABLE = { bookings: 'select=*&order=created_at.desc' };
+const READABLE = { bookings: 'select=*&order=created_at.desc', usage_events: 'select=*&order=ts.desc&limit=20000' };
 
 exports.handler = async (event) => {
   const headers = {
