@@ -602,7 +602,7 @@ button,.tab,.hub-pill-btn,select,input[type=checkbox]{-webkit-tap-highlight-colo
   const plainFetch = window.fetch.bind(window);
   window.fetch = function (input, init) {
     const url = typeof input === 'string' ? input : (input && input.url) || '';
-    if (/\/\.netlify\/functions\/(hub-write|claude-parse)/.test(url)) {
+    if (/\/\.netlify\/functions\/(hub-write|claude-parse|hub-read|smart-note|receipt-inbox)/.test(url)) {
       const token = localStorage.getItem('hub_auth_token');
       if (token) {
         const headers = new Headers((init && init.headers) || (typeof input !== 'string' && input.headers) || {});
