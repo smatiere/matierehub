@@ -46,11 +46,14 @@ exports.handler = async (event) => {
   };
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
   if (event.httpMethod !== 'POST') return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
-  const denied = guardHub(event, headers);
-  if (denied) return denied;
   const out = (code, o) => ({ statusCode: code, headers, body: JSON.stringify(o) });
   try {
     const b = JSON.parse(event.body || '{}');
+    // RECEIPT_INBOX_KEY (given to the Comms Hub / iPhone Shortcut) can ONLY add receipts. Everything else needs the Hub login.
+    const sent = (event.headers && (event.headers['x-hub-key'] || event.headers['X-Hub-Key'])) || '';
+    const inboxKey = process.env.RECEIPT_INBOX_KEY;
+    const addOnly = inboxKey && b.action === 'add' && sent && sent.length === inboxKey.length && crypto.timingSafeEqual(Buffer.from(sent), Buffer.from(inboxKey));
+    if (!addOnly) { const denied = guardHub(event, headers); if (denied) return denied; }
 
     if (b.action === 'add') {
       const mime = String(b.mime || '').toLowerCase();
