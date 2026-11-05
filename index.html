@@ -442,6 +442,32 @@ button,.tab,.hub-pill-btn,select,input[type=checkbox]{-webkit-tap-highlight-colo
   .modal-body{overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:max(20px,env(safe-area-inset-bottom))}
   #sch-snack{bottom:calc(92px + env(safe-area-inset-bottom))}
 }
+
+/* ══ Phone navigation (2026-11-06) — bottom bar for the 4 most-used tabs + "More" sheet.
+   Based on usage: Timesheets, Projects, Schedule, Scan Receipt. Desktop keeps the top tab strip. ══ */
+#hub-nav,#hub-more{display:none}
+@media (max-width:720px){
+  .tabs{display:none}
+  #hub-nav{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:520;background:#000;border-top:1px solid var(--border-2);padding:0 max(4px,env(safe-area-inset-left)) env(safe-area-inset-bottom) max(4px,env(safe-area-inset-right))}
+  #hub-nav button{flex:1;min-height:56px;background:none;border:none;color:var(--ink-4);font:inherit;font-size:10.5px;font-weight:600;letter-spacing:.04em;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;position:relative;touch-action:manipulation}
+  #hub-nav button .ni{font-size:20px;line-height:1}
+  #hub-nav button.active{color:var(--amber)}
+  #hub-nav .nbadge{position:absolute;top:5px;left:calc(50% + 6px);background:var(--orange);color:#fff;border-radius:10px;padding:1px 6px;font-size:10px;font-weight:700;display:none}
+  #claude-bar{bottom:calc(56px + env(safe-area-inset-bottom));padding-bottom:10px}
+  #app{padding-bottom:calc(150px + env(safe-area-inset-bottom))}
+  #claude-toast{bottom:calc(130px + env(safe-area-inset-bottom))}
+  #sch-snack{bottom:calc(150px + env(safe-area-inset-bottom))}
+  #hub-more{position:fixed;inset:0;z-index:700;background:rgba(0,0,0,.6);align-items:flex-end}
+  #hub-more.open{display:flex}
+  #hub-more .sheet{width:100%;background:var(--bg-2);border-radius:18px 18px 0 0;padding:8px 12px calc(14px + env(safe-area-inset-bottom));animation:sheetIn .22s ease;max-height:80vh;overflow-y:auto}
+  #hub-more .sheet-h{font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-4);padding:12px 6px 6px}
+  #hub-more .sheet button{width:100%;min-height:52px;display:flex;align-items:center;justify-content:space-between;background:none;border:none;border-bottom:1px solid var(--border);color:var(--ink);font:inherit;font-size:16px;padding:0 6px;text-align:left;touch-action:manipulation}
+  #hub-more .sheet button.active{color:var(--amber);font-weight:700}
+  #hub-more .sheet .mbadge{background:var(--orange);color:#fff;border-radius:10px;padding:1px 8px;font-size:12px;font-weight:700}
+  /* bigger thumb targets on the common action buttons */
+  .btn-primary,.btn-refresh,.pnl-cat-btn,#claude-send-btn{min-height:44px}
+  #claude-add-btn{min-width:44px;min-height:44px}
+}
 @media (max-width:720px){.hide-sm{display:none}}
 @keyframes sheetIn{from{transform:translateY(40px);opacity:0}to{transform:none;opacity:1}}
 
@@ -625,6 +651,26 @@ button,.tab,.hub-pill-btn,select,input[type=checkbox]{-webkit-tap-highlight-colo
   </div>
   <span id="claude-bar-status"></span>
   <button id="claude-send-btn" onclick="claudeBarSend()">Log</button>
+</div>
+<!-- Phone bottom navigation + More sheet (visible on phones only; see CSS "Phone navigation") -->
+<nav id="hub-nav" aria-label="Main">
+  <button data-tab="timesheet" onclick="hubGo('timesheet')"><span class="ni">⏱</span>Timesheets</button>
+  <button data-tab="projects" onclick="hubGo('projects')"><span class="ni">📁</span>Projects</button>
+  <button data-tab="schedule" onclick="hubGo('schedule')"><span class="ni">📅</span>Schedule<span class="nbadge" id="nb-schedule"></span></button>
+  <button data-tab="receipts" onclick="hubGo('receipts')"><span class="ni">🧾</span>Receipts</button>
+  <button data-tab="more" onclick="hubMore(true)"><span class="ni">☰</span>More<span class="nbadge" id="nb-more"></span></button>
+</nav>
+<div id="hub-more" onclick="if(event.target===this)hubMore(false)">
+  <div class="sheet">
+    <div class="sheet-h">More</div>
+    <button data-tab="action" onclick="hubGo('action')">For Action <span class="mbadge" id="mb-action" style="display:none"></span></button>
+    <button data-tab="shopping" onclick="hubGo('shopping')">Shopping List</button>
+    <button data-tab="expenses" onclick="hubGo('expenses')">Expenses</button>
+    <button data-tab="transactions" onclick="hubGo('transactions')">Transactions</button>
+    <button data-tab="quotes" onclick="hubGo('quotes')">Quotes &amp; Pricing</button>
+    <button data-tab="pnl" onclick="hubGo('pnl')">P&amp;L</button>
+    <button data-tab="performance" onclick="hubGo('performance')">Performance</button>
+  </div>
 </div>
 <div id="claude-toast"></div>
 
@@ -1108,7 +1154,7 @@ function fmt(n, decimals=0) {
 function pct(n) { return (n||0).toFixed(1) + '%'; }
 
 function showTab(name, el) {
-  try { hubTrack('view', name); } catch (e) {}
+  try { hubTrack('view', name); hubNavSync(name); } catch (e) {}
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   (el || event.target).classList.add('active');
@@ -7824,6 +7870,25 @@ document.addEventListener('click', function (e) {
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') hubTrackFlush(); });
 setInterval(hubTrackFlush, 20000);
 hubTrack('open', HUB_DEVICE);
+
+// ── Phone navigation (bottom bar + More sheet) ───────────────────────────
+function hubGo(name) {
+  hubMore(false);
+  const tab = [...document.querySelectorAll('.tabs .tab')].find(t => (t.getAttribute('onclick') || '').includes("'" + name + "'"));
+  if (tab) showTab(name, tab);
+}
+function hubMore(open) { document.getElementById('hub-more').classList.toggle('open', !!open); }
+function hubNavSync(name) {
+  const main = ['timesheet', 'projects', 'schedule', 'receipts'];
+  document.querySelectorAll('#hub-nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === (main.includes(name) ? name : 'more')));
+  document.querySelectorAll('#hub-more .sheet button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  const cnt = id => { const e = document.getElementById(id); return e && e.style.display !== 'none' ? (e.textContent || '').trim() : ''; };
+  const sc = cnt('sch-count'), fa = cnt('fa-count');
+  const set = (id, v) => { const e = document.getElementById(id); if (e) { e.textContent = v; e.style.display = v ? '' : 'none'; } };
+  set('nb-schedule', sc); set('nb-more', fa); set('mb-action', fa);
+}
+['sch-count', 'fa-count'].forEach(id => { const e = document.getElementById(id); if (e) new MutationObserver(() => hubNavSync(hubTrackTab)).observe(e, { childList: true, characterData: true, subtree: true, attributes: true }); });
+hubNavSync('timesheet');
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 hubCheckAuth();
