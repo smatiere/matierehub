@@ -416,3 +416,4 @@ Files: `index.html`, `netlify/functions/hub-write.js` (new), `CLAUDE.md`. Verifi
 
 ## Batch — ignore rules (2026-11-05)
 - New table receipt_ignore. Receipts whose supplier / sender / subject match a rule (seeded: Matiere = our own sales invoices) go straight to a 'Not a cost' pile instead of Pending. 'Not a cost' button on the card: this one, or always for that supplier (also clears matching ones already waiting).
+- Inbox learns description (single-line receipts) and category per supplier from last time and from past saved expenses.

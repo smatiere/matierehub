@@ -6535,6 +6535,16 @@ function siHabit(sup) {
   const none = rows.filter(e => !String(e.project || '').trim() || isNonBillable(e.project)).length;
   return { n: rows.length, noProjShare: none / rows.length };
 }
+// Most common description / category this supplier has had in past saved expenses (works on any device).
+function siHabitField(sup, field, minShare) {
+  const k = String(sup || '').toLowerCase().trim(); if (!k) return '';
+  const rows = (D.expense_log || []).filter(e => String(e.supplier || '').toLowerCase().trim() === k && String(e[field] || '').trim());
+  if (rows.length < 2) return '';
+  const cnt = {};
+  rows.forEach(e => { const v = String(e[field]).trim(); cnt[v.toLowerCase()] = cnt[v.toLowerCase()] || { v, n: 0 }; cnt[v.toLowerCase()].n++; });
+  const top = Object.values(cnt).sort((a, b) => b.n - a.n)[0];
+  return top.n / rows.length >= minShare ? top.v : '';
+}
 function siSupplierList() {
   const set = new Set();
   (D.expense_log || []).forEach(e => e.supplier && set.add(e.supplier));
@@ -6552,7 +6562,7 @@ function siCardHtml() {
   const total = r.total_inc != null ? r.total_inc : (sumInc || '');
   const cats = (typeof EX_CATEGORIES !== 'undefined' && EX_CATEGORIES) ? EX_CATEGORIES : [];
   const lineCat = (lines.find(l => l.category) || {}).category || '';
-  const cat = SI.cat != null ? SI.cat : (mem.cat || lineCat || '');
+  const cat = SI.cat != null ? SI.cat : (mem.cat || lineCat || siHabitField(sup, 'category', 0.6) || '');
   const tax = SI.tax || mem.tax || 'gst';
   const src = r.source === 'email' ? `✉️ ${attrEsc(r.email_from || 'email')}` : r.source === 'photo' ? '📸 Photo' : '⬆️ Upload';
   const sug = siSuggest((r.receipt_date||'').slice(0,10));
@@ -6561,7 +6571,7 @@ function siCardHtml() {
   const chip = (label, on, fn) => `<span onclick="${fn}" class="hub-pill-btn${on?' active':''}" style="cursor:pointer;padding:6px 12px;font-size:12px">${label}</span>`;
   const chk = r.check_info && r.check_info.total ? (r.check_info.ok ? `<span style="color:var(--sage)">✓ lines add up to the printed ${fmt(r.check_info.total,2)}</span>` : `<span style="color:var(--amber)">⚠ lines add to ${fmt(sumInc,2)}, receipt says ${fmt(r.check_info.total,2)}</span>`)
     : (lines.length ? '<span style="color:var(--ink-4)">no printed total to check</span>' : '<span style="color:var(--amber)">Couldn’t read this one automatically — fill in the amount and what it was for.</span>');
-  const desc = SI.desc != null ? SI.desc : (lines.length ? '' : (r.email_subject || ''));
+  const desc = SI.desc != null ? SI.desc : (lines.length ? '' : (mem.desc || siHabitField(sup, 'description', 0.5) || r.email_subject || ''));
   return `
   <div class="si-card">
     <div class="si-nav"><button class="hub-pill-btn" onclick="siMove(-1)">‹</button><span class="si-count">${SI.idx+1} / ${rows.length}</span><button class="hub-pill-btn" onclick="siMove(1)">›</button><span class="si-src">${src}</span></div>
@@ -6728,7 +6738,7 @@ async function siSave() {
     if (data.status !== 'success') throw new Error(data.message || 'Save failed');
     if (data.entries && D) { D.expense_log = D.expense_log || []; data.entries.forEach(e => D.expense_log.push(e)); }
     const ids = (data.entries || []).map(e => e.id);
-    siMemSave(sup, { cat: cat || undefined, tax, project: project || undefined, noProj: !project });
+    siMemSave(sup, { cat: cat || undefined, tax, project: project || undefined, noProj: !project, desc: (!(r.lines || []).length && desc) ? desc : undefined });
     await siApi({ action:'update', id:r.id, fields:{ status:'processed', supplier:sup, receipt_date:date, total_inc: isNaN(total) ? r.total_inc : total, lines: items.map(i => ({ description:i.description, qty:i.qty, unit_price:i.unit_price, amount:i.amount, category:i.category, project: i.project !== (project || '') ? i.project : '' })), project, no_project:!project, expense_ids:ids, notes: desc || '', reference: ref, tax_mode: tax, xero_status: 'queued', xero_error: '' } });
     SI.counts.processed = (SI.counts.processed||0) + 1;
     claudeToast(`✓ ${items.length} line${items.length>1?'s':''} saved${project?' to '+project:''}`, 'success');
