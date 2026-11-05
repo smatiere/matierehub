@@ -29,3 +29,6 @@ create table if not exists receipt_ignore (supplier_key text primary key, suppli
 alter table receipt_ignore enable row level security;
 grant all on receipt_ignore to service_role;
 insert into receipt_ignore(supplier_key,supplier,reason) values ('matiere','Matiere Pty Ltd','Our own sales invoice — not a cost') on conflict do nothing;
+
+-- 2026-11-05 (d): trace every saved expense line back to its invoice/receipt
+alter table expense_log add column if not exists reference text default '', add column if not exists receipt_id text default '';

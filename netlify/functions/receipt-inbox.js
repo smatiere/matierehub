@@ -95,7 +95,7 @@ exports.handler = async (event) => {
         email_from: String(b.email_from || '').slice(0, 200), email_subject: String(b.email_subject || '').slice(0, 300), email_date: b.email_date || null,
         supplier: parsed ? (parsed.supplier || first.supplier || '') : '', receipt_date: first.date || b.email_date || null,
         total_inc: parsed && parsed.check && parsed.check.total ? parsed.check.total : (items.length ? Math.round(items.reduce((t, i) => t + (Number(i.amount) || 0), 0) * 110) / 100 : null),
-        lines: items, check_info: parsed ? parsed.check : null
+        lines: items, check_info: parsed ? parsed.check : null, reference: parsed && parsed.check && parsed.check.invoice_no ? parsed.check.invoice_no : ''
       }))[0];
       return out(200, { ok: true, row, read: !!parsed });
     }
@@ -144,7 +144,7 @@ exports.handler = async (event) => {
         ...(why ? { status: 'ignored', notes: why } : {}),
         supplier: parsed.supplier || first.supplier || r.supplier || '', receipt_date: first.date || r.receipt_date || r.email_date || null,
         total_inc: parsed.check && parsed.check.total ? parsed.check.total : Math.round(items.reduce((t2, i) => t2 + (Number(i.amount) || 0), 0) * 110) / 100,
-        lines: items, check_info: parsed.check, updated_at: new Date().toISOString()
+        lines: items, check_info: parsed.check, ...(parsed.check && parsed.check.invoice_no && !r.reference ? { reference: parsed.check.invoice_no } : {}), updated_at: new Date().toISOString()
       }))[0];
       return out(200, { ok: true, read: true, row });
     }

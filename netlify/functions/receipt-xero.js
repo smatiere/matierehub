@@ -51,14 +51,31 @@ async function findOrCreateContact(ctx, name) {
   return made.Contacts[0].ContactID;
 }
 
-function attach(ctx, txnId, filename, mime, buf) {
+function attach(ctx, txnId, filename, mime, buf, kind) {
   return new Promise((resolve, reject) => {
     const req = https.request({
-      hostname: 'api.xero.com', method: 'PUT', path: `/api.xro/2.0/BankTransactions/${encodeURIComponent(txnId)}/Attachments/${encodeURIComponent(filename)}`,
+      hostname: 'api.xero.com', method: 'PUT', path: `/api.xro/2.0/${kind || 'BankTransactions'}/${encodeURIComponent(txnId)}/Attachments/${encodeURIComponent(filename)}`,
       headers: { Authorization: `Bearer ${ctx.token}`, 'Xero-Tenant-Id': ctx.tenant, 'Content-Type': mime, 'Content-Length': buf.length, Accept: 'application/json' }
     }, (r) => { let d = ''; r.on('data', c => d += c); r.on('end', () => resolve({ status: r.statusCode, body: d })); });
     req.on('error', reject); req.write(buf); req.end();
   });
+}
+
+// Is this already in Xero (a Spend Money entry or a bill from the same supplier, same total, within a few days)?
+async function findExisting(ctx, contactId, date, expectedInc) {
+  const d = new Date(date + 'T00:00:00Z'), pad = (n) => String(n).padStart(2, '0');
+  const dt = (x) => `DateTime(${x.getUTCFullYear()},${pad(x.getUTCMonth() + 1)},${pad(x.getUTCDate())})`;
+  const lo = new Date(d.getTime() - 5 * 86400000), hi = new Date(d.getTime() + 5 * 86400000);
+  const range = `Date>=${dt(lo)}&&Date<=${dt(hi)}`;
+  try {
+    const bt = await xeroCall(`BankTransactions?where=${encodeURIComponent(`Contact.ContactID==Guid("${contactId}")&&Status!="DELETED"&&${range}`)}`, 'GET', ctx.token, ctx.tenant);
+    const a = (bt.BankTransactions || []).find(x => Math.abs(Number(x.Total) - expectedInc) <= 0.06);
+    if (a) return { id: a.BankTransactionID, kind: 'BankTransactions' };
+    const iv = await xeroCall(`Invoices?where=${encodeURIComponent(`Type=="ACCPAY"&&Contact.ContactID==Guid("${contactId}")&&Status!="VOIDED"&&Status!="DELETED"&&${range}`)}`, 'GET', ctx.token, ctx.tenant);
+    const b = (iv.Invoices || []).find(x => Math.abs(Number(x.Total) - expectedInc) <= 0.06);
+    if (b) return { id: b.InvoiceID, kind: 'Invoices' };
+  } catch (e) { /* if the lookup itself fails, carry on and create */ }
+  return null;
 }
 
 async function pushOne(ctx, r) {
@@ -75,6 +92,17 @@ async function pushOne(ctx, r) {
     return { Description: l.description || '(no description)', Quantity: parseFloat(l.qty) || 1, UnitAmount: parseFloat(l.unit_price) || 0, AccountCode: code, TaxType: taxType };
   });
   const date = String(r.receipt_date || '').slice(0, 10) || new Date().toISOString().slice(0, 10);
+  // Never create a second copy: if Xero already has it, just attach the file to that one.
+  const sumEx = lines.reduce((t2, l) => t2 + (parseFloat(l.qty) || 1) * (parseFloat(l.unit_price) || 0), 0);
+  const expectedInc = r.total_inc != null ? Number(r.total_inc) : (r.tax_mode === 'gst' || !r.tax_mode ? sumEx * 1.1 : sumEx);
+  const have = await findExisting(ctx, contactId, date, expectedInc);
+  if (have) {
+    const f0 = await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${r.file_path}`, { headers: sbH() });
+    let att0 = false;
+    if (f0.ok) { const buf0 = Buffer.from(await f0.arrayBuffer()); const nm = String(sup + '-' + date).replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 60) + '.' + ext(r.mime); att0 = (await attach(ctx, have.id, nm, r.mime, buf0, have.kind)).status < 400; }
+    await rest('PATCH', `receipt_inbox?id=eq.${encodeURIComponent(r.id)}`, { xero_status: 'sent', xero_txn_id: have.id, xero_attached: att0, xero_error: `Already in Xero (${have.kind === 'Invoices' ? 'as a bill' : 'as Spend Money'}) — nothing duplicated${att0 ? ', file attached to it' : ''}`, xero_sent_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+    return { id: r.id, ok: true, attached: att0, existing: true };
+  }
   const mk = (status) => ({ BankTransactions: [{
     Type: 'SPEND', Contact: { ContactID: contactId }, Date: date, Status: status, LineAmountTypes: 'Exclusive',
     Reference: r.reference || `MatiereHub — ${sup} ${date}`, BankAccount: { AccountID: ctx.bank.AccountID }, LineItems: lineItems

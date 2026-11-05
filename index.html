@@ -485,6 +485,10 @@ button,.tab,.hub-pill-btn,select,input[type=checkbox]{-webkit-tap-highlight-colo
 .si-line .si-ld{grid-column:1/-1}.si-line .si-lp{font-size:11px;color:var(--ink-3)}
 .si-line input{width:100%;min-width:0;box-sizing:border-box;padding:6px 7px;border:1px solid var(--border);border-radius:6px;background:var(--bg-1);color:var(--ink-1);font-size:12px}
 .si-line .si-ln{text-align:right}.si-x{cursor:pointer;color:var(--ink-4);text-align:center}
+.si-dup{border:1px solid var(--amber);background:rgba(255,190,11,.08);border-radius:10px;padding:10px 12px;margin-bottom:10px;font-size:12px;color:var(--ink-2);line-height:1.5}
+.si-dup-act{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.si-dup-act button{padding:9px 12px;background:var(--bg-2);color:var(--ink-2);border:1px solid var(--border);border-radius:8px;font-size:12px;cursor:pointer}
+.si-dup-act .si-primary2{background:var(--amber);color:#000;border:none;font-weight:700}
 .si-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 .si-actions button{padding:12px 16px;background:var(--bg-2);color:var(--ink-2);border:1px solid var(--border);border-radius:8px;font-size:13px;cursor:pointer}
 .si-actions .si-primary{flex:1;min-width:150px;background:var(--sage);color:#fff;border:none;font-size:14px;font-weight:700}
@@ -6443,7 +6447,7 @@ function rcSetView(v) { RC.view = v; renderReceipts(); }
 // Every receipt (photo, upload, email) lands in Pending. Swipe through, pick a project, save:
 // lines go to expenses (and the price library), the original file is kept in Processed and can
 // be attached to a Xero draft. Files sit in a private bucket; the Hub only gets short-lived links.
-const SI = { pile:'pending', rows:[], counts:{}, idx:0, urls:{}, proj:'', noProj:false, missing:null, showLines:false, busy:false, tried:{}, touched:false, cat:null, tax:'', ref:null, desc:null };
+const SI = { pile:'pending', rows:[], counts:{}, idx:0, urls:{}, proj:'', noProj:false, missing:null, showLines:true, busy:false, tried:{}, touched:false, dupOk:{}, cat:null, tax:'', ref:null, desc:null };
 
 async function siApi(body) {
   const r = await fetch('/.netlify/functions/receipt-inbox', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(body) });
@@ -6558,6 +6562,70 @@ function siHabitField(sup, field, minShare) {
   const top = Object.values(cnt).sort((a, b) => b.n - a.n)[0];
   return top.n / rows.length >= minShare ? top.v : '';
 }
+// ── Duplicate protection ──
+const siNorm = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+function siDupes(r) {
+  const lines = Array.isArray(r.lines) ? r.lines : [];
+  const sup = siNorm(siGuessSupplier(r));
+  const date = (r.receipt_date || '').slice(0, 10);
+  if (!lines.length || !sup || !date) return null;
+  const t0 = new Date(date + 'T00:00:00').getTime();
+  const ref = siNorm(r.reference);
+  const cand = (D.expense_log || []).filter(e => siNorm(e.supplier) === sup && e.id !== undefined && (
+    Math.abs(new Date(String(e.date).slice(0,10) + 'T00:00:00').getTime() - t0) <= 3 * 86400000 || (ref && siNorm(e.reference) === ref)));
+  if (!cand.length) return null;
+  const used = new Set(), matched = [], missing = [];
+  lines.forEach(l => {
+    const dn = siNorm(l.description);
+    const k = cand.findIndex((e, i) => !used.has(i) && Math.abs(Number(e.amount) - (parseFloat(l.amount) || 0)) <= 0.05 && (siNorm(e.description) === dn || siNorm(e.description).includes(dn) || dn.includes(siNorm(e.description))));
+    if (k >= 0) { used.add(k); matched.push({ l, e: cand[k] }); } else missing.push(l);
+  });
+  if (!matched.length) return null;
+  const pc = {}; matched.forEach(m => { const p = m.e.project || ''; pc[p] = (pc[p] || 0) + 1; });
+  const project = Object.entries(pc).sort((a, b) => b[1] - a[1])[0][0];
+  return { matched, missing, ids: matched.map(m => m.e.id), project, total: matched.reduce((t, m) => t + (Number(m.e.amount) || 0), 0), date: String(matched[0].e.date).slice(0, 10) };
+}
+function siDupBanner(r) {
+  const d = SI.dupDismissed === r.id ? null : siDupes(r);
+  if (!d) return '';
+  const miss = d.missing.length;
+  return `<div class="si-dup"><b>⚠ Already in your expenses</b>
+    <div>${d.matched.length} of ${(r.lines||[]).length} lines are already saved on ${fmtDMY(d.date)}${d.project ? ' to <b>' + attrEsc(d.project) + '</b>' : ' with no project'} (${fmt(d.total, 2)} ex GST).${miss ? ` <b>Not saved yet:</b> ${d.missing.map(l => attrEsc(l.description) + ' ' + fmt(parseFloat(l.amount)||0, 2)).join('; ')}.` : ' Nothing is missing.'}</div>
+    <div class="si-dup-act">
+      <button class="si-primary2" onclick="siDupLink()">${miss ? 'Link file only (skip the missing)' : 'Same invoice — link the file'}</button>
+      ${miss ? `<button class="si-primary2" onclick="siDupAdd()">Add only the ${miss} missing line${miss>1?'s':''}</button>` : ''}
+      <button onclick="siDupDismiss()">Different — save normally</button></div></div>`;
+}
+function siDupDismiss() { const r = SI.rows[SI.idx]; if (r) { SI.dupDismissed = r.id; SI.dupOk[r.id] = true; siRender(); } }
+// Mark the receipt processed, pointing at existing expenses — nothing new is added to the job.
+async function siDupFinish(r, ids, project, extra) {
+  const v = id => ((document.getElementById(id) || {}).value || '').trim();
+  const tax = v('si-tax') || 'gst', cat = v('si-cat');
+  const lines = (r.lines || []).map(l => ({ description: l.description, qty: l.qty, unit_price: l.unit_price, amount: l.amount, category: cat || l.category || '', project: '' }));
+  await siApi({ action:'update', id:r.id, fields:{ status:'processed', supplier: v('si-sup') || r.supplier, receipt_date: v('si-date') || r.receipt_date, total_inc: parseFloat(v('si-total')) || r.total_inc, lines, project, no_project: !project, expense_ids: ids, reference: v('si-ref') || r.reference || '', tax_mode: tax, xero_status:'queued', xero_error:'', notes: extra } });
+  for (const id of ids) { try { await hubWrite('expense_log', id, { receipt_id: r.id, ...(v('si-ref') ? { reference: v('si-ref') } : {}) }); } catch (e) {} }
+  SI.counts.processed = (SI.counts.processed || 0) + 1;
+}
+async function siDupLink() {
+  const r = SI.rows[SI.idx]; const d = r && siDupes(r); if (!d) return;
+  try { await siDupFinish(r, d.ids, d.project, 'Linked to expenses already saved — nothing added'); claudeToast('✓ Linked to the existing expenses — nothing added', 'success'); siAdvance(r.id); }
+  catch (e) { claudeToast('⚠ ' + e.message, 'error'); }
+}
+async function siDupAdd() {
+  const r = SI.rows[SI.idx]; const d = r && siDupes(r); if (!d || !d.missing.length) return;
+  const v = id => ((document.getElementById(id) || {}).value || '').trim();
+  const sup = v('si-sup') || r.supplier, date = v('si-date') || r.receipt_date, cat = v('si-cat');
+  const items = d.missing.map(l => ({ action:'new', type:'expense', date: String(date).slice(0,10), supplier: sup, description: l.description || '', category: cat || l.category || '', project: d.project || '',
+    qty: parseFloat(l.qty)||1, unit_price: parseFloat(l.unit_price)||0, amount: parseFloat(l.amount)||0, receipt_id: r.id, reference: v('si-ref') }));
+  try {
+    const res = await fetch('/.netlify/functions/claude-parse', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ pendingAction:{ action:'expense_batch', items } }) });
+    const data = await res.json();
+    if (data.status !== 'success') throw new Error(data.message || 'Save failed');
+    if (data.entries && D) { D.expense_log = D.expense_log || []; data.entries.forEach(e => D.expense_log.push(e)); }
+    await siDupFinish(r, d.ids.concat((data.entries || []).map(e => e.id)), d.project, `Matched ${d.matched.length} expenses already saved; added ${items.length} missing line${items.length>1?'s':''}`);
+    claudeToast(`✓ Added ${items.length} missing line${items.length>1?'s':''}; the rest were already saved`, 'success'); siAdvance(r.id);
+  } catch (e) { claudeToast('⚠ ' + e.message, 'error'); }
+}
 function siSupplierList() {
   const set = new Set();
   (D.expense_log || []).forEach(e => e.supplier && set.add(e.supplier));
@@ -6584,6 +6652,8 @@ function siCardHtml() {
   const taxWhy = SI.tax ? '' : fromReceipt ? (detected === 'none' ? 'no GST shown on this invoice' : 'GST shown on this invoice') : (mem.tax || hist) ? 'learned from this supplier\'s past invoices' : 'assumed — nothing to go on';
   const src = r.source === 'email' ? `✉️ ${attrEsc(r.email_from || 'email')}` : r.source === 'photo' ? '📸 Photo' : '⬆️ Upload';
   const sug = siSuggest((r.receipt_date||'').slice(0,10));
+  const dupInfo = SI.dupDismissed === r.id ? null : siDupes(r);
+  if (dupInfo && !SI.touched && !SI.noProj && !SI.proj) { if (dupInfo.project) SI.proj = dupInfo.project; else SI.noProj = true; }
   const habit = siHabit(sup);
   if (!SI.touched && !SI.noProj && !SI.proj) { if (mem.noProj || (habit && habit.noProjShare >= 0.8)) SI.noProj = true; else if (sug.length === 1) SI.proj = sug[0][0]; else if (mem.project) SI.proj = mem.project; }
   const chip = (label, on, fn) => `<span onclick="${fn}" class="hub-pill-btn${on?' active':''}" style="cursor:pointer;padding:6px 12px;font-size:12px">${label}</span>`;
@@ -6594,6 +6664,7 @@ function siCardHtml() {
   <div class="si-card">
     <div class="si-nav"><button class="hub-pill-btn" onclick="siMove(-1)">‹</button><span class="si-count">${SI.idx+1} / ${rows.length}</span><button class="hub-pill-btn" onclick="siMove(1)">›</button><span class="si-src">${src}</span></div>
     ${r.email_subject ? `<div class="si-subj">${attrEsc(r.email_subject)}</div>` : ''}
+    ${siDupBanner(r)}
     <div id="si-preview" class="si-preview">Loading receipt…</div>
 
     <div class="si-sec">Receipt</div>
@@ -6601,7 +6672,7 @@ function siCardHtml() {
       <label class="si-full">Supplier<input id="si-sup" list="si-sups" value="${attrEsc(sup)}" onchange="siSupChanged(this.value)"><datalist id="si-sups">${siSupplierList().map(x => `<option value="${attrEsc(x)}">`).join('')}</datalist></label>
       <label>Date<input id="si-date" type="date" value="${attrEsc((r.receipt_date||'').slice(0,10))}" onchange="siDateChanged(this.value)"></label>
       <label>Total (inc GST)<input id="si-total" inputmode="decimal" value="${total}"></label>
-      <label class="si-full">Reference / invoice no. <small>(optional)</small><input id="si-ref" value="${attrEsc(SI.ref != null ? SI.ref : '')}" placeholder="e.g. INV-12345"></label>
+      <label class="si-full">Reference / invoice no. <small>(optional)</small><input id="si-ref" value="${attrEsc(SI.ref != null ? SI.ref : (r.reference || (r.check_info && r.check_info.invoice_no) || ''))}" placeholder="e.g. INV-12345"></label>
       <label class="si-full">${lines.length ? 'Description (optional)' : 'What was it for?'}<input id="si-desc" value="${attrEsc(desc)}" placeholder="e.g. Google Workspace – November"></label>
     </div>
     <div class="si-note">${chk}</div>
@@ -6752,7 +6823,10 @@ async function siSave() {
   }
   lines.forEach(l => { if (cat) l.category = cat; });
   const items = lines.map(l => ({ action:'new', type:'expense', date, supplier: sup, description: l.description || '', category: l.category || '', project: (l.project || '').trim() || project || '',
-    qty: parseFloat(l.qty)||1, unit_price: parseFloat(l.unit_price)||0, amount: Math.round((parseFloat(l.qty)||1)*(parseFloat(l.unit_price)||0)*100)/100 }));
+    qty: parseFloat(l.qty)||1, unit_price: parseFloat(l.unit_price)||0, amount: Math.round((parseFloat(l.qty)||1)*(parseFloat(l.unit_price)||0)*100)/100, receipt_id: r.id, reference: ref }));
+  // last safety net: refuse to double-log identical lines on the same job without a yes
+  const same = items.filter(i => (D.expense_log || []).some(e => siNorm(e.supplier) === siNorm(i.supplier) && String(e.date).slice(0,10) === i.date && siNorm(e.description) === siNorm(i.description) && Math.abs(Number(e.amount) - i.amount) <= 0.01 && siNorm(e.project) === siNorm(i.project)));
+  if (same.length && !SI.dupOk[r.id] && !confirm(`${same.length} of these lines look IDENTICAL to expenses already saved on this job (e.g. “${same[0].description}” ${fmt(same[0].amount,2)}).\n\nSaving would count them twice and lower the job's margin.\n\nOK = save anyway\nCancel = go back`)) return;
   SI.busy = true; const btn = document.getElementById('si-save'); if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
   try {
     const res = await fetch('/.netlify/functions/claude-parse', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ pendingAction:{ action:'expense_batch', items } }) });

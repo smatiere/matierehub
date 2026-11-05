@@ -23,7 +23,7 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 // ── Allow-list: { table: [columns the HUB may PATCH (update existing rows)] } ──
 const WRITABLE = {
   bank_transactions: ['project', 'notes', 'expense_log_id'],
-  expense_log:       ['project', 'category', 'description', 'notes'],
+  expense_log:       ['project', 'category', 'description', 'notes', 'receipt_id', 'reference'],
   // 2026-07-10 — inline notes editing from the Projects tab's Timesheets section.
   timesheets:        ['notes'],
   // Feature 3 — hand-link an invoice line item to a project (HUB-only column).

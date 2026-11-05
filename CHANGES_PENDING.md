@@ -419,3 +419,9 @@ Files: `index.html`, `netlify/functions/hub-write.js` (new), `CLAUDE.md`. Verifi
 - Inbox learns description (single-line receipts) and category per supplier from last time and from past saved expenses.
 - GST: reader now reports whether GST is shown (included / none / unknown) and does not divide by 1.1 when there is none. Card picks GST mode from the invoice, else the supplier's last saved mode (any device), else 10%; says which. Lines adjust correctly if you override.
 - Inbox preview: flex centering was hiding the top of tall PDFs (opened at the bottom of page 3); now always starts at the top of page 1.
+
+## Batch — duplicate protection (2026-11-05)
+- Reader extracts the invoice number (prefills Reference). Saved expense lines now carry receipt_id + reference (expense_log columns, already added).
+- Inbox card: if a receipt's lines are already in expenses (same supplier, date ±3d, matching lines — or same invoice no.), an amber banner offers: link the file only / add only the missing lines / different. Last-resort confirm if saving would create identical lines on the same job.
+- receipt-xero: before creating Spend Money it looks for an existing Xero entry or bill (same supplier, total, ±5 days) and attaches the file to that instead.
+- Lines list opens by default. PolyGuru fixed: EXP-280 (shipping $75.96) added to Aanya - Fairlight - porch; invoice linked to its 7 expenses.

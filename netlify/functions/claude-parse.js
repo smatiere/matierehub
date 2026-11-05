@@ -379,7 +379,7 @@ If you cannot confidently parse the input at all: {"action":"unclear","message":
         const imageInstruction =
 `This is a receipt/invoice photo (or PDF). Extract EVERY individual product line as its own expense entry — do NOT skip, merge, summarise, or group lines. If the receipt has 25 line items, return 25 objects. Capture small and cheap items too.
 
-OVERRIDE: ignore the "Output ONE JSON object only" rule for this image. Return a JSON ARRAY only — one object per product line, then ONE final object {"receipt_total": 123.45, "gst_status": "included"} holding the grand total paid exactly as printed (leave out receipt_total if none is printed) and gst_status: "included" if the receipt shows GST/tax being charged (e.g. a GST line, "includes GST", 10%), "none" if it clearly shows no GST (GST-free, "no tax", tax 0.00, overseas or internet service with no GST line, "Total excludes tax"), or "unknown" if you cannot tell. Each product line has this shape:
+OVERRIDE: ignore the "Output ONE JSON object only" rule for this image. Return a JSON ARRAY only — one object per product line, then ONE final object {"receipt_total": 123.45, "gst_status": "included", "invoice_number": "INV-1234"} holding the grand total paid exactly as printed (leave out receipt_total if none is printed) and gst_status: "included" if the receipt shows GST/tax being charged (e.g. a GST line, "includes GST", 10%), "none" if it clearly shows no GST (GST-free, "no tax", tax 0.00, overseas or internet service with no GST line, "Total excludes tax"), or "unknown" if you cannot tell. invoice_number = the invoice / tax invoice / order / receipt number printed on it (leave it out if there is none). Each product line has this shape:
 [{"action":"new","type":"expense","date":"${todayStr}","supplier":"StoreName","description":"Item name","category":"Category","project":"","qty":1,"unit_price":9.09,"amount":9.09}]
 
 Rules:
@@ -412,15 +412,16 @@ Rules:
         let raw = d.content[0].text.trim().replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim();
         let arr = [];
         try { const c = JSON.parse(raw); arr = Array.isArray(c) ? c : [c]; } catch (e) { arr = extractJsonObjects(raw); }
-        const totObj = arr.find(o => o && (o.receipt_total != null || o.gst_status != null));
+        const totObj = arr.find(o => o && (o.receipt_total != null || o.gst_status != null || o.invoice_number != null));
         const total = totObj && totObj.receipt_total != null ? parseFloat(totObj.receipt_total) : null;
         const gstStatus = totObj && ['included', 'none'].includes(String(totObj.gst_status || '').toLowerCase()) ? String(totObj.gst_status).toLowerCase() : 'unknown';
-        const lines = arr.filter(o => o && o.receipt_total == null && o.gst_status == null);
+        const invoiceNo = totObj && totObj.invoice_number ? String(totObj.invoice_number).trim().slice(0, 60) : '';
+        const lines = arr.filter(o => o && o.receipt_total == null && o.gst_status == null && o.invoice_number == null);
         let sum = 0; lines.forEach(o => { const q = parseFloat(o.qty) || 1; sum += (parseFloat(o.unit_price) || (parseFloat(o.amount) / q) || 0) * q; });
         sum = Math.round(sum * 100) / 100;
         const tol = total ? Math.max(1, total * 0.03) : 0;
         const ok = !total || Math.abs(sum * 1.1 - total) <= tol || Math.abs(sum - total) <= tol;   // ex-GST x1.1, or GST-free receipt
-        return { items: lines, total, gst_status: gstStatus, sum_ex: sum, ok, truncated: d.stop_reason === 'max_tokens', model };
+        return { items: lines, total, gst_status: gstStatus, invoice_no: invoiceNo, sum_ex: sum, ok, truncated: d.stop_reason === 'max_tokens', model };
       }
       if (hasImages) {
         let best = null;
@@ -430,7 +431,7 @@ Rules:
         }
         if (!best || !best.items.length) throw new Error('No line items parsed from receipt');
         parsed = { action: 'expense_batch', items: best.items,
-          _check: { ok: best.ok, total: best.total, gst_status: best.gst_status, lines_inc_gst: best.gst_status === 'none' ? best.sum_ex : Math.round(best.sum_ex * 110) / 100 }, _model: best.model };
+          _check: { ok: best.ok, total: best.total, gst_status: best.gst_status, invoice_no: best.invoice_no, lines_inc_gst: best.gst_status === 'none' ? best.sum_ex : Math.round(best.sum_ex * 110) / 100 }, _model: best.model };
       }
       if (!parsed) {
       const model = 'claude-haiku-4-5-20251001';
@@ -981,6 +982,8 @@ Rules:
           unit_price:  Math.round(unitPrice * 100) / 100,
           amount
         };
+        if (item.reference)  entry.reference  = String(item.reference).slice(0, 80);   // invoice no. — lets us spot a second copy
+        if (item.receipt_id) entry.receipt_id = String(item.receipt_id).slice(0, 60);  // the Inbox receipt it came from
         await sbPost('expense_log', entry);
         insertedEntries.push(entry);
       }
