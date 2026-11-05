@@ -7863,7 +7863,7 @@ document.addEventListener('click', function (e) {
     if (!el) return;
     const m = (el.getAttribute('onclick') || '').match(/^\s*(?:return\s+)?([A-Za-z_$][\w$]*)\s*\(/);
     const name = m ? m[1] : (el.id || '');
-    if (!name || name === 'showTab') return;   // tab opens are recorded as views
+    if (!name || name === 'showTab' || name === 'hubGo') return;   // tab opens are recorded as views
     hubTrack('tap', name);
   } catch (err) {}
 }, true);
