@@ -503,6 +503,9 @@ body.claude-bar-off #app{padding-bottom:calc(24px + env(safe-area-inset-bottom))
   table.mcards td.hide-sm{display:none!important}
   table.mcards td input{flex:1;width:auto!important;min-width:0!important;min-height:40px;background:var(--bg-1)!important;border:1px solid var(--border-2)!important;border-radius:8px!important;padding:0 10px!important;color:var(--ink)!important}
 }
+.ts-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
+.ts-tile{background:var(--bg-2);border:1px solid var(--border);border-radius:12px;min-height:64px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:var(--ink);font:inherit;touch-action:manipulation}
+.ts-tile b{font-size:20px;color:var(--amber)}.ts-tile span{font-size:10.5px;color:var(--ink-4)}
 @media (max-width:720px){.hide-sm{display:none}}
 @keyframes sheetIn{from{transform:translateY(40px);opacity:0}to{transform:none;opacity:1}}
 
@@ -3987,6 +3990,17 @@ function getRange() {
   return { from, to };
 }
 
+// ── "Today" strip at the top of Timesheets (phone landing page) ──
+function tsTodayStrip() {
+  const t = todayStr();
+  const jobs = ((D && D.bookings) || []).filter(b => b.start_date && !['done', 'cancelled'].includes(b.status) && b.start_date <= t && t <= (b.end_date || b.start_date)).length;
+  const mon = new Date(todayMidnight()); mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7));
+  const wk = (D.timesheets || []).filter(x => (x.employee || 'Seb') === 'Seb' && x.date >= ds(mon) && x.date <= t).reduce((a, x) => a + (x.hours || 0), 0);
+  const fa = (document.getElementById('fa-count') || {}).textContent || '';
+  const rc = (SI.counts && SI.counts.pending) || 0;
+  const tile = (n, l, go) => `<button class="ts-tile" onclick="hubGo('${go}')"><b>${n}</b><span>${l}</span></button>`;
+  return `<div class="ts-strip">${tile(jobs, jobs === 1 ? 'job today' : 'jobs today', 'schedule')}${tile(+wk.toFixed(1) + 'h', 'this week', 'timesheet')}${tile(fa.trim() || 0, 'to action', 'action')}${tile(rc, rc === 1 ? 'receipt' : 'receipts', 'receipts')}</div>`;
+}
 function renderTimesheet() {
   if (!D) return;
   buildColorMap(D.timesheets, D.projects);
@@ -4032,6 +4046,7 @@ function renderTimesheet() {
 
   document.getElementById('page-timesheet').innerHTML = `
     <button class="btn-primary ts-logbtn" onclick="tsQuickLog()">＋ Log hours</button>
+    ${tsTodayStrip()}
     <!-- KPIs -->
     <div class="kpi-grid">
       <div class="kpi ${missingDays>0?'warn':'good'}" style="cursor:pointer" onclick="tsShowMissing('${ds(twoWeeksAgo)}','${ds(today)}')" title="Click to see and fill the missing days">
@@ -7993,10 +8008,11 @@ async function hubInboxBadge() {
   try {
     if (!localStorage.getItem('hub_auth_token')) return;
     const j = await siApi({ action: 'list', status: 'pending' });
-    const n = (j.rows || []).length;
+    const n = (j.rows || []).length, changed = n !== SI.counts.pending;
     SI.counts.pending = n;
     const e = document.getElementById('nb-receipts');
     if (e) { e.textContent = n; e.style.display = n ? '' : 'none'; }
+    if (changed && hubTrackTab === 'timesheet' && D && !document.getElementById('modal-overlay').classList.contains('open')) renderTimesheet();
   } catch (e) {}
 }
 setTimeout(hubInboxBadge, 2500); setInterval(hubInboxBadge, 300000);

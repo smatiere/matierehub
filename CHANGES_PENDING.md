@@ -10,6 +10,11 @@ tracking fails silently, nothing breaks). New `netlify/functions/hub-track.js` (
 `hub-read.js` can read `usage_events`; `index.html` has `hubTrack()` + a click listener before `// ── Boot`.
 Review after 2-3 weeks: rank tabs/buttons by device, then re-score iPhone UX.
 
+- **Phone batch 2 (2026-11-06):** Timesheets: "＋ Log hours" bottom sheet (project, ½h stepper, date, notes → hub-write
+  `timesheets` insert, id/rate/value set server-side) + Today strip (jobs today, hours this week, to action, receipts).
+  Schedule: "Today" card (map / call / open). Expenses + Transactions become cards on phones (`table.mcards`).
+  Receipts: Inbox is the landing view; bottom-bar badge shows pending count. Claude bar parked (`claude-bar-off` on body).
+
 ## Feature — 2026-11-01 (Schedule tab: pipeline + bookings calendar)
 
 Seb asked for a pipeline / future-bookings tool: approved quotes (Xero or direct in the Hub)
