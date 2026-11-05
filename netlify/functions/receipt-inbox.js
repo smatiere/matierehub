@@ -138,6 +138,11 @@ exports.handler = async (event) => {
       const data = Buffer.from(await f.arrayBuffer()).toString('base64');
       const parsed = await readReceipt(event, r.file_name || 'receipt', r.mime, data);
       if (!parsed) return out(200, { ok: true, read: false, row: r });
+      if (b.only_ref) {   // keep everything Seb already edited; just learn the invoice number
+        const inv = parsed.check && parsed.check.invoice_no ? parsed.check.invoice_no : '';
+        const row2 = (await rest('PATCH', `receipt_inbox?id=eq.${encodeURIComponent(b.id)}`, { ...(inv ? { reference: inv } : {}), updated_at: new Date().toISOString() }))[0];
+        return out(200, { ok: true, read: true, invoice_no: inv, row: row2 });
+      }
       const items = parsed.items, first = items[0] || {};
       const why = r.status === 'pending' ? await ignoreReason(parsed.supplier || first.supplier, r.email_from, r.email_subject) : '';
       const row = (await rest('PATCH', `receipt_inbox?id=eq.${encodeURIComponent(b.id)}`, {

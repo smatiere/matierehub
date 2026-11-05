@@ -132,10 +132,11 @@ exports.handler = async (event) => {
   const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, x-hub-token, x-hub-key, Authorization', 'Content-Type': 'application/json' };
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
   if (event.httpMethod !== 'POST') return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
-  if (!authorised(event)) { const denied = guardHub(event, headers); if (denied) return denied; }
   const out = (c, o) => ({ statusCode: c, headers, body: JSON.stringify(o) });
   try {
     const b = JSON.parse(event.body || '{}');
+    // The shared server secret (used by the scheduled GitHub batch) may ONLY run the batch push, never read anything.
+    if (!(authorised(event) && b.action === 'push' && !b.ids)) { const denied = guardHub(event, headers); if (denied) return denied; }
     if (b.action === 'status') {
       const rows = await rest('GET', 'receipt_inbox?select=id,xero_status&status=eq.processed');
       const n = (s) => rows.filter(r => (r.xero_status || '') === s).length;

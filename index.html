@@ -6501,6 +6501,7 @@ async function siRender() {
   else if (SI.pile === 'missing') { body.innerHTML = head + '<div style="color:var(--ink-4);padding:20px;text-align:center"><span class="spinner-sm"></span> Checking your bank spending…</div>'; body.innerHTML = head + await siMissingHtml(); return; }
   else {
     body.innerHTML = head + siListHtml();
+    if (SI.pile === 'processed') siFillRefs();
     if (SI.pile === 'processed') siXeroStatus().then(j => { const el = document.getElementById('si-xbar'); if (el && j.bank) el.insertAdjacentHTML('beforeend', ` <span style="color:var(--ink-4)">· paid from ${attrEsc(j.bank)}</span>`); else if (el && j.note) el.insertAdjacentHTML('beforeend', ` <span style="color:var(--pink)">· ${attrEsc(j.note)}</span>`); });
   }
   if (SI.pile === 'pending' && SI.rows[SI.idx]) { siWireCard(); siRereadEmpty(); }
@@ -6859,7 +6860,7 @@ function siListHtml() {
       : '<span style="color:var(--ink-4)">Not sent to Xero</span>';
     return `<div style="display:flex;gap:10px;align-items:center;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;background:var(--bg-1)">
       <div style="flex:1;min-width:0"><div style="font-weight:600;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${attrEsc(r.supplier||r.file_name||'Receipt')} <span style="color:var(--ink-4);font-weight:400">· ${fmtDMY((r.receipt_date||'').slice(0,10))} · ${r.total_inc!=null?fmt(r.total_inc,2):''}</span></div>
-        <div style="font-size:11px;color:var(--ink-4)">${proc ? (r.no_project ? 'No project' : attrEsc(r.project||'')) + ' · ' + xero : (r.source==='email'?'✉️ email':'📸')}</div></div>
+        <div style="font-size:11px;color:var(--ink-4)">${proc ? (r.reference ? 'Inv ' + attrEsc(r.reference) + ' · ' : '') + (r.no_project ? 'No project' : attrEsc(r.project||'')) + ' · ' + xero : (r.source==='email'?'✉️ email':'📸')}</div></div>
       <button class="hub-pill-btn" onclick="siOpenFile('${r.id}')">View</button>
       ${proc && st !== 'sent' ? `<button class="hub-pill-btn" onclick="siPush(['${r.id}'])">${st === 'failed' ? 'Retry' : 'To Xero'}</button>` : ''}
       ${!proc ? `<button class="hub-pill-btn" onclick="siRestore('${r.id}')">Restore</button>` : ''}
@@ -6867,6 +6868,16 @@ function siListHtml() {
 }
 async function siOpenFile(id) { try { const u = await siUrl(id); window.open(u.url, '_blank'); } catch (e) { claudeToast('⚠ ' + e.message, 'error'); } }
 async function siRestore(id) { try { await siApi({ action:'update', id, fields:{ status:'pending' } }); await siLoad(SI.pile); SI.counts.pending = (SI.counts.pending||0)+1; siRender(); } catch (e) { claudeToast('⚠ ' + e.message, 'error'); } }
+// Learn the invoice number of saved receipts that don't have one yet (needed to tell two copies apart).
+async function siFillRefs() {
+  if (SI.refsBusy) return; SI.refsBusy = true;
+  try {
+    const todo = SI.rows.filter(r => r.status === 'processed' && !r.reference && !SI.tried['ref' + r.id]).slice(0, 12);
+    let n = 0;
+    for (const r of todo) { SI.tried['ref' + r.id] = 1; try { const j = await siApi({ action:'reread', id:r.id, only_ref:true }); if (j.invoice_no) { r.reference = j.invoice_no; n++; } } catch (e) {} }
+    if (n) siRender();
+  } finally { SI.refsBusy = false; }
+}
 // Sends queued receipts to Xero (server-side: no Xero sign-in on the phone). Loops until none are left.
 async function siPush(ids) {
   if (SI.pushing) return;
