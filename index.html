@@ -2051,10 +2051,9 @@ function schHeader() {
 
 function schSetupCard() {
   return `<div class="section"><div class="section-body" style="padding:24px;max-width:640px;margin:0 auto">
-    <h2 style="font-size:18px;margin-bottom:8px">One-time setup</h2>
-    <p style="color:var(--ink-3);line-height:1.5;margin-bottom:14px">The Schedule needs a <code>bookings</code> table in Supabase. Copy the SQL, open the Supabase SQL editor, paste, and press Run. Then come back and tap “Check again”.</p>
-    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="sch-btn pri" onclick="navigator.clipboard.writeText(SCH_SQL).then(()=>claudeToast('SQL copied'))">Copy SQL</button><a class="sch-btn" target="_blank" rel="noopener" href="https://supabase.com/dashboard/project/nwpzjqblhywclqharggu/sql/new">Open SQL editor</a><button class="sch-btn" onclick="loadData()">Check again</button></div>
-    <pre class="sch-sql">${attrEsc(SCH_SQL)}</pre></div></div>`;
+    <h2 style="font-size:18px;margin-bottom:8px">Couldn't load your jobs</h2>
+    <p style="color:var(--ink-3);line-height:1.5;margin-bottom:14px">The schedule didn't load. This is usually a dropped connection or a login that needs refreshing. Tap “Check again”; if it stays like this, reload the page.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="sch-btn pri" onclick="loadData()">Check again</button></div></div></div>`;
 }
 
 function schRender() {
