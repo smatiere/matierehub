@@ -212,6 +212,50 @@ async function createBooking({ job_name, client_name, quote_number, labour_hours
   return rows[0];
 }
 
+// ── Price library (Supabase price_list, ex GST) ──────────────────────────────
+// 2026-11-05 — one library for quoting: fed by saved receipts (database trigger on
+// expense_log), by prices found online in a chat (save_price) and by hand.
+const PRICE_STOP = new Set(['the','and','for','with','of','a','an','to','in','pk','pack']);
+async function toolSearchPrices({ query, supplier, limit }) {
+  const toks = String(query || '').toLowerCase().split(/[^a-z0-9.]+/).filter(t => t && t.length >= 2 && !PRICE_STOP.has(t)).slice(0, 8);
+  if (!toks.length) throw new Error('Give a search like "treated pine 90x45 2.4m"');
+  const ors = toks.map(t => `item.ilike.*${encodeURIComponent(t)}*`).join(',');
+  let q = `?select=*&or=(${ors})&limit=300`;
+  if (supplier) q += `&supplier=ilike.*${encodeURIComponent(supplier)}*`;
+  const rows = await sbGet('price_list', q);
+  const today = Date.now();
+  const scored = rows.map(r => {
+    const hay = String(r.item).toLowerCase();
+    const hits = toks.filter(t => hay.includes(t)).length;
+    return { r, hits, days: Math.round((today - new Date(r.last_seen + 'T00:00:00').getTime()) / 86400000) };
+  }).sort((a, b) => b.hits - a.hits || a.days - b.days).slice(0, Math.min(Number(limit) || 12, 30));
+  return {
+    note: 'Prices are EX GST (add 10% for inc-GST). "stale" = last seen over 120 days ago — re-check before quoting. If nothing fits, search the web, then call save_price so the library grows.',
+    count: scored.length,
+    matches: scored.map(({ r, hits, days }) => ({
+      item: r.item, supplier: r.supplier || '(unknown)', unit: r.unit || undefined,
+      price_ex_gst: Number(r.unit_price), price_inc_gst: Math.round(Number(r.unit_price) * 110) / 100,
+      last_seen: r.last_seen, days_old: days, stale: days > 120,
+      times_seen: r.times_seen, range_ex_gst: r.low != null && Number(r.low) !== Number(r.high) ? [Number(r.low), Number(r.high)] : undefined,
+      source: r.source, url: r.source_url || undefined, category: r.category || undefined, words_matched: `${hits}/${toks.length}`
+    }))
+  };
+}
+async function toolSavePrice({ item, supplier, unit_price, gst_included, unit, url, category, notes, source }) {
+  if (!item || unit_price == null) throw new Error('item and unit_price are required');
+  const ex = gst_included ? Math.round(Number(unit_price) / 1.1 * 100) / 100 : Number(unit_price);
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/upsert_price`, {
+    method: 'POST',
+    headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ p_item: item, p_supplier: supplier || '', p_price: ex, p_unit: unit || '', p_category: category || '',
+      p_source: ['web', 'quote', 'manual'].includes(source) ? source : 'web', p_url: url || '', p_seen: new Date().toISOString().slice(0, 10), p_notes: notes || '' })
+  });
+  const txt = await res.text();
+  if (!res.ok) throw new Error(`Saving price failed: ${res.status} ${txt.slice(0, 200)}`);
+  const r = JSON.parse(txt);
+  return { saved: true, item: r.item, supplier: r.supplier, price_ex_gst: Number(r.unit_price), times_seen: r.times_seen };
+}
+
 // ── Tool implementations ──────────────────────────────────────────────────
 async function toolFindContact({ query }) {
   const accessToken = await getAccessToken();
@@ -377,6 +421,28 @@ async function toolCreateInvoice(args) {
 // ── MCP tool catalogue ─────────────────────────────────────────────────────
 const TOOLS = [
   {
+    name: 'search_prices',
+    description: 'Search Matiere\'s own PRICE LIBRARY — real prices from Seb\'s scanned receipts (Bunnings etc.), plus prices saved from earlier web searches. ALWAYS call this FIRST when pricing materials, supplies or services for a quote, before relying on memory or the web. Prices are ex GST, with date last paid, how often seen and the price range. Treat "stale" prices (over 120 days) as a guide only. Only go to the web for items the library does not have, then call save_price.',
+    inputSchema: { type: 'object', properties: {
+      query: { type: 'string', description: 'Words describing the item, e.g. "treated pine 90x45 2.4m" or "deck screws 50mm"' },
+      supplier: { type: 'string', description: 'Optional: limit to one supplier, e.g. Bunnings' },
+      limit: { type: 'number', description: 'Max results (default 12)' }
+    }, required: ['query'] }
+  },
+  {
+    name: 'save_price',
+    description: 'Save a price into Matiere\'s price library so future quotes can use it. Call this whenever you find a price online (or from a supplier quote/email) that was not in the library, and after Seb confirms a price. Records supplier, unit, ex-GST price and source URL.',
+    inputSchema: { type: 'object', properties: {
+      item: { type: 'string', description: 'Full item description incl. size/length, e.g. "Pine Structural Treated H3 90x45mm 2.4m"' },
+      supplier: { type: 'string', description: 'Where the price is from, e.g. Bunnings, Mitre 10, Dunbar Timber' },
+      unit_price: { type: 'number', description: 'Price per unit' },
+      gst_included: { type: 'boolean', description: 'true if the price you give includes GST (it will be converted to ex GST). Default false.' },
+      unit: { type: 'string', description: 'e.g. each, per metre, box of 500, per hour' },
+      url: { type: 'string' }, category: { type: 'string' }, notes: { type: 'string' },
+      source: { type: 'string', description: 'web (default), quote (supplier quote), or manual' }
+    }, required: ['item', 'unit_price'] }
+  },
+  {
     name: 'find_contact',
     description: 'Search Matiere\'s Xero contacts by name. Use this before create_quote/create_invoice to get a ContactID, or to check whether a client already exists in Xero.',
     inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Name or partial name to search for' } }, required: ['query'] }
@@ -391,7 +457,7 @@ const TOOLS = [
   },
   {
     name: 'create_quote',
-    description: 'Create a DRAFT Xero quote for a client (Seb reviews and sends from within Xero). Also, when job_name/materials/labour_hours are given, creates a shopping list of materials and a job baseline record (status "quoted") to compare against actuals later — this is Matiere\'s standard approve-a-quote workflow.',
+    description: 'Create a DRAFT Xero quote for a client (Seb reviews and sends from within Xero). Price materials from search_prices (the price library) first, and save any new web prices with save_price. Also, when job_name/materials/labour_hours are given, creates a shopping list of materials and a job baseline record (status "quoted") to compare against actuals later — this is Matiere\'s standard approve-a-quote workflow.',
     inputSchema: { type: 'object', properties: {
       contact_id: { type: 'string', description: 'Xero ContactID — preferred if already known' },
       contact_name: { type: 'string', description: 'Client name — looked up via find_contact if contact_id is not given' },
@@ -429,6 +495,8 @@ const TOOLS = [
 
 async function callTool(name, args) {
   switch (name) {
+    case 'search_prices':   return toolSearchPrices(args || {});
+    case 'save_price':      return toolSavePrice(args || {});
     case 'find_contact':    return toolFindContact(args || {});
     case 'create_contact':  return toolCreateContact(args || {});
     case 'create_quote':    return toolCreateQuote(args || {});

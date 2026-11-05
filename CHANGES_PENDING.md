@@ -378,3 +378,9 @@ Files: `index.html`, `netlify/functions/hub-write.js` (new), `CLAUDE.md`. Verifi
 ## Batch — bookings visible again + Won jobs flow into Schedule (2026-11-05)
 - Root cause of "jobs not showing": bookings table has row-level security with no read rule, so the browser's public key saw nothing. Now read through new password-gated `hub-read.js` (DB left locked: bookings hold client phone/email).
 - Every Won project is added to the Schedule automatically; "Add job" now lists Quoted/Lost jobs and marks the pick Won. "approved in Xero" banner removed.
+
+## Batch — Price library (2026-11-05)
+- New Supabase table `price_list` (supabase_price_list.sql, already run): one library of prices (ex GST) with supplier, unit, last paid, times seen, low–high, source (receipt / web / quote / manual).
+- Fed automatically: a database trigger on `expense_log` adds every saved receipt/expense line (any entry route). Backfilled 189 items from existing receipts.
+- Xero MCP connector (used by the quoting chat) gains `search_prices` and `save_price`; `create_quote` description tells Claude to check the library first and save web finds.
+- Hub: Scan Receipt → "Price library" now shows the shared library (source, price range).

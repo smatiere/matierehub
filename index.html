@@ -663,7 +663,7 @@ async function hubReadBookings() {
 // ── Data load — live from Supabase ────────────────────────────────────────────
 async function loadData() {
   try {
-    const [timesheets, expenses, projects, xeroRows, invoiceItems, quoteItems, shoppingLists, bookings] = await Promise.all([
+    const [timesheets, expenses, projects, xeroRows, invoiceItems, quoteItems, shoppingLists, bookings, priceList] = await Promise.all([
       sbGet('/rest/v1/timesheets?select=*&order=date.asc,id.asc'),
       sbGet('/rest/v1/expense_log?select=*&order=date.asc,id.asc'),
       sbGet('/rest/v1/projects?select=*&order=id.asc'),
@@ -679,7 +679,8 @@ async function loadData() {
       sbGet('/rest/v1/shopping_lists?select=*&order=created_at.desc').catch(() => []),
       // bookings (Schedule tab, 2026-11-01) — null = table not created yet
       // (supabase_bookings.sql not run); the tab then shows a one-tap setup card.
-      hubReadBookings().catch(() => null)
+      hubReadBookings().catch(() => null),
+      sbGet('/rest/v1/price_list?select=*&order=item.asc&limit=5000').catch(() => null)
     ]);
 
     const xero = {};
@@ -693,6 +694,7 @@ async function loadData() {
       quote_items:          quoteItems,
       shopping_lists:       shoppingLists,
       bookings,
+      price_list:           priceList,
       kpis:                 xero.kpis                 || {},
       monthly:              xero.monthly              || { labels:[], periods:[], revenue:[], materials:[], wages_owner:[] },
       open_invoices:        xero.open_invoices        || [],
@@ -6378,7 +6380,7 @@ function rcShell() {
   <div style="padding:20px">
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:18px">
       ${tab('scan','📷 Scan receipt')}
-      ${tab('catalog','📚 Materials catalog')}
+      ${tab('catalog','📚 Price library')}
     </div>
     <div id="rc-body"></div>
   </div>`;
@@ -6823,6 +6825,12 @@ async function rcExportToXero(items, batchLabel) {
 // Shows latest unit price + last-seen date + category + times purchased — the
 // reusable price reference for building quotes.
 function rcBuildCatalog() {
+  // Shared price library (receipts + web finds in chat + manual) — same data the quoting chat searches.
+  if (Array.isArray(D.price_list)) {
+    return D.price_list.map(r => ({ supplier: r.supplier || '', description: r.item, category: r.category || '', unit_price: Number(r.unit_price) || 0,
+      date: r.last_seen || '', count: r.times_seen || 1, project: '', projects: [], source: r.source, low: r.low, high: r.high, url: r.source_url, unit: r.unit }))
+      .sort((a, b) => a.description.localeCompare(b.description));
+  }
   const map = {};
   (D.expense_log || []).forEach(e => {
     const desc = (e.description||'').trim();
@@ -6853,7 +6861,7 @@ function rcRenderCatalog() {
     <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:16px;padding:14px;background:var(--bg-2);border-radius:10px">
       <input type="text" id="rc-cat-search" placeholder="Search description…" value="${attrEsc(RC.catSearch)}" oninput="rcCatFilter()" style="${inp};flex:1;min-width:180px">
       <input type="text" id="rc-cat-supplier" placeholder="Supplier…" value="${attrEsc(RC.catSupplier)}" oninput="rcCatFilter()" style="${inp};width:160px">
-      <input type="text" id="rc-cat-project" placeholder="Project…" value="${attrEsc(RC.catProject)}" oninput="rcCatFilter()" style="${inp};width:160px">
+      <input type="text" id="rc-cat-project" placeholder="Project…" value="${attrEsc(RC.catProject)}" oninput="rcCatFilter()" style="${inp};width:160px;${Array.isArray(D.price_list)?'display:none':''}">
     </div>
     <div id="rc-cat-table" style="overflow-x:auto"></div>`;
   smartSuggest(document.getElementById('rc-cat-project'), ssProjectNames, v => { RC.catProject = v; rcRenderCatalogTable(); });
@@ -6876,7 +6884,7 @@ function rcRenderCatalogTable() {
   if (sup) rows = rows.filter(r => (r.supplier||'').toLowerCase().includes(sup));
   if (prj) rows = rows.filter(r => (r.projects||[]).some(p => p.toLowerCase().includes(prj)));
   if (!rows.length) {
-    wrap.innerHTML = '<div style="color:var(--ink-4);padding:20px;text-align:center">No catalog items yet — they build up automatically as you save receipts.</div>';
+    wrap.innerHTML = '<div style="color:var(--ink-4);padding:20px;text-align:center">The price library is empty — it builds up from saved receipts and prices found in chat.</div>';
     return;
   }
   wrap.innerHTML = `
@@ -6886,8 +6894,8 @@ function rcRenderCatalogTable() {
         <th style="padding:8px 10px;font-weight:600">Description</th>
         <th style="padding:8px 10px;font-weight:600">Supplier</th>
         <th style="padding:8px 10px;font-weight:600">Category</th>
-        <th style="padding:8px 10px;font-weight:600">Project</th>
-        <th style="padding:8px 10px;font-weight:600;text-align:right">Latest unit $</th>
+        <th style="padding:8px 10px;font-weight:600">Source</th>
+        <th style="padding:8px 10px;font-weight:600;text-align:right">Latest unit $ (ex GST)</th>
         <th style="padding:8px 10px;font-weight:600;text-align:right">Times</th>
         <th style="padding:8px 10px;font-weight:600">Last seen</th>
         <th style="padding:8px 8px;width:90px"></th>
@@ -6901,8 +6909,8 @@ function rcRenderCatalogTable() {
             <td style="padding:7px 10px;color:var(--ink-2)">${attrEsc(r.description)}</td>
             <td style="padding:7px 10px;color:var(--ink-3)">${attrEsc(r.supplier||'—')}</td>
             <td style="padding:7px 10px;color:var(--ink-4)">${attrEsc(r.category||'—')}</td>
-            <td style="padding:7px 10px;color:var(--ink-3)" title="${attrEsc(projTitle)}">${attrEsc(r.project||'—')}${extra?`<span style="color:var(--ink-4)">${extra}</span>`:''}</td>
-            <td style="padding:7px 10px;text-align:right;color:var(--amber);font-weight:600">${fmt(r.unit_price,2)}</td>
+            <td style="padding:7px 10px;color:var(--ink-3)" title="${attrEsc(projTitle)}">${r.source ? (r.url ? '<a href="'+attrEsc(r.url)+'" target="_blank" rel="noopener" style="color:inherit">'+attrEsc(r.source)+'</a>' : attrEsc(r.source)) : (attrEsc(r.project||'—')+(extra?`<span style="color:var(--ink-4)">${extra}</span>`:''))}</td>
+            <td style="padding:7px 10px;text-align:right;color:var(--amber);font-weight:600">${fmt(r.unit_price,2)}${r.low != null && Number(r.low) !== Number(r.high) ? `<div style="font-size:10px;color:var(--ink-4);font-weight:400">${fmt(r.low,2)}–${fmt(r.high,2)}</div>` : ''}</td>
             <td style="padding:7px 10px;text-align:right;color:var(--ink-4)">${r.count}</td>
             <td style="padding:7px 10px;color:var(--ink-4);white-space:nowrap">${fmtDMY(r.date)}</td>
             <td style="padding:5px 8px;text-align:right"><button onclick='rcCopyLine(${JSON.stringify({d:r.description,p:r.unit_price,s:r.supplier}).replace(/'/g,"&#39;")})' style="padding:5px 9px;background:var(--bg-1);color:var(--ink-3);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:11px">Copy</button></td>
