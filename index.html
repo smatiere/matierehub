@@ -477,6 +477,15 @@ body.claude-bar-off #app{padding-bottom:calc(24px + env(safe-area-inset-bottom))
   body.claude-bar-off #claude-toast{bottom:calc(76px + env(safe-area-inset-bottom))}
   body.claude-bar-off #sch-snack{bottom:calc(76px + env(safe-area-inset-bottom))}
 }
+.ts-logbtn{width:100%;min-height:48px;font-size:15px;margin-bottom:14px;border-radius:12px}
+@media (min-width:721px){.ts-logbtn{width:auto;min-height:0;font-size:12px;padding:9px 18px;border-radius:var(--r)}}
+.ql-row{margin-bottom:14px}.ql-row label{display:block;font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-4);margin-bottom:6px}
+.ql-row select,.ql-row input[type=date],.ql-row input[type=text]{width:100%;min-height:46px;background:var(--bg-3);border:1px solid var(--border-2);color:var(--ink);border-radius:10px;padding:0 12px;font-size:16px;color-scheme:dark}
+.ql-step{display:flex;align-items:center;gap:10px}
+.ql-step button.sb{width:56px;height:56px;border-radius:14px;background:var(--bg-3);border:1px solid var(--border-2);color:var(--ink);font-size:26px;touch-action:manipulation}
+.ql-step .ql-val{flex:1;text-align:center;font-size:34px;font-weight:700;color:var(--amber)}
+.ql-presets{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.ql-presets button{min-height:44px;padding:0 16px;border-radius:22px;background:var(--bg-3);border:1px solid var(--border-2);color:var(--ink-2);font-size:14px;font-weight:600;touch-action:manipulation}
 @media (max-width:720px){.hide-sm{display:none}}
 @keyframes sheetIn{from{transform:translateY(40px);opacity:0}to{transform:none;opacity:1}}
 
@@ -3986,6 +3995,7 @@ function renderTimesheet() {
     <input type="date" id="ts-to" value="${tsRangeTo||ds(today)}" onchange="tsCustomRange()" max="${ds(today)}">` : '';
 
   document.getElementById('page-timesheet').innerHTML = `
+    <button class="btn-primary ts-logbtn" onclick="tsQuickLog()">＋ Log hours</button>
     <!-- KPIs -->
     <div class="kpi-grid">
       <div class="kpi ${missingDays>0?'warn':'good'}" style="cursor:pointer" onclick="tsShowMissing('${ds(twoWeeksAgo)}','${ds(today)}')" title="Click to see and fill the missing days">
@@ -7898,6 +7908,49 @@ function hubNavSync(name) {
 }
 ['sch-count', 'fa-count'].forEach(id => { const e = document.getElementById(id); if (e) new MutationObserver(() => hubNavSync(hubTrackTab)).observe(e, { childList: true, characterData: true, subtree: true, attributes: true }); });
 hubNavSync('timesheet');
+
+// ── Quick "Log hours" sheet (2026-11-06) ─────────────────────────────────
+let QL = { hours: 8 };
+function tsQuickLog() {
+  const names = [];
+  (D.projects || []).filter(p => (p.status || 'Active') === 'Active').forEach(p => names.push(p.name));
+  NON_BILLABLE.filter(n => n !== "Elea's bed").forEach(n => { if (!names.includes(n)) names.push(n); });
+  let last = ''; try { last = localStorage.getItem('ql_last_project') || ''; } catch (e) {}
+  if (last && !names.includes(last)) names.unshift(last);
+  QL = { hours: 8 };
+  const opts = names.map(n => `<option value="${attrEsc(n)}"${n === last ? ' selected' : ''}>${attrEsc(n)}</option>`).join('');
+  openModal('Log hours', `
+    <div class="ql-row"><label>Project</label><select id="ql-project">${last ? '' : '<option value="">Choose…</option>'}${opts}</select></div>
+    <div class="ql-row"><label>Hours</label>
+      <div class="ql-step"><button class="sb" onclick="qlStep(-0.5)" aria-label="Less">−</button><div class="ql-val" id="ql-val">8</div><button class="sb" onclick="qlStep(0.5)" aria-label="More">+</button></div>
+      <div class="ql-presets"><button onclick="qlSet(2)">2h</button><button onclick="qlSet(4)">4h</button><button onclick="qlSet(6)">6h</button><button onclick="qlSet(8)">Full day</button></div></div>
+    <div class="ql-row"><label>Date</label><input type="date" id="ql-date" value="${ds(todayMidnight())}" max="${ds(todayMidnight())}"></div>
+    <div class="ql-row"><label>Notes (optional)</label><input type="text" id="ql-notes" placeholder="What was done"></div>
+    <button class="btn-primary" id="ql-save" style="width:100%;min-height:50px;font-size:16px;border-radius:12px" onclick="qlSave()">Save hours</button>`);
+}
+function qlSet(h) { QL.hours = h; document.getElementById('ql-val').textContent = h; }
+function qlStep(d) { qlSet(Math.min(24, Math.max(0.5, QL.hours + d))); }
+async function qlSave() {
+  const project = document.getElementById('ql-project').value;
+  if (!project) { claudeToast('Choose a project first', 'unclear'); return; }
+  const btn = document.getElementById('ql-save'); btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    const row = await (async () => {
+      const r = await fetch('/.netlify/functions/hub-write', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ table: 'timesheets', insert: true, fields: { project, hours: QL.hours, date: document.getElementById('ql-date').value, notes: document.getElementById('ql-notes').value.trim(), employee: 'Seb' } }) });
+      const out = await r.json().catch(() => ({}));
+      if (!r.ok || !out.ok) throw new Error(out.error || ('Save failed ' + r.status));
+      return out.row;
+    })();
+    try { localStorage.setItem('ql_last_project', project); } catch (e) {}
+    D.timesheets = D.timesheets || []; D.timesheets.push(row);
+    closeModal(); renderTimesheet();
+    claudeToast(`✓ ${row.hours}h on ${row.project}`, 'success');
+  } catch (e) {
+    btn.disabled = false; btn.textContent = 'Save hours';
+    claudeToast('⚠ ' + e.message, 'error');
+  }
+}
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 hubCheckAuth();

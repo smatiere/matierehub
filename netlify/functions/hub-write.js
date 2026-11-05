@@ -52,6 +52,8 @@ const WRITABLE = {
 // Used for "create a project on the spot" (Feature 1). The row id is generated
 // server-side (PR-### sequence) — never accepted from the client.
 const CREATABLE = {
+  // 2026-11-06 — quick "Log hours" sheet on phones. Row id (TS-###), rate and value are set server-side.
+  timesheets:     ['date', 'project', 'hours', 'employee', 'notes'],
   projects:       ['name', 'status', 'quoted', 'notes', 'manual_revenue', 'manual_revenue_note',
                     'baseline_scope', 'baseline_price', 'baseline_labour_hours', 'baseline_materials_estimate', 'baseline_set_at'],
   // 2026-09-18 — shopping lists are usually created by the Xero MCP connector
@@ -116,6 +118,15 @@ async function nextProjectId() {
 }
 
 // Generate the next BK-### booking id (same pattern as the others).
+async function nextTimesheetId() {
+  const rows = await sbGet('timesheets', '?select=id');
+  const nums = rows
+    .map(r => parseInt(String(r.id || '').replace(/^TS-/, ''), 10))
+    .filter(n => !isNaN(n));
+  const next = nums.length ? Math.max(...nums) + 1 : 1;
+  return `TS-${String(next).padStart(3, '0')}`;
+}
+
 async function nextBookingId() {
   const rows = await sbGet('bookings', '?select=id');
   const nums = rows
@@ -182,6 +193,18 @@ exports.handler = async (event) => {
         row.status = row.status || 'Active';
         if (row.quoted == null) row.quoted = 0;
         if (!row.notes) row.notes = `Created ${new Date().toISOString().slice(0, 10)} via HUB`;
+      }
+      if (table === 'timesheets') {
+        const h = parseFloat(row.hours);
+        if (!row.project || !String(row.project).trim()) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Project required' }) };
+        if (!(h > 0 && h <= 24)) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Hours must be between 0 and 24' }) };
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(row.date || ''))) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Date required (YYYY-MM-DD)' }) };
+        row.hours    = h;
+        row.employee = row.employee || 'Seb';
+        row.notes    = row.notes || '';
+        row.rate     = 100;
+        row.value    = h * 100;
+        row.id       = await nextTimesheetId();
       }
       if (table === 'bookings') {
         row.id     = await nextBookingId();
