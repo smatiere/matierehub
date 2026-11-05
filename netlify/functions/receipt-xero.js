@@ -165,6 +165,13 @@ exports.handler = async (event) => {
       try { const c = await xeroContext(); bank = c.bank ? c.bank.Name : null; if (!c.bank) note = c.banks.length ? 'More than one bank account' : 'No bank account'; } catch (e) { note = e.message; }
       return out(200, { ok: true, queued: n('queued'), failed: n('failed'), sent: n('sent'), bank, note });
     }
+    // The expense accounts exactly as they are in Xero's chart of accounts (what the Inbox category list shows).
+    if (b.action === 'accounts') {
+      const c = await xeroContext();
+      const accs = (await xeroCall('Accounts', 'GET', c.token, c.tenant)).Accounts || [];
+      const list = accs.filter(a => a.Class === 'EXPENSE' && a.Status === 'ACTIVE' && a.Name).map(a => ({ code: a.Code, name: a.Name, type: a.Type }));
+      return out(200, { ok: true, accounts: list });
+    }
     if (b.action === 'banks') {
       const c = await xeroContext();
       return out(200, { ok: true, chosen: c.bank ? c.bank.Name : null, banks: c.banks.map(x => ({ id: x.AccountID, name: x.Name, code: x.Code, bank_type: x.BankAccountType, currency: x.CurrencyCode })) });

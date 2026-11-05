@@ -22,3 +22,14 @@
   from   = "/*"
   to     = "/index.html"
   status = 200
+
+# Always check for a newer page (stops the iPhone Home Screen app showing an old version)
+[[headers]]
+  for = "/"
+  [headers.values]
+    Cache-Control = "no-cache, must-revalidate"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache, must-revalidate"

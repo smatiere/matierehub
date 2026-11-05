@@ -708,6 +708,7 @@ body.claude-bar-off #app{padding-bottom:calc(24px + env(safe-area-inset-bottom))
     <button data-tab="quotes" onclick="hubGo('quotes')">Quotes &amp; Pricing</button>
     <button data-tab="pnl" onclick="hubGo('pnl')">P&amp;L</button>
     <button data-tab="performance" onclick="hubGo('performance')">Performance</button>
+    <button onclick="hubReloadApp()" style="color:var(--ink-3)">↻ Reload app (get latest version)</button>
   </div>
 </div>
 <div id="claude-toast"></div>
@@ -6389,7 +6390,8 @@ async function exLoadCategories() {
     listed = rows.map(r => r.name).filter(Boolean);
   } catch (e) { listed = []; }
   const fromExp = (D.expense_log || []).map(e => e.category).filter(Boolean);
-  EX_CATEGORIES = [...new Set([...listed, ...fromExp])].sort();
+  const xs = await siLoadAccounts();
+  EX_CATEGORIES = xs ? [...new Set([...xs, ...fromExp])].sort() : [...new Set([...listed, ...fromExp])].sort();
   return EX_CATEGORIES;
 }
 
@@ -6533,10 +6535,39 @@ function rcStartForProject(name) {
   showTab('receipts', tabEl);
 }
 
+// Xero's own expense accounts: the Inbox category list must match Xero exactly (it is accounting coding).
+// Cached on this phone for a day so the list still works if Xero is slow.
+async function siLoadAccounts() {
+  if (SI.xa) return SI.xa;
+  let cached = null; try { cached = JSON.parse(localStorage.getItem('xero_accounts') || 'null'); } catch (e) {}
+  if (cached && Date.now() - cached.t < 864e5 && cached.names.length) return SI.xa = cached.names;
+  try {
+    const r = await fetch('/.netlify/functions/receipt-xero', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'accounts' }) });
+    const j = await r.json();
+    if (j.ok && j.accounts.length) {
+      const names = j.accounts.map(a => a.name);
+      try { localStorage.setItem('xero_accounts', JSON.stringify({ t: Date.now(), names })); } catch (e) {}
+      return SI.xa = names;
+    }
+  } catch (e) {}
+  return SI.xa = (cached && cached.names) || null;
+}
+// Categories for the dropdown: the ones used most in the last 12 months first, then every other Xero account A-Z.
+function siCatGroups(xs) {
+  const cutoff = ds(new Date(todayMidnight().getTime() - 365 * 864e5));
+  const cnt = {};
+  (D.expense_log || []).forEach(e => { if (e.category && String(e.date).slice(0, 10) >= cutoff) cnt[e.category.toLowerCase()] = (cnt[e.category.toLowerCase()] || 0) + 1; });
+  const used = xs.filter(n => cnt[n.toLowerCase()]).sort((a, b) => cnt[b.toLowerCase()] - cnt[a.toLowerCase()]).slice(0, 12);
+  const rest = xs.filter(n => !used.includes(n)).sort((a, b) => a.localeCompare(b));
+  return { used, rest };
+}
+function siCatMatch(xs, c) { return c ? (xs.find(n => n.toLowerCase() === String(c).toLowerCase().trim()) || '') : ''; }
+
 async function renderReceipts() {
   const el = document.getElementById('page-receipts');
   if (!el || !D) return;
-  await exLoadCategories();           // populates EX_CATEGORIES (shared category list)
+  await siLoadAccounts();
+  await exLoadCategories();           // populates EX_CATEGORIES (Xero accounts when available)
   if (RC.view === 'inbox') { await siLoad(SI.pile === 'missing' ? 'pending' : SI.pile).catch(() => {}); }
   el.innerHTML = rcShell();
   if (RC.view === 'inbox') siRender();
@@ -6716,6 +6747,13 @@ function siSuggest(date) {
 function siMem(sup) { try { return (JSON.parse(localStorage.getItem('si_mem') || '{}'))[String(sup||'').toLowerCase()] || {}; } catch (e) { return {}; } }
 function siMemSave(sup, o) { try { const m = JSON.parse(localStorage.getItem('si_mem') || '{}'); m[String(sup||'').toLowerCase()] = { ...(m[String(sup||'').toLowerCase()]||{}), ...o }; localStorage.setItem('si_mem', JSON.stringify(m)); } catch (e) {} }
 // Supplier guess from the email address (payments-noreply@google.com -> Google)
+function siCatOptions(cat, fallback) {
+  const xs = SI.xa;
+  const opt = c => `<option ${c === cat ? 'selected' : ''}>${attrEsc(c)}</option>`;
+  if (!xs) return `<option value="">— choose —</option>${fallback.map(opt).join('')}${cat && !fallback.includes(cat) ? `<option selected>${attrEsc(cat)}</option>` : ''}`;
+  const g = siCatGroups(xs);
+  return `<option value="">— choose —</option><optgroup label="Most used">${g.used.map(opt).join('')}</optgroup><optgroup label="All Xero accounts">${g.rest.map(opt).join('')}</optgroup>${cat && !xs.includes(cat) ? `<option selected>${attrEsc(cat)}</option>` : ''}`;
+}
 function siGuessSupplier(r) {
   if (r.supplier) return r.supplier;
   const m = String(r.email_from || '').match(/@([a-z0-9-]+\.)*([a-z0-9-]+)\.[a-z.]{2,}$/i);
@@ -6732,10 +6770,10 @@ function siHabit(sup) {
   return { n: rows.length, noProjShare: none / rows.length };
 }
 // Most common description / category this supplier has had in past saved expenses (works on any device).
-function siHabitField(sup, field, minShare) {
+function siHabitField(sup, field, minShare, minRows) {
   const k = String(sup || '').toLowerCase().trim(); if (!k) return '';
   const rows = (D.expense_log || []).filter(e => String(e.supplier || '').toLowerCase().trim() === k && String(e[field] || '').trim());
-  if (rows.length < 2) return '';
+  if (rows.length < (minRows || 2)) return '';
   const cnt = {};
   rows.forEach(e => { const v = String(e[field]).trim(); cnt[v.toLowerCase()] = cnt[v.toLowerCase()] || { v, n: 0 }; cnt[v.toLowerCase()].n++; });
   const top = Object.values(cnt).sort((a, b) => b.n - a.n)[0];
@@ -6822,7 +6860,8 @@ function siCardHtml() {
   const total = r.total_inc != null ? r.total_inc : (sumInc || '');
   const cats = (typeof EX_CATEGORIES !== 'undefined' && EX_CATEGORIES) ? EX_CATEGORIES : [];
   const lineCat = (lines.find(l => l.category) || {}).category || '';
-  const cat = SI.cat != null ? SI.cat : (mem.cat || lineCat || siHabitField(sup, 'category', 0.6) || '');
+  const learned = mem.cat || lineCat || siHabitField(sup, 'category', 0.5, 1) || '';
+  const cat = SI.cat != null ? SI.cat : (SI.xa ? siCatMatch(SI.xa, learned) : learned);
   // GST mode: what this receipt says, else what we learned from this supplier, else 10%.
   const detected = (r.check_info && r.check_info.gst_status) || 'unknown';
   const hist = (SI.taxHist || {})[String(sup).toLowerCase()] || '';
@@ -6858,7 +6897,7 @@ function siCardHtml() {
 
     <div class="si-sec">Accounting</div>
     <div class="si-grid">
-      <label>Category (Xero account)<select id="si-cat"><option value="">— choose —</option>${cats.map(c => `<option ${c===cat?'selected':''}>${attrEsc(c)}</option>`).join('')}${cat && !cats.includes(cat) ? `<option selected>${attrEsc(cat)}</option>` : ''}</select></label>
+      <label>Category (Xero account)<select id="si-cat">${siCatOptions(cat, cats)}</select></label>
       <label>GST<select id="si-tax"><option value="gst" ${tax==='gst'?'selected':''}>GST 10% included</option><option value="free" ${tax==='free'?'selected':''}>No GST (GST-free)</option><option value="excl" ${tax==='excl'?'selected':''}>BAS excluded</option></select><small style="color:var(--ink-4)">${taxWhy}</small></label>
     </div>
 
@@ -7946,6 +7985,10 @@ function hubGo(name) {
   hubMore(false);
   const tab = [...document.querySelectorAll('.tabs .tab')].find(t => (t.getAttribute('onclick') || '').includes("'" + name + "'"));
   if (tab) showTab(name, tab);
+}
+async function hubReloadApp() {
+  try { if (window.caches) { for (const k of await caches.keys()) await caches.delete(k); } } catch (e) {}
+  location.reload();
 }
 function hubMore(open) { document.getElementById('hub-more').classList.toggle('open', !!open); }
 function hubNavSync(name) {
