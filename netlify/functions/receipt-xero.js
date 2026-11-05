@@ -62,19 +62,34 @@ function attach(ctx, txnId, filename, mime, buf, kind) {
   });
 }
 
-// Is this already in Xero (a Spend Money entry or a bill from the same supplier, same total, within a few days)?
-async function findExisting(ctx, contactId, date, expectedInc) {
+// Is this already in Xero? Looks for a payment with the same total within a few days: first under the same contact, then
+// (because the bank feed often names the supplier differently: "Bunnings" vs "Bunnings Warehouse") by amount and date alone.
+async function findExisting(ctx, contactId, date, expectedInc, supplierName) {
   const d = new Date(date + 'T00:00:00Z'), pad = (n) => String(n).padStart(2, '0');
   const dt = (x) => `DateTime(${x.getUTCFullYear()},${pad(x.getUTCMonth() + 1)},${pad(x.getUTCDate())})`;
   const lo = new Date(d.getTime() - 5 * 86400000), hi = new Date(d.getTime() + 5 * 86400000);
   const range = `Date>=${dt(lo)}&&Date<=${dt(hi)}`;
+  const norm = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const similar = (a2, b2) => { const x = norm(a2), y = norm(b2); return x && y && (x.includes(y.slice(0, 5)) || y.includes(x.slice(0, 5))); };
+  const dayDiff = (x) => Math.abs(new Date(String(x.DateString || x.Date || '').slice(0, 10) + 'T00:00:00Z').getTime() - d.getTime());
+  const pick = (list, idKey, kind) => {
+    const fits = list.filter(x => Math.abs(Number(x.Total) - expectedInc) <= 0.06);
+    if (!fits.length) return null;
+    // prefer one with no file yet, then the closest date
+    fits.sort((p, q) => (p.HasAttachments ? 1 : 0) - (q.HasAttachments ? 1 : 0) || dayDiff(p) - dayDiff(q));
+    return { id: fits[0][idKey], kind, contact: (fits[0].Contact && fits[0].Contact.Name) || '', hadFile: !!fits[0].HasAttachments, multiple: fits.length > 1 };
+  };
   try {
-    const bt = await xeroCall(`BankTransactions?where=${encodeURIComponent(`Contact.ContactID==Guid("${contactId}")&&Status!="DELETED"&&${range}`)}`, 'GET', ctx.token, ctx.tenant);
-    const a = (bt.BankTransactions || []).find(x => Math.abs(Number(x.Total) - expectedInc) <= 0.06);
-    if (a) return { id: a.BankTransactionID, kind: 'BankTransactions' };
+    if (contactId) {
+      const bt = await xeroCall(`BankTransactions?where=${encodeURIComponent(`Contact.ContactID==Guid("${contactId}")&&Status!="DELETED"&&${range}`)}`, 'GET', ctx.token, ctx.tenant);
+      const a = pick(bt.BankTransactions || [], 'BankTransactionID', 'BankTransactions'); if (a) return a;
+    }
+    // any contact, our bank account, matching name loosely OR a unique amount match
+    const all = await xeroCall(`BankTransactions?where=${encodeURIComponent(`Type=="SPEND"&&Status!="DELETED"&&${range}`)}`, 'GET', ctx.token, ctx.tenant);
+    const mine = (all.BankTransactions || []).filter(x => !ctx.bank || !x.BankAccount || x.BankAccount.AccountID === ctx.bank.AccountID);
+    const byName = pick(mine.filter(x => similar(x.Contact && x.Contact.Name, supplierName)), 'BankTransactionID', 'BankTransactions'); if (byName) return byName;
     const iv = await xeroCall(`Invoices?where=${encodeURIComponent(`Type=="ACCPAY"&&Contact.ContactID==Guid("${contactId}")&&Status!="VOIDED"&&Status!="DELETED"&&${range}`)}`, 'GET', ctx.token, ctx.tenant);
-    const b = (iv.Invoices || []).find(x => Math.abs(Number(x.Total) - expectedInc) <= 0.06);
-    if (b) return { id: b.InvoiceID, kind: 'Invoices' };
+    const b2 = pick(iv.Invoices || [], 'InvoiceID', 'Invoices'); if (b2) return b2;
   } catch (e) { /* if the lookup itself fails, carry on and create */ }
   return null;
 }
@@ -96,12 +111,12 @@ async function pushOne(ctx, r) {
   // Never create a second copy: if Xero already has it, just attach the file to that one.
   const sumEx = lines.reduce((t2, l) => t2 + (parseFloat(l.qty) || 1) * (parseFloat(l.unit_price) || 0), 0);
   const expectedInc = r.total_inc != null ? Number(r.total_inc) : (r.tax_mode === 'gst' || !r.tax_mode ? sumEx * 1.1 : sumEx);
-  const have = await findExisting(ctx, contactId, date, expectedInc);
+  const have = await findExisting(ctx, contactId, date, expectedInc, sup);
   if (have) {
     const f0 = await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${r.file_path}`, { headers: sbH() });
     let att0 = false;
     if (f0.ok) { const buf0 = Buffer.from(await f0.arrayBuffer()); const nm = String(sup + '-' + date).replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 60) + '.' + ext(r.mime); att0 = (await attach(ctx, have.id, nm, r.mime, buf0, have.kind)).status < 400; }
-    await rest('PATCH', `receipt_inbox?id=eq.${encodeURIComponent(r.id)}`, { xero_status: 'sent', xero_txn_id: have.id, xero_attached: att0, xero_error: `Already in Xero (${have.kind === 'Invoices' ? 'as a bill' : 'as Spend Money'}) — nothing duplicated${att0 ? ', file attached to it' : ''}`, xero_sent_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+    await rest('PATCH', `receipt_inbox?id=eq.${encodeURIComponent(r.id)}`, { xero_status: 'sent', xero_txn_id: have.id, xero_attached: att0, xero_error: `Already in Xero (${have.kind === 'Invoices' ? 'as a bill' : 'as Spend Money'}${have.contact ? ', under ' + have.contact : ''}) — nothing duplicated${att0 ? ', file attached to it' : ''}${have.hadFile ? ' (it already had a file)' : ''}`, xero_sent_at: new Date().toISOString(), updated_at: new Date().toISOString() });
     return { id: r.id, ok: true, attached: att0, existing: true };
   }
   const mk = (status) => ({ BankTransactions: [{

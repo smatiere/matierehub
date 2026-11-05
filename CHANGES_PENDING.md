@@ -429,3 +429,4 @@ Files: `index.html`, `netlify/functions/hub-write.js` (new), `CLAUDE.md`. Verifi
 
 ## Batch — combined PDF import (2026-11-05)
 - Inbox "📚 Combined PDF": drop a PDF holding many receipts (e.g. Bunnings PowerPass "Print Selected"); it is read 4 pages at a time (a receipt cut at a window edge is carried into the next), split into one PDF per receipt in the browser (pdf-lib), and each becomes its own Pending card with supplier, date, lines, total check, invoice number. Server: receipt-inbox `read_multi`; `add` accepts prefill + salt. Re-importing the same PDF is ignored (same files).
+- receipt-xero: existing-entry search now also matches by amount + date + loose supplier name under any contact (bank feed names suppliers differently), preferring entries with no file; reports which contact it matched.
