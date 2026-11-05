@@ -6634,7 +6634,7 @@ function siSupplierList() {
 }
 function siCardHtml() {
   const rows = SI.rows;
-  if (!rows.length) return `<div style="text-align:center;padding:50px 20px;color:var(--ink-4)"><div style="font-size:38px;margin-bottom:8px">🎉</div>Nothing waiting. Tap <b>＋ Add receipts</b> to add some.</div>`;
+  if (!rows.length) return `<div style="text-align:center;padding:50px 20px;color:var(--ink-4)"><div style="font-size:38px;margin-bottom:8px">🎉</div>Nothing waiting. Tap <b>＋ Add receipts</b> to add some.<div style="font-size:12px;margin-top:10px">📸 Photos from your phone arrive here too once the “Send to Hub” shortcut is set up.</div></div>`;
   const r = rows[SI.idx];
   const lines = Array.isArray(r.lines) ? r.lines : [];
   const sup = siGuessSupplier(r);
@@ -6893,32 +6893,25 @@ async function siXeroStatus() {
 
 // ── Missing receipts: money out of the bank with no receipt anywhere ──
 async function siMissingHtml() {
+  // Ask Xero itself: payments from the last 90 days with no receipt file attached, and any Inbox receipt that matches each.
+  let x = null;
   try {
-    const since = new Date(Date.now() - 90*86400000).toISOString().slice(0,10);
-    const [bank, all] = await Promise.all([
-      sbGet(`/rest/v1/bank_transactions?select=id,date,contact,description,debit&debit=gt.0&date=gte.${since}&order=date.desc&limit=500`),
-      siApi({ action:'list', status:'all' })
-    ]);
-    const have = [];   // {t: time, amt: inc GST}
-    const groups = {};
-    (D.expense_log || []).forEach(e => { const k = (e.supplier||'')+'|'+(e.date||'').slice(0,10); (groups[k] = groups[k] || { d:(e.date||'').slice(0,10), a:0 }).a += (Number(e.amount)||0) * 1.1; });
-    Object.values(groups).forEach(g => have.push({ t: new Date(g.d+'T00:00:00').getTime(), a: g.a }));
-    all.rows.forEach(r => { if (r.total_inc != null && r.receipt_date) have.push({ t: new Date(r.receipt_date.slice(0,10)+'T00:00:00').getTime(), a: Number(r.total_inc) }); });
-    let ign = []; try { ign = JSON.parse(localStorage.getItem('si_ignored') || '[]'); } catch (e) {}
-    const miss = bank.filter(b => {
-      if (ign.includes(b.id)) return false;
-      const t = new Date(b.date.slice(0,10)+'T00:00:00').getTime(), a = Number(b.debit);
-      return !have.some(h => Math.abs(h.t - t) <= 5*86400000 && Math.abs(h.a - a) <= Math.max(1, a*0.03));
-    });
-    SI.missing = miss;
-    if (!miss.length) return `<div style="padding:40px 20px;text-align:center;color:var(--ink-4)"><div style="font-size:34px">✅</div>Every payment in the last 90 days has a receipt.</div>`;
-    return `<div style="max-width:760px;margin:0 auto"><div style="font-size:12px;color:var(--ink-4);margin-bottom:8px">${miss.length} payment${miss.length>1?'s':''} out of the bank in the last 90 days with no matching receipt. Find the receipt and add it, or tap Ignore (wages, transfers…).</div>` +
-      miss.map(b => `<div style="display:flex;gap:10px;align-items:center;padding:9px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;background:var(--bg-1)">
-        <div style="flex:1;min-width:0"><div style="font-weight:600;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${attrEsc(b.contact||b.description||'Payment')}</div><div style="font-size:11px;color:var(--ink-4)">${fmtDMY(b.date.slice(0,10))}</div></div>
-        <div style="color:var(--amber);font-weight:700">${fmt(b.debit,2)}</div>
-        <button class="hub-pill-btn" onclick="siIgnore('${b.id}')">Ignore</button></div>`).join('') + `</div>`;
-  } catch (e) { return `<div style="padding:30px;color:var(--pink);text-align:center">⚠ ${attrEsc(e.message)}</div>`; }
+    const r = await fetch('/.netlify/functions/receipt-xero', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ action:'needs_receipt' }) });
+    x = await r.json(); if (!r.ok || !x.ok) throw new Error(x.error || 'Xero error ' + r.status);
+  } catch (e) { return `<div style="padding:30px;color:var(--pink);text-align:center">⚠ Couldn’t check Xero: ${attrEsc(e.message)}</div>`; }
+  let ign = []; try { ign = JSON.parse(localStorage.getItem('si_ignored') || '[]'); } catch (e) {}
+  const items = x.items.filter(i => !ign.includes(i.id)).sort((a, b) => (b.candidates.length - a.candidates.length) || String(b.date).localeCompare(String(a.date)));
+  if (!items.length) return `<div style="padding:40px 20px;text-align:center;color:var(--ink-4)"><div style="font-size:34px">✅</div>Every payment in Xero from the last 90 days has a receipt.</div>`;
+  const withC = items.filter(i => i.candidates.length).length;
+  return `<div style="max-width:760px;margin:0 auto"><div style="font-size:12px;color:var(--ink-4);margin-bottom:8px">${items.length} of ${x.checked} payments in Xero (last 90 days) have no receipt attached${withC ? ` · <b style="color:var(--sage)">${withC} have a matching receipt here</b>` : ''}. Ignore wages, transfers and bank fees.</div>` +
+    items.map(i => { const c = i.candidates[0];
+      const act = c ? (c.status === 'pending' ? `<button class="hub-pill-btn active" onclick="siOpenPending('${c.id}')">Receipt waiting — open</button>` : `<button class="hub-pill-btn active" onclick="siPush(['${c.id}'])">Attach receipt</button>`) : '<span style="font-size:11px;color:var(--ink-4)">no receipt found</span>';
+      return `<div style="display:flex;gap:8px;align-items:center;padding:9px 12px;border:1px solid ${c ? 'var(--sage)' : 'var(--border)'};border-radius:8px;margin-bottom:6px;background:var(--bg-1)">
+        <div style="flex:1;min-width:0"><div style="font-weight:600;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${attrEsc(i.contact || 'Payment')}</div><div style="font-size:11px;color:var(--ink-4)">${fmtDMY(i.date)}${i.reference ? ' · ' + attrEsc(i.reference) : ''}</div></div>
+        <div style="color:var(--amber);font-weight:700">${fmt(i.total,2)}</div>${act}
+        <button class="hub-pill-btn" onclick="siIgnore('${i.id}')">Ignore</button></div>`; }).join('') + `</div>`;
 }
+async function siOpenPending(id) { SI.pile = 'pending'; await siLoad('pending').catch(() => {}); const k = SI.rows.findIndex(r => r.id === id); SI.idx = k >= 0 ? k : 0; siReset(); siRender(); window.scrollTo({ top: 0 }); }
 function siIgnore(id) { let ign = []; try { ign = JSON.parse(localStorage.getItem('si_ignored') || '[]'); } catch (e) {} ign.push(id); try { localStorage.setItem('si_ignored', JSON.stringify(ign)); } catch (e) {} siRender(); }
 
 

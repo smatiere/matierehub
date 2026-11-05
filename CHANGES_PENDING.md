@@ -425,3 +425,4 @@ Files: `index.html`, `netlify/functions/hub-write.js` (new), `CLAUDE.md`. Verifi
 - Inbox card: if a receipt's lines are already in expenses (same supplier, date ±3d, matching lines — or same invoice no.), an amber banner offers: link the file only / add only the missing lines / different. Last-resort confirm if saving would create identical lines on the same job.
 - receipt-xero: before creating Spend Money it looks for an existing Xero entry or bill (same supplier, total, ±5 days) and attaches the file to that instead.
 - Lines list opens by default. PolyGuru fixed: EXP-280 (shipping $75.96) added to Aanya - Fairlight - porch; invoice linked to its 7 expenses.
+- Missing receipts pile now asks Xero: payments (last 90 days) with no file attached, with matching Inbox receipts offered (Open / Attach).
