@@ -31,7 +31,11 @@ const extOf = (mime) => ({ 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp'
 async function readReceipt(event, name, mime, data) {
   try {
     const { handler } = require('./claude-parse');
-    const r = await handler({ httpMethod: 'POST', headers: event.headers, body: JSON.stringify({ previewOnly: true, images: [{ name, mediaType: mime, data }] }) });
+    // Internal call: authenticate with the server's own secret (the add-only key is not accepted by the reader).
+    const internal = {};
+    if (process.env.HUB_API_KEY) internal['x-hub-key'] = process.env.HUB_API_KEY;
+    else if (process.env.HUB_ADMIN_PASSWORD) internal['x-hub-token'] = crypto.createHash('sha256').update('matiere-hub-admin:' + process.env.HUB_ADMIN_PASSWORD).digest('hex');
+    const r = await handler({ httpMethod: 'POST', headers: internal, body: JSON.stringify({ previewOnly: true, images: [{ name, mediaType: mime, data }] }) });
     const j = JSON.parse(r.body);
     if (j.status !== 'preview' || !Array.isArray(j.items) || !j.items.length) return null;
     return j;
@@ -112,6 +116,23 @@ exports.handler = async (event) => {
       fields.updated_at = new Date().toISOString();
       const row = (await rest('PATCH', `receipt_inbox?id=eq.${encodeURIComponent(b.id)}`, fields))[0];
       return out(200, { ok: true, row });
+    }
+
+    if (b.action === 'reread') {
+      const r = (await rest('GET', `receipt_inbox?select=*&id=eq.${encodeURIComponent(b.id)}`))[0];
+      if (!r) return out(404, { error: 'Not found' });
+      const f = await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${r.file_path}`, { headers: sbHeaders() });
+      if (!f.ok) throw new Error('Could not read the stored file');
+      const data = Buffer.from(await f.arrayBuffer()).toString('base64');
+      const parsed = await readReceipt(event, r.file_name || 'receipt', r.mime, data);
+      if (!parsed) return out(200, { ok: true, read: false, row: r });
+      const items = parsed.items, first = items[0] || {};
+      const row = (await rest('PATCH', `receipt_inbox?id=eq.${encodeURIComponent(b.id)}`, {
+        supplier: parsed.supplier || first.supplier || r.supplier || '', receipt_date: first.date || r.receipt_date || r.email_date || null,
+        total_inc: parsed.check && parsed.check.total ? parsed.check.total : Math.round(items.reduce((t2, i) => t2 + (Number(i.amount) || 0), 0) * 110) / 100,
+        lines: items, check_info: parsed.check, updated_at: new Date().toISOString()
+      }))[0];
+      return out(200, { ok: true, read: true, row });
     }
 
     if (b.action === 'xero_attach') {

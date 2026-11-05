@@ -400,3 +400,8 @@ Files: `index.html`, `netlify/functions/hub-write.js` (new), `CLAUDE.md`. Verifi
 - create_quote no longer adds a Schedule booking. Jobs enter the Schedule only when Won (Xero ACCEPTED or status set by hand).
 - "✕ Not won" on cards and in the job sheet takes a job off (Undo; returns if later Won). Finished/Paid jobs auto-close, Lost/Inactive auto-cancel.
 - Sam - Fairlight (3 quotes) removed from the schedule.
+
+## Batch — Receipt Inbox facelift + Xero fields (2026-11-05)
+- Fix: Inbox's internal reader was refusing the add-only key, so email receipts arrived with no lines. Reader now authenticates internally; new `reread` action; the Inbox re-reads empty pending receipts automatically on open.
+- Card redesign (phone-first, aligned grid): PDF drawn inline (pdf.js, up to 4 pages) / photo inline; supplier suggested (from reading, else the sender's domain) with a list of known suppliers; total suggested from the read; reference/invoice no.; description; Xero account (category), GST mode (10% / GST-free / BAS excluded); Paid from (remembered); job chips. Per-supplier memory (category, GST, project/no project).
+- No lines read? Enter the total + what it was for and it saves as one line. Xero draft uses Reference, tax type and attaches the file.
