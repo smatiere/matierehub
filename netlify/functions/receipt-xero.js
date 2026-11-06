@@ -88,6 +88,8 @@ async function findExisting(ctx, contactId, date, expectedInc, supplierName) {
     const all = await xeroCall(`BankTransactions?where=${encodeURIComponent(`Type=="SPEND"&&Status!="DELETED"&&${range}`)}`, 'GET', ctx.token, ctx.tenant);
     const mine = (all.BankTransactions || []).filter(x => !ctx.bank || !x.BankAccount || x.BankAccount.AccountID === ctx.bank.AccountID);
     const byName = pick(mine.filter(x => similar(x.Contact && x.Contact.Name, supplierName)), 'BankTransactionID', 'BankTransactions'); if (byName) return byName;
+    // Names differ (e.g. a screenshot read "EZ Glaze", Xero has "PolyGuru"): accept a single payment with the same amount and date.
+    const byAmt = expectedInc >= 20 ? pick(mine, 'BankTransactionID', 'BankTransactions') : null; if (byAmt && !byAmt.multiple) return { ...byAmt, byAmount: true };
     if (!contactId) return null;
     const iv = await xeroCall(`Invoices?where=${encodeURIComponent(`Type=="ACCPAY"&&Contact.ContactID==Guid("${contactId}")&&Status!="VOIDED"&&Status!="DELETED"&&${range}`)}`, 'GET', ctx.token, ctx.tenant);
     const b2 = pick(iv.Invoices || [], 'InvoiceID', 'Invoices'); if (b2) return b2;
@@ -209,7 +211,11 @@ exports.handler = async (event) => {
         const d0 = day(it.date);
         const fits = txns.filter(x => Math.abs(Number(x.Total) - Number(it.total)) <= 0.06 && Math.abs(day(String(x.DateString || x.Date || '').slice(0, 10) || '1970-01-01') - d0) <= 5 * 86400000 && similar(x.Contact && x.Contact.Name, it.supplier));
         fits.sort((p2, q) => (p2.HasAttachments ? 1 : 0) - (q.HasAttachments ? 1 : 0));
-        const h = fits[0];
+        let h = fits[0];
+        if (!h && Number(it.total) >= 20) {   // names differ: a single payment with the same amount and date counts
+          const alt = txns.filter(x => Math.abs(Number(x.Total) - Number(it.total)) <= 0.06 && Math.abs(day(String(x.DateString || x.Date || '').slice(0, 10) || '1970-01-01') - d0) <= 5 * 86400000);
+          if (alt.length === 1) h = alt[0];
+        }
         return h ? { id: it.id, found: true, hadFile: !!h.HasAttachments, txn: h.BankTransactionID, contact: (h.Contact && h.Contact.Name) || '' } : { id: it.id, found: false };
       });
       return out(200, { ok: true, results, scanned: txns.length });

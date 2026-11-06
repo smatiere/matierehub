@@ -6651,14 +6651,26 @@ const SIB_GROUPS = [
   { k: 'sendfile', title: 'Send the file to Xero', hub: 'ok',  xe: 'ok',  file: 'no', text: 'Saved to a job. Xero has the entry but no file yet: the file gets attached.', on: true },
   { k: 'sendnew',  title: 'Send to Xero',          hub: 'ok',  xe: 'no',  file: 'no', text: 'Saved to a job. Not in Xero yet: it gets created there with the file.', on: true },
   { k: 'partial',  title: 'Add missing lines',     hub: 'part', xe: 'q',  file: 'no', text: 'Most lines are on a job. The missing lines are added to that job, then it goes to Xero.', on: true },
-  { k: 'copy',     title: 'Copies',                hub: '',    xe: '',    file: '',   text: 'Same supplier, date and total as another card, which stays. The copy is removed.', on: true },
+  { k: 'copy',     title: 'Copies',                hub: '',    xe: '',    file: '',   text: 'Same date, total and items as another card or an already-processed receipt. The copy is removed.', on: true },
   { k: 'needjob',  title: 'Needs a job',           hub: 'no',  xe: 'ok',  file: '',   text: 'In Xero, but not saved to any job. Left for you to pick the job. Tick to close it anyway (no job cost is saved).', on: false, left: true },
   { k: 'fresh',    title: 'New',                   hub: 'no',  xe: 'no',  file: 'no', text: 'Not in the Hub or Xero. Left for you.', on: false, left: true, nobox: true }
 ];
 // ONE rule for "where does this receipt stand?" used by the card panel and by the bulk clear, so both always agree.
 // x = what Xero said: {found, hadFile, txn} or undefined/null when unknown.
+// Is this the same receipt as one already processed? Same total and date (within a day) AND the same supplier, the same items or the same
+// invoice number. Catches a screenshot of an email that was already imported as a PDF, where the supplier name was read differently.
+function siProcMatch(r) {
+  const t = Number(r.total_inc), d0 = (r.receipt_date || '').slice(0, 10);
+  if (!(t >= 10) || !d0 || !SI.proc) return null;
+  const day = x => new Date(String(x).slice(0, 10) + 'T00:00:00').getTime();
+  const ref = siNorm(r.reference);
+  const lines = Array.isArray(r.lines) ? r.lines : [];
+  return SI.proc.find(o => o.id !== r.id && Math.abs(Number(o.total_inc) - t) < 0.01 && o.receipt_date && Math.abs(day(o.receipt_date) - day(d0)) <= 86400000 && (
+    siSameSup(o.supplier, siGuessSupplier(r)) || (ref && siNorm(o.reference) === ref) ||
+    (lines.length && Array.isArray(o.lines) && o.lines.length && lines.filter(l => o.lines.some(m => siDescSim(m.description, l.description) >= 0.6)).length / lines.length >= 0.6))) || null;
+}
 function siClassify(r, x, copyIds) {
-  if (copyIds && copyIds.has(r.id)) return { k: 'copy' };
+  if (copyIds && copyIds.has(r.id)) return { k: 'copy', pm: siProcMatch(r) };
   const lines = Array.isArray(r.lines) ? r.lines : [];
   const d = lines.length && siGuessSupplier(r) && r.receipt_date ? siDupes(r) : null;
   const S = lines.reduce((t, l) => t + (parseFloat(l.amount) || 0), 0);
@@ -6685,6 +6697,7 @@ async function siBulkScan() {
     if (!siNorm(siGuessSupplier(r)) || !r.receipt_date || !(Number(r.total_inc) > 0)) return;
     if (seen[k]) copyIds.add(r.id); else seen[k] = r.id;
   });
+  rows.forEach(r => { if (siProcMatch(r)) copyIds.add(r.id); });
   let xmap = {};
   try {
     const items = rows.filter(r => !copyIds.has(r.id) && siGuessSupplier(r) && r.receipt_date && Number(r.total_inc) > 0).map(r => ({ id: r.id, supplier: siGuessSupplier(r), date: (r.receipt_date || '').slice(0, 10), total: Number(r.total_inc) }));
@@ -6699,6 +6712,7 @@ async function siBulkScan() {
   const line = (g, o) => {
     let t = siBulkLine(o.r);
     if (o.d && o.d.project) t += ' → ' + attrEsc(o.d.project);
+    if (g.k === 'copy' && o.pm) t += ' · same as ' + attrEsc(o.pm.supplier || 'a processed receipt') + ' (processed)';
     if (g.k === 'partial') t += ' · adds: ' + o.d.missing.map(l => attrEsc((l.description || '').slice(0, 28)) + ' ' + fmt(parseFloat(l.amount) || 0, 2)).join(', ');
     return t;
   };
@@ -6870,7 +6884,7 @@ async function siLoadTaxHist() {
     const j = await siApi({ action:'list', status:'processed' });
     const m = {};
     j.rows.slice().sort((a, b) => String(a.updated_at).localeCompare(String(b.updated_at))).forEach(r => { if (r.supplier && r.tax_mode) m[String(r.supplier).toLowerCase()] = r.tax_mode; });
-    SI.taxHist = m;
+    SI.taxHist = m; SI.proc = j.rows;
     if (SI.pile === 'pending' && RC.view === 'inbox') siRender();
   } catch (e) { SI.taxHist = {}; }
 }
@@ -7098,7 +7112,8 @@ function siStatusHtml(r) {
   if (r.status !== 'pending') return '';
   const xi = siXeroInfo(r);
   if (xi === undefined) return '<div class="si-note" style="color:var(--ink-4)">Checking your job costs and Xero…</div>';
-  const copy = siIsCopy(r) && !(SI.twinOk || {})[r.id];
+  const pm = siProcMatch(r);
+  const copy = (siIsCopy(r) || !!pm) && !(SI.twinOk || {})[r.id];
   const c = siClassify(r, xi, copy ? new Set([r.id]) : null);
   const g = SIB_GROUPS.find(z => z.k === c.k);
   const note = xi === null ? '<div style="font-size:11px;color:var(--ink-4);margin-top:3px">Couldn’t check Xero just now.</div>' : '';
@@ -7119,7 +7134,7 @@ function siStatusHtml(r) {
   }[c.k];
   const more = c.k === 'needjob' ? '<div style="font-size:12px;margin-top:4px;color:var(--ink-3)">Or choose the job below and Save: Xero’s entry is reused, nothing new is created there.</div>' : '';
   return `<div class="si-dup" style="border-color:${col}"><b>${g.title}</b><div style="margin:4px 0">${pills}</div>
-    <div>${g.text}${jobTxt ? ' Job: ' + jobTxt + '.' : ''}${xTxt}${c.k === 'partial' ? ' Adds: ' + c.d.missing.map(l => attrEsc((l.description || '').slice(0, 30)) + ' ' + fmt(parseFloat(l.amount) || 0, 2)).join(', ') + '.' : ''}</div>${more}${note}
+    <div>${c.k === 'copy' && pm ? `Same date, total and items as <b>${attrEsc(pm.supplier || 'a receipt')}</b> (${fmtDMY((pm.receipt_date || '').slice(0, 10))}, ${fmt(Number(pm.total_inc), 2)}), which is already processed${pm.xero_status === 'sent' ? ' and in Xero' : ''}. This one is a copy.` : g.text}${jobTxt ? ' Job: ' + jobTxt + '.' : ''}${xTxt}${c.k === 'partial' ? ' Adds: ' + c.d.missing.map(l => attrEsc((l.description || '').slice(0, 30)) + ' ' + fmt(parseFloat(l.amount) || 0, 2)).join(', ') + '.' : ''}</div>${more}${note}
     <div class="si-dup-act">${acts}${c.k === 'copy' ? '' : btn('Different — save normally', 'siStDismiss()')}</div></div>`;
 }
 function siStDismiss() { const r = SI.rows[SI.idx]; if (r) { SI.dupDismissed = r.id; SI.dupOk[r.id] = true; siRender(); } }
