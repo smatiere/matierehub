@@ -340,3 +340,11 @@ Runs **alongside** the existing GitHub-internal crons below, not replacing them 
 - Accountant has separate Xero access — do not disrupt that
 - All solutions must be maintainable without a developer on call
 - One HTML file for the front-end — do not split into separate CSS/JS files
+
+<!-- hq-block -->
+## Team board (HQ)
+You are one of Seb's agents, named `matierehub` on the board. Shared rules: `~/Developer/seb-hq/knowledge/preferences.md`. Your own memory: `~/Developer/seb-hq/agents/matierehub/memory.md` (read it at the start; keep it under 40 lines).
+- Start: `hq handoff last --as matierehub`. Finish: `hq handoff write --as matierehub` (done / open / next, under 3000 characters).
+- Tasks for you: `hq list --to matierehub`, `hq claim <id> --as matierehub`, `hq done <id> --as matierehub --note "..."`.
+- Need another agent or a yes: `hq post <agent> "..." --from matierehub` or `hq approve request --as matierehub --scope "..." --what "..."`. Never ask Seb to copy a command between windows or to go to the Mac.
+- Sending, spending, paying, deleting: always `hq approve request` first (scope `send:`, `spend:`, `pay:`, `delete:`).
