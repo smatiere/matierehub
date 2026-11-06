@@ -69,6 +69,10 @@ Review after 2-3 weeks: rank tabs/buttons by device, then re-score iPhone UX.
 - **Photo date as a fallback (2026-11-06):** the reader sometimes misreads the printed date (5 Sep read as 5 Nov). Matching (Hub + Xero check/check_many) now also looks around the
   date in the photo's file name ("Receipt 2026-09-05 14-09.jpg"), and the card shows "Photo taken ... Use that date" when the two differ by more than 3 days.
 
+- **Xero send made gentle (2026-11-07):** the first scheduled batch sent ~12 receipts (all "already in Xero, file attached", no duplicates) then hit Xero's rate limit (429, ~60 calls/min)
+  and the workflow stopped with exit 1. receipt-xero now sends 3 per call, treats 429 as "busy, stay queued" (not failed) and reports `rate_limited`; the workflow pauses 20s between rounds,
+  65s after a rate limit, retries hiccups and only fails after 3 in a row.
+
 ## Feature — 2026-11-01 (Schedule tab: pipeline + bookings calendar)
 
 Seb asked for a pipeline / future-bookings tool: approved quotes (Xero or direct in the Hub)

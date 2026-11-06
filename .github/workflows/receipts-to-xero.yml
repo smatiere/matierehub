@@ -15,12 +15,21 @@ jobs:
     steps:
       - name: Send queued receipts
         run: |
-          for i in 1 2 3 4 5 6 7 8; do
-            response=$(curl -s -w "\n%{http_code}" -X POST "https://matierehub2.netlify.app/.netlify/functions/receipt-xero" -H "Authorization: Bearer ${{ secrets.SYNC_SECRET }}" -H "Content-Type: application/json" -d '{"action":"push"}')
+          # Xero allows about 60 calls a minute, so go gently: a few receipts at a time, a pause between rounds,
+          # a longer pause when Xero says "slow down", and don't give up on one hiccup.
+          fails=0
+          for i in $(seq 1 20); do
+            response=$(curl -s -m 100 -w "\n%{http_code}" -X POST "https://matierehub2.netlify.app/.netlify/functions/receipt-xero" -H "Authorization: Bearer ${{ secrets.SYNC_SECRET }}" -H "Content-Type: application/json" -d '{"action":"push"}')
             http_code=$(echo "$response" | tail -1)
             body=$(echo "$response" | head -n -1)
-            echo "HTTP $http_code: $body"
-            if [ "$http_code" != "200" ]; then exit 1; fi
+            echo "round $i: HTTP $http_code: $body"
+            if [ "$http_code" != "200" ]; then
+              fails=$((fails+1))
+              if [ "$fails" -ge 3 ]; then echo "Three failures in a row, stopping"; exit 1; fi
+              sleep 45; continue
+            fi
+            fails=0
             remaining=$(echo "$body" | sed -n 's/.*"remaining":\([0-9]*\).*/\1/p')
             if [ "${remaining:-0}" = "0" ]; then break; fi
+            if echo "$body" | grep -q '"rate_limited":true'; then sleep 65; else sleep 20; fi
           done

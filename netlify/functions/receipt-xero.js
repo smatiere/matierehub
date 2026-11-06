@@ -256,18 +256,30 @@ exports.handler = async (event) => {
     if (b.action === 'push') {
       const ids = Array.isArray(b.ids) && b.ids.length ? b.ids : null;
       const filter = ids ? `id=in.(${ids.map(encodeURIComponent).join(',')})` : `xero_status=eq.queued`;
-      const rows = await rest('GET', `receipt_inbox?select=*&status=eq.processed&${filter}&order=receipt_date.asc&limit=${ids ? ids.length : 4}`);
-      const ctx = rows.length ? await xeroContext() : null;
+      const rows = await rest('GET', `receipt_inbox?select=*&status=eq.processed&${filter}&order=receipt_date.asc&limit=${ids ? ids.length : 3}`);
+      const busy = (m) => /\b429\b|rate limit|too many requests/i.test(String(m || ''));   // Xero allows about 60 calls a minute
+      let ctx = null, rateLimited = false;
+      try { ctx = rows.length ? await xeroContext() : null; }
+      catch (e) {
+        if (!busy(e.message)) throw e;
+        const left0 = await rest('GET', 'receipt_inbox?select=id&status=eq.processed&xero_status=eq.queued');
+        return out(200, { ok: true, results: [], remaining: left0.length, rate_limited: true });
+      }
       const results = [];
       for (const r of rows) {
         try { results.push(await pushOne(ctx, r)); }
         catch (e) {
+          if (busy(e.message)) {   // Xero is asking us to slow down: leave this one (and the rest) queued for the next round, don't mark it failed
+            rateLimited = true; results.push({ id: r.id, ok: false, error: 'Xero busy, will retry', retry: true });
+            await rest('PATCH', `receipt_inbox?id=eq.${encodeURIComponent(r.id)}`, { xero_status: 'queued', xero_error: 'Xero was busy (rate limit) — will retry on the next send', updated_at: new Date().toISOString() }).catch(() => {});
+            break;
+          }
           await rest('PATCH', `receipt_inbox?id=eq.${encodeURIComponent(r.id)}`, { xero_status: 'failed', xero_error: String(e.message).slice(0, 300), updated_at: new Date().toISOString() }).catch(() => {});
           results.push({ id: r.id, ok: false, error: e.message });
         }
       }
       const left = await rest('GET', 'receipt_inbox?select=id&status=eq.processed&xero_status=eq.queued');
-      return out(200, { ok: true, results, remaining: left.length });
+      return out(200, { ok: true, results, remaining: left.length, rate_limited: rateLimited });
     }
     return out(400, { error: 'Unknown action' });
   } catch (e) { return out(500, { error: e.message }); }
