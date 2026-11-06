@@ -48,6 +48,10 @@ Review after 2-3 weeks: rank tabs/buttons by device, then re-score iPhone UX.
   scrolled to the busiest stretch (items + total); tap opens our own viewer (pinch, drag, double-tap, Fit, fixed Done) so the page never zooms.
   New group "Saved, but prices differ" (same wording, different price: photo misread or wrong saved line) shown in the card panel and the bulk clear (unticked).
 
+- **Matching tolerates a misread photo (2026-11-06):** same-item test is looser (wording >=70%, or >=50% with a price within 25%); the whole-receipt total
+  check now also uses the receipt's PRINTED total (within ~1%) so garbled lines no longer hide a receipt that is already saved; "saved but a similar line
+  with another price" becomes "Saved, but prices differ" instead of falling through to "Needs a job".
+
 ## Feature — 2026-11-01 (Schedule tab: pipeline + bookings calendar)
 
 Seb asked for a pipeline / future-bookings tool: approved quotes (Xero or direct in the Hub)

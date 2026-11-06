@@ -6682,13 +6682,17 @@ function siClassify(r, x, copyIds) {
   const d = lines.length && siGuessSupplier(r) && r.receipt_date ? siDupes(r) : null;
   const S = lines.reduce((t, l) => t + (parseFloat(l.amount) || 0), 0);
   if (d && !d.missing.length && d.priceDiff && d.priceDiff.length) return { k: 'check', d, x };
-  if (d && !d.missing.length && Math.abs(d.total - S) <= Math.max(2, S * 0.03)) return { k: x && x.found ? (x.hadFile ? 'done' : 'sendfile') : 'sendnew', d, x };
+  const P0 = Number(r.total_inc) || 0;
+  if (d && !d.missing.length && (Math.abs(d.total - S) <= Math.max(2, S * 0.03) || (P0 > 0 && (Math.abs(d.total - P0 / 1.1) <= Math.max(1.5, P0 * 0.012) || Math.abs(d.total - P0) <= Math.max(1.5, P0 * 0.012))))) return { k: x && x.found ? (x.hadFile ? 'done' : 'sendfile') : 'sendnew', d, x };
   if (d && d.missing.length && d.matched.length >= d.missing.length && d.matched.length >= 2) {
     // Only "add missing lines" when each missing line is truly absent: if a saved expense that is still unmatched looks like it
     // (same wording, price just differs), it is probably the same line saved at another price, so leave the receipt for a human.
     const t0 = new Date((r.receipt_date || '').slice(0, 10) + 'T00:00:00').getTime();
     const spare = (D.expense_log || []).filter(e => siSameSup(e.supplier, siGuessSupplier(r)) && Math.abs(new Date(String(e.date).slice(0, 10) + 'T00:00:00').getTime() - t0) <= 3 * 86400000 && !d.matched.some(m => m.e === e) && !(d.priceDiff || []).some(m => m.e === e));
     if (d.missing.every(l => !spare.some(e => siDescSim(e.description, l.description) >= 0.5))) return { k: 'partial', d, x };
+    // some "missing" line looks like a saved one with another price: pair them up and let a human check
+    d.missing.slice().forEach(l => { const e = spare.filter(z => !d.priceDiff.some(p2 => p2.e === z)).sort((p2, q2) => siDescSim(q2.description, l.description) - siDescSim(p2.description, l.description))[0]; if (e && siDescSim(e.description, l.description) >= 0.5) { d.priceDiff.push({ l, e }); d.missing.splice(d.missing.indexOf(l), 1); } });
+    return { k: 'check', d, x };
   }
   if (x && x.found) return { k: 'needjob', x };
   return { k: 'fresh' };
@@ -7086,18 +7090,22 @@ function siDupes(r) {
   const priceDiff = [];
   for (let i = missing.length - 1; i >= 0; i--) {
     let best = -1, bs = 0;
-    cand.forEach((e, k) => { if (used.has(k)) return; const sim = siDescSim(e.description, missing[i].description); if (sim >= 0.7 && sim > bs) { bs = sim; best = k; } });
+    const amt0 = parseFloat(missing[i].amount) || 0;
+    cand.forEach((e, k) => { if (used.has(k)) return; const sim = siDescSim(e.description, missing[i].description), near = Math.abs(Number(e.amount) - amt0) <= Math.max(0.5, Math.abs(amt0) * 0.25); if ((sim >= 0.7 || (sim >= 0.5 && near)) && sim > bs) { bs = sim; best = k; } });
     if (best >= 0) { used.add(best); priceDiff.push({ l: missing[i], e: cand[best] }); missing.splice(i, 1); }
   }
-  // Whole-receipt check: the saved expenses for one job and day add up to this receipt (within 2.5%).
-  const S = lines.reduce((t, l) => t + (parseFloat(l.amount) || 0), 0);
+  // Whole-receipt check: the saved expenses for one job and day add up to this receipt: to the sum of its lines (within 2.5%) or, better,
+  // to its PRINTED total (within about 1%), which stays right even when the photo reader got some lines wrong.
+  const S = lines.reduce((t, l) => t + (parseFloat(l.amount) || 0), 0), P = Number(r.total_inc) || 0;
+  const near = (a2, b2, pct, floor) => Math.abs(a2 - b2) <= Math.max(floor, b2 * pct);
   const groups = {};
   cand.forEach(e => { const k = (e.project || '') + '|' + String(e.date).slice(0, 10); (groups[k] = groups[k] || []).push(e); });
   Object.values(groups).forEach(g => {
     const gs = g.reduce((t, e) => t + (Number(e.amount) || 0), 0);
-    if (S > 0 && Math.abs(gs - S) <= Math.max(2, S * 0.025) && g.length >= lines.length * 0.6 && g.length <= lines.length * 1.6 && missing.length) {
-      const left = g.filter(e => !matched.some(m => m.e === e));
-      if (left.length >= missing.length && !priceDiff.length) missing.splice(0).forEach(l => { matched.push({ l, e: left.shift() }); });   // only if every missing line has a saved expense to pair with
+    const total_ok = (S > 0 && near(gs, S, 0.025, 2)) || (P > 0 && (near(gs, P / 1.1, 0.012, 1.5) || near(gs, P, 0.012, 1.5)));
+    if (total_ok && g.length >= lines.length * 0.6 && g.length <= lines.length * 1.6 && (missing.length || priceDiff.length)) {
+      const left = g.filter(e => !matched.some(m => m.e === e) && !priceDiff.some(m => m.e === e));
+      if (left.length >= missing.length) { priceDiff.splice(0).forEach(m => matched.push(m)); missing.splice(0).forEach(l => { matched.push({ l, e: left.shift() }); }); }   // every leftover line has a saved expense to pair with
     }
   });
   if (!matched.length && !priceDiff.length) return null;
