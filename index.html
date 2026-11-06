@@ -7124,6 +7124,15 @@ function siDupes(r) {
   Object.values(groups).forEach(g => {
     const gs = g.reduce((t, e) => t + (Number(e.amount) || 0), 0);
     const total_ok = (S > 0 && near(gs, S, 0.025, 2)) || (P > 0 && (near(gs, P / 1.1, 0.012, 1.5) || near(gs, P, 0.012, 1.5)));
+    // The saved total equals the PRINTED total almost to the cent: nothing can be missing, whatever the photo reader made of the lines
+    // (e.g. it listed the GST amount as an extra product).
+    const exact = P > 0 && (near(gs, P / 1.1, 0.004, 0.05) || near(gs, P, 0.004, 0.05));
+    if (exact && (missing.length || priceDiff.length)) {
+      const left = g.filter(e => !matched.some(m => m.e === e) && !priceDiff.some(m => m.e === e));
+      priceDiff.splice(0).forEach(m => matched.push(m));
+      missing.splice(0).forEach(l => { const e = left.shift(); if (e) matched.push({ l, e }); });
+      return;
+    }
     if (total_ok && g.length >= lines.length * 0.6 && g.length <= lines.length * 1.6 && (missing.length || priceDiff.length)) {
       const left = g.filter(e => !matched.some(m => m.e === e) && !priceDiff.some(m => m.e === e));
       if (left.length >= missing.length) { priceDiff.splice(0).forEach(m => matched.push(m)); missing.splice(0).forEach(l => { matched.push({ l, e: left.shift() }); }); }   // every leftover line has a saved expense to pair with
@@ -7132,7 +7141,7 @@ function siDupes(r) {
   if (!matched.length && !priceDiff.length) return null;
   const pc = {}; matched.concat(priceDiff).forEach(m => { const p = m.e.project || ''; pc[p] = (pc[p] || 0) + 1; });
   const project = Object.entries(pc).sort((a, b) => b[1] - a[1])[0][0];
-  return { matched, missing, priceDiff, ids: matched.map(m => m.e.id), project, total: matched.reduce((t, m) => t + (Number(m.e.amount) || 0), 0), date: String((matched[0] || priceDiff[0]).e.date).slice(0, 10) };
+  return { matched, missing, priceDiff, ids: [...new Set(matched.map(m => m.e.id))], project, total: matched.reduce((t, m) => t + (Number(m.e.amount) || 0), 0), date: String((matched[0] || priceDiff[0]).e.date).slice(0, 10) };
 }
 function siDupBanner(r) {
   const d = SI.dupDismissed === r.id ? null : siDupes(r);
