@@ -15,6 +15,12 @@ Review after 2-3 weeks: rank tabs/buttons by device, then re-score iPhone UX.
   Schedule: "Today" card (map / call / open). Expenses + Transactions become cards on phones (`table.mcards`).
   Receipts: Inbox is the landing view; bottom-bar badge shows pending count. Claude bar parked (`claude-bar-off` on body).
 
+- **Receipt page UX + icons (2026-11-06):** sticky action bar under the header (position, Personal, Not a cost, Skip, Save & next) so no
+  scrolling to act; piles on one scrolling row with round + (add) and Combined-PDF icon buttons; picture 30vh on phones with tap-to-enlarge
+  (full-screen, pinch zoom); order = supplier, total/date, job chips, category/GST; Reference + Description under "More details";
+  line list collapses when the lines add up to the printed total; swipe left/right changes receipt. Icons: Lucide (ISC) inline SVG
+  (`HUB_ICONS`, `hubIcon()`) for bottom bar and receipt page. Checked in a 390px frame with fake data, not yet on a real iPhone.
+
 ## Feature — 2026-11-01 (Schedule tab: pipeline + bookings calendar)
 
 Seb asked for a pipeline / future-bookings tool: approved quotes (Xero or direct in the Hub)

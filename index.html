@@ -506,6 +506,50 @@ body.claude-bar-off #app{padding-bottom:calc(24px + env(safe-area-inset-bottom))
 .ts-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
 .ts-tile{background:var(--bg-2);border:1px solid var(--border);border-radius:12px;min-height:64px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:var(--ink);font:inherit;touch-action:manipulation}
 .ts-tile b{font-size:20px;color:var(--amber)}.ts-tile span{font-size:10.5px;color:var(--ink-4)}
+
+/* ══ Receipt Inbox UX (2026-11-06): sticky action bar, one-row piles, smaller picture, tidy icons ══ */
+.rc-wrap{padding:20px}
+.rc-tabs{display:flex;gap:8px;align-items:center;margin-bottom:18px;overflow-x:auto;scrollbar-width:none}
+.rc-tabs::-webkit-scrollbar{display:none}
+.rc-tabs .hub-pill-btn{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.si-top{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.si-piles{display:flex;gap:6px;overflow-x:auto;flex:1;min-width:0;scrollbar-width:none;padding:2px 0}
+.si-piles::-webkit-scrollbar{display:none}
+.si-piles .hub-pill-btn{white-space:nowrap;flex:none}
+.si-ic{flex:none;width:44px;height:44px;border-radius:12px;background:var(--bg-2);border:1px solid var(--border-2);color:var(--ink-2);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;touch-action:manipulation}
+.si-ic-main{background:var(--amber);border-color:var(--amber);color:#000}
+.si-bar{position:sticky;top:var(--hdr,65px);z-index:40;display:flex;align-items:stretch;gap:6px;background:rgba(0,0,0,.94);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);padding:8px 0;margin-bottom:6px;border-bottom:1px solid var(--border)}
+.si-pos{flex:none;display:flex;align-items:baseline;justify-content:center;min-width:34px;align-self:center;font-size:17px;font-weight:700;color:var(--ink)}
+.si-pos small{font-size:11px;color:var(--ink-4);font-weight:500}
+.si-ab{flex:none;min-width:54px;min-height:48px;padding:0 6px;background:var(--bg-2);color:var(--ink-2);border:1px solid var(--border);border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:10px;font-weight:600;cursor:pointer;touch-action:manipulation}
+.si-ab span{line-height:1}
+.si-ab-icon{min-width:48px}
+.si-save{flex:1;min-width:0;min-height:48px;background:var(--sage);color:#fff;border:none;border-radius:12px;display:flex;align-items:center;justify-content:center;gap:7px;font-size:15px;font-weight:700;cursor:pointer;touch-action:manipulation}
+.si-save:disabled{opacity:.5}
+.si-meta{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--ink-4);margin-bottom:6px}
+.si-meta .si-src{display:inline-flex;align-items:center;gap:5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.si-hint{margin-left:auto;white-space:nowrap}
+.si-preview{position:relative}
+.si-preview img{cursor:zoom-in}
+.si-zoomhint{position:absolute;right:8px;bottom:8px;display:inline-flex;align-items:center;gap:5px;background:rgba(0,0,0,.72);color:#fff;border:none;border-radius:14px;padding:6px 10px;font-size:11px}
+.si-zoom{position:fixed;inset:0;z-index:900;background:#000;overflow:auto;-webkit-overflow-scrolling:touch;touch-action:pinch-zoom pan-x pan-y}
+.si-zoom img{display:block;width:100%;height:auto}
+.si-zoom-x{position:fixed;top:max(12px,env(safe-area-inset-top));right:12px;z-index:2;display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 16px;background:var(--amber);color:#000;border:none;border-radius:22px;font-weight:700;font-size:14px}
+.si-more>summary{min-height:40px;display:flex;align-items:center}
+.si-savehint{padding:9px 12px;background:var(--bg-2);border-radius:8px;color:var(--ink-3)}
+@media (max-width:720px){
+  .rc-wrap{padding:0}
+  .rc-tabs{margin-bottom:8px}
+  .si-top{margin-bottom:4px}
+  .si-card .si-preview{max-height:30vh}
+  .si-card .si-preview img{max-height:30vh;object-fit:contain}
+  .si-grid input,.si-grid select,.si-wide{height:46px}
+  .si-chips .hub-pill-btn{min-height:40px;display:inline-flex;align-items:center}
+  #hub-nav button .ni svg{display:block}
+  .si-savehint{display:none}
+}
+@media (min-width:721px){.si-hint{display:none}}
+#hub-nav button .ni{display:flex;align-items:center;justify-content:center;height:24px}
 @media (max-width:720px){.hide-sm{display:none}}
 @keyframes sheetIn{from{transform:translateY(40px);opacity:0}to{transform:none;opacity:1}}
 
@@ -692,11 +736,11 @@ body.claude-bar-off #app{padding-bottom:calc(24px + env(safe-area-inset-bottom))
 </div>
 <!-- Phone bottom navigation + More sheet (visible on phones only; see CSS "Phone navigation") -->
 <nav id="hub-nav" aria-label="Main">
-  <button data-tab="timesheet" onclick="hubGo('timesheet')"><span class="ni">⏱</span>Timesheets</button>
-  <button data-tab="projects" onclick="hubGo('projects')"><span class="ni">📁</span>Projects</button>
-  <button data-tab="schedule" onclick="hubGo('schedule')"><span class="ni">📅</span>Schedule<span class="nbadge" id="nb-schedule"></span></button>
-  <button data-tab="receipts" onclick="hubGo('receipts')"><span class="ni">🧾</span>Receipts<span class="nbadge" id="nb-receipts"></span></button>
-  <button data-tab="more" onclick="hubMore(true)"><span class="ni">☰</span>More<span class="nbadge" id="nb-more"></span></button>
+  <button data-tab="timesheet" onclick="hubGo('timesheet')"><span class="ni" data-ic="clock"></span>Timesheets</button>
+  <button data-tab="projects" onclick="hubGo('projects')"><span class="ni" data-ic="folder"></span>Projects</button>
+  <button data-tab="schedule" onclick="hubGo('schedule')"><span class="ni" data-ic="calendar-days"></span>Schedule<span class="nbadge" id="nb-schedule"></span></button>
+  <button data-tab="receipts" onclick="hubGo('receipts')"><span class="ni" data-ic="receipt"></span>Receipts<span class="nbadge" id="nb-receipts"></span></button>
+  <button data-tab="more" onclick="hubMore(true)"><span class="ni" data-ic="layout-grid"></span>More<span class="nbadge" id="nb-more"></span></button>
 </nav>
 <div id="hub-more" onclick="if(event.target===this)hubMore(false)">
   <div class="sheet">
@@ -6578,11 +6622,11 @@ async function renderReceipts() {
 function rcShell() {
   const tab = (v,l) => `<button class="hub-pill-btn${RC.view===v?' active':''}" onclick="rcSetView('${v}')">${l}</button>`;
   return `
-  <div style="padding:20px">
-    <div style="display:flex;gap:8px;align-items:center;margin-bottom:18px">
-      ${tab('inbox','📥 Inbox' + (SI.counts.pending ? ' (' + SI.counts.pending + ')' : ''))}
-      ${tab('scan','📷 Scan receipt')}
-      ${tab('catalog','📚 Price library')}
+  <div class="rc-wrap">
+    <div class="rc-tabs">
+      ${tab('inbox', hubIcon('inbox', 16) + ' Inbox' + (SI.counts.pending ? ' (' + SI.counts.pending + ')' : ''))}
+      ${tab('scan', hubIcon('camera', 16) + ' Scan')}
+      ${tab('catalog', hubIcon('book-open', 16) + ' Price library')}
     </div>
     <div id="rc-body"></div>
   </div>`;
@@ -6595,7 +6639,7 @@ function rcSetView(v) { RC.view = v; renderReceipts(); }
 // Every receipt (photo, upload, email) lands in Pending. Swipe through, pick a project, save:
 // lines go to expenses (and the price library), the original file is kept in Processed and can
 // be attached to a Xero draft. Files sit in a private bucket; the Hub only gets short-lived links.
-const SI = { pile:'pending', rows:[], counts:{}, idx:0, urls:{}, proj:'', noProj:false, missing:null, showLines:true, busy:false, tried:{}, touched:false, dupOk:{}, cat:null, tax:'', ref:null, desc:null };
+const SI = { pile:'pending', rows:[], counts:{}, idx:0, urls:{}, proj:'', noProj:false, missing:null, showLines:null, busy:false, tried:{}, touched:false, dupOk:{}, cat:null, tax:'', ref:null, desc:null };
 
 async function siApi(body) {
   const r = await fetch('/.netlify/functions/receipt-inbox', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(body) });
@@ -6640,11 +6684,11 @@ async function siRender() {
   siLoadTaxHist();
   const c = SI.counts;
   const head = `
-    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px">
-      ${siPileTab('pending','Pending', c.pending||0)}${siPileTab('processed','Processed', c.processed||0)}${siPileTab('personal','Personal', c.personal||0)}${c.ignored ? siPileTab('ignored','Not a cost', c.ignored) : ''}${siPileTab('missing','Missing receipts','')}
-      <button onclick="document.getElementById('si-file').click()" class="hub-pill-btn" style="margin-left:auto;background:var(--amber);color:#000;font-weight:700">＋ Add receipts</button>
+    <div class="si-top">
+      <div class="si-piles">${siPileTab('pending','Pending', c.pending||0)}${siPileTab('processed','Processed', c.processed||0)}${siPileTab('personal','Personal', c.personal||0)}${c.ignored ? siPileTab('ignored','Not a cost', c.ignored) : ''}${siPileTab('missing','Missing','')}</div>
+      <button onclick="document.getElementById('si-file').click()" class="si-ic si-ic-main" title="Add receipts" aria-label="Add receipts">${hubIcon('plus', 22)}</button>
       <input id="si-file" type="file" accept="image/*,.pdf" multiple style="display:none" onchange="siAddFiles(this.files);this.value=''">
-      <button onclick="document.getElementById('si-multi').click()" class="hub-pill-btn" title="A PDF holding many receipts (e.g. Bunnings PowerPass 'Print Selected')">📚 Combined PDF</button>
+      <button onclick="document.getElementById('si-multi').click()" class="si-ic" title="Combined PDF: one PDF holding many receipts (e.g. Bunnings PowerPass)" aria-label="Combined PDF">${hubIcon('files', 20)}</button>
       <input id="si-multi" type="file" accept="application/pdf,.pdf" multiple style="display:none" onchange="siImportMulti(this.files);this.value=''">
     </div>`;
   if (SI.pile === 'pending') body.innerHTML = head + siCardHtml();
@@ -6956,7 +7000,7 @@ function siCardHtml() {
   const fromReceipt = detected === 'none' ? 'free' : detected === 'included' ? 'gst' : '';
   const tax = SI.tax || fromReceipt || mem.tax || hist || 'gst';
   const taxWhy = SI.tax ? '' : fromReceipt ? (detected === 'none' ? 'no GST shown on this invoice' : 'GST shown on this invoice') : (mem.tax || hist) ? 'learned from this supplier\'s past invoices' : 'assumed — nothing to go on';
-  const src = r.source === 'email' ? `✉️ ${attrEsc(r.email_from || 'email')}` : r.source === 'photo' ? '📸 Photo' : '⬆️ Upload';
+  const src = r.source === 'email' ? `${hubIcon('mail', 14)} ${attrEsc(r.email_from || 'email')}` : r.source === 'photo' ? `${hubIcon('camera', 14)} Photo` : `${hubIcon('upload', 14)} Upload`;
   const sug = siSuggest((r.receipt_date||'').slice(0,10));
   const dupInfo = SI.dupDismissed === r.id ? null : siDupes(r);
   if (dupInfo && !SI.touched && !SI.noProj && !SI.proj) { if (dupInfo.project) SI.proj = dupInfo.project; else SI.noProj = true; }
@@ -6966,39 +7010,52 @@ function siCardHtml() {
   const chk = r.check_info && r.check_info.total ? (r.check_info.ok ? `<span style="color:var(--sage)">✓ lines add up to the printed ${fmt(r.check_info.total,2)}</span>` : `<span style="color:var(--amber)">⚠ lines add to ${fmt(sumInc,2)}, receipt says ${fmt(r.check_info.total,2)}</span>`)
     : (lines.length ? '<span style="color:var(--ink-4)">no printed total to check</span>' : '<span style="color:var(--amber)">Couldn’t read this one automatically — fill in the amount and what it was for.</span>');
   const desc = SI.desc != null ? SI.desc : (lines.length ? '' : (mem.desc || siHabitField(sup, 'description', 0.5) || r.email_subject || ''));
+  const lineCount = lines.length;
+  const openLines = SI.showLines != null ? SI.showLines : !(r.check_info && r.check_info.ok);
+  const detailsFields = `
+      <label class="si-full">Reference / invoice no.<input id="si-ref" enterkeyhint="next" value="${attrEsc(SI.ref != null ? SI.ref : (r.reference || (r.check_info && r.check_info.invoice_no) || ''))}" placeholder="e.g. INV-12345"></label>
+      <label class="si-full">Description<input id="si-desc" enterkeyhint="next" value="${attrEsc(desc)}" placeholder="e.g. Google Workspace – November"></label>`;
   return `
   <div class="si-card">
-    <div class="si-nav"><button class="hub-pill-btn" onclick="siMove(-1)">‹</button><span class="si-count">${SI.idx+1} / ${rows.length}</span><button class="hub-pill-btn" onclick="siMove(1)">›</button><span class="si-src">${src}</span></div>
+    <div class="si-bar">
+      <div class="si-pos">${SI.idx+1}<small>/${rows.length}</small></div>
+      <button class="si-ab" onclick="siPersonal()" aria-label="Personal">${hubIcon('user-round', 20)}<span>Personal</span></button>
+      <button class="si-ab" onclick="siNotCost()" aria-label="Not a cost" title="Our own invoices, statements, junk">${hubIcon('ban', 20)}<span>Not a cost</span></button>
+      <button class="si-ab si-ab-icon" onclick="siMove(1)" aria-label="Skip to the next receipt">${hubIcon('skip-forward', 20)}<span>Skip</span></button>
+      <button id="si-save" class="si-save" onclick="siSave()">${hubIcon('check', 20)}<span>Save &amp; next</span></button>
+    </div>
+    <div class="si-meta"><span class="si-src">${src}</span><span class="si-hint">swipe ← → to change receipt</span></div>
     ${r.email_subject ? `<div class="si-subj">${attrEsc(r.email_subject)}</div>` : ''}
     ${siDupBanner(r)}
     ${siTwinBanner(r)}
     <div id="si-xero">${siXeroHtml(r)}</div>
     <div id="si-preview" class="si-preview">Loading receipt…</div>
 
-    <div class="si-sec">Receipt</div>
     <div class="si-grid">
-      <label class="si-full">Supplier<input id="si-sup" list="si-sups" value="${attrEsc(sup)}" onchange="siSupChanged(this.value)"><datalist id="si-sups">${siSupplierList().map(x => `<option value="${attrEsc(x)}">`).join('')}</datalist></label>
+      <label class="si-full">Supplier<input id="si-sup" list="si-sups" enterkeyhint="next" value="${attrEsc(sup)}" onchange="siSupChanged(this.value)"><datalist id="si-sups">${siSupplierList().map(x => `<option value="${attrEsc(x)}">`).join('')}</datalist></label>
+      <label>Total (inc GST)<input id="si-total" inputmode="decimal" enterkeyhint="next" value="${total}"></label>
       <label>Date<input id="si-date" type="date" value="${attrEsc((r.receipt_date||'').slice(0,10))}" onchange="siDateChanged(this.value)"></label>
-      <label>Total (inc GST)<input id="si-total" inputmode="decimal" value="${total}"></label>
-      <label class="si-full">Reference / invoice no. <small>(optional)</small><input id="si-ref" value="${attrEsc(SI.ref != null ? SI.ref : (r.reference || (r.check_info && r.check_info.invoice_no) || ''))}" placeholder="e.g. INV-12345"></label>
-      <label class="si-full">${lines.length ? 'Description (optional)' : 'What was it for?'}<input id="si-desc" value="${attrEsc(desc)}" placeholder="e.g. Google Workspace – November"></label>
+      ${lineCount ? '' : `<label class="si-full">What was it for?<input id="si-desc" value="${attrEsc(desc)}" placeholder="e.g. Google Workspace – November"></label>`}
     </div>
     <div class="si-note">${chk}</div>
-
-    <div class="si-sec">Accounting</div>
-    <div class="si-grid">
-      <label>Category (Xero account)<select id="si-cat">${siCatOptions(cat, cats)}</select></label>
-      <label>GST<select id="si-tax"><option value="gst" ${tax==='gst'?'selected':''}>GST 10% included</option><option value="free" ${tax==='free'?'selected':''}>No GST (GST-free)</option><option value="excl" ${tax==='excl'?'selected':''}>BAS excluded</option></select><small style="color:var(--ink-4)">${taxWhy}</small></label>
-    </div>
 
     <div class="si-sec">Which job?</div>
     <div id="si-chips" class="si-chips">
       ${sug.map(([n,h]) => chip(`${attrEsc(n)} · ${+h.toFixed(1)}h that day`, SI.proj===n && !SI.noProj, `siPick('${attrEsc(n).replace(/'/g,"\\'")}')`)).join('')}
       ${chip('No project', SI.noProj, 'siPickNone()')}
     </div>
-    <input id="si-proj" class="si-wide" placeholder="Or type a project…" value="${attrEsc(SI.noProj?'':SI.proj)}">
+    <input id="si-proj" class="si-wide" placeholder="Or type a project…" enterkeyhint="done" value="${attrEsc(SI.noProj?'':SI.proj)}">
 
-    <details ${SI.showLines?'open':''} ontoggle="SI.showLines=this.open" class="si-lines"><summary>${lines.length} line${lines.length===1?'':'s'} read from the receipt · ${fmt(sumInc,2)} inc GST${lines.some(l => l.project) ? ' · some on other jobs' : ''} — edit</summary>
+    <div class="si-grid" style="margin-top:12px">
+      <label>Category (Xero account)<select id="si-cat">${siCatOptions(cat, cats)}</select></label>
+      <label>GST<select id="si-tax"><option value="gst" ${tax==='gst'?'selected':''}>GST 10% included</option><option value="free" ${tax==='free'?'selected':''}>No GST (GST-free)</option><option value="excl" ${tax==='excl'?'selected':''}>BAS excluded</option></select><small style="color:var(--ink-4)">${taxWhy}</small></label>
+    </div>
+
+    <details class="si-lines si-more"><summary>More details <span style="color:var(--ink-4)">· reference, description</span></summary>
+      <div class="si-grid" style="margin-top:8px">${lineCount ? detailsFields : `<label class="si-full">Reference / invoice no.<input id="si-ref" value="${attrEsc(SI.ref != null ? SI.ref : (r.reference || (r.check_info && r.check_info.invoice_no) || ''))}" placeholder="e.g. INV-12345"></label>`}</div>
+    </details>
+
+    <details ${openLines?'open':''} class="si-lines"><summary onclick="SI.showLines=!this.parentNode.open">${lines.length} line${lines.length===1?'':'s'} read from the receipt · ${fmt(sumInc,2)} inc GST${lines.some(l => l.project) ? ' · some on other jobs' : ''} — edit</summary>
       <datalist id="si-projs">${ssProjectNames().map(x => `<option value="${attrEsc(x)}">`).join('')}</datalist>
       ${lines.map((l,i) => `<div class="si-line">
           <input class="si-ld" value="${attrEsc(l.description||'')}" onchange="siLine(${i},'description',this.value)">
@@ -7008,18 +7065,33 @@ function siCardHtml() {
           <span onclick="siLineDel(${i})" class="si-x">✕</span></div>`).join('')}
       <div class="si-note">Unit price is ex GST. Leave “same job” empty unless a line belongs to a different job.</div>
     </details>
-
-    <div class="si-note" style="padding:9px 12px;background:var(--bg-2);border-radius:8px;color:var(--ink-3)">Save puts it in your expenses. It goes to Xero (with the file attached) in the next batch — see <b>Processed</b>.</div>
-    <div class="si-actions">
-      <button id="si-save" class="si-primary" onclick="siSave()">Save &amp; next</button>
-      <button onclick="siPersonal()">Personal</button>
-      <button onclick="siNotCost()" title="Our own invoices, statements, junk">Not a cost</button>
-      <button onclick="siMove(1)">Skip</button>
-    </div>
+    <div class="si-note si-savehint">Save puts it in your expenses. It goes to Xero (with the file attached) in the next batch — see <b>Processed</b>.</div>
   </div>`;
 }
+// Full-screen receipt: pinch to zoom, tap the cross to close.
+function siZoom(url) {
+  const o = document.createElement('div'); o.className = 'si-zoom';
+  o.innerHTML = `<button class="si-zoom-x" aria-label="Close">${hubIcon('check', 22)}<span>Done</span></button><img src="${url}" alt="receipt">`;
+  o.querySelector('button').onclick = () => { o.remove(); document.body.style.overflow = ''; };
+  document.body.style.overflow = 'hidden'; document.body.appendChild(o);
+}
+// Swipe left/right on a receipt card to move between receipts (not while touching a field, the picture or a button).
+(function () {
+  let sx = null, sy = 0, st = 0;
+  document.addEventListener('touchstart', e => {
+    const t = e.target;
+    if (!t.closest || !t.closest('.si-card') || t.closest('input,select,textarea,.si-preview,.si-line,button,summary,.si-chips,.si-bar')) { sx = null; return; }
+    sx = e.touches[0].clientX; sy = e.touches[0].clientY; st = Date.now();
+  }, { passive: true });
+  document.addEventListener('touchend', e => {
+    if (sx == null) return;
+    const t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy; sx = null;
+    if (Math.abs(dx) > 80 && Math.abs(dx) > Math.abs(dy) * 2 && Date.now() - st < 700 && SI.pile === 'pending' && SI.rows.length > 1) { siMove(dx < 0 ? 1 : -1); }
+  }, { passive: true });
+})();
 function siWireCard() {
   const r = SI.rows[SI.idx];
+  hubHdr();
   smartSuggest(document.getElementById('si-proj'), ssProjectNames, v => { SI.proj = v; SI.noProj = false; SI.touched = true; siRefreshChips(); });
   const pi = document.getElementById('si-proj');
   if (pi) pi.addEventListener('input', () => { SI.proj = pi.value.trim(); SI.noProj = false; SI.touched = true; });
@@ -7030,7 +7102,7 @@ function siWireCard() {
 // Shows the receipt right on the page: photos as pictures, PDFs drawn page by page.
 async function siShowFile(r, u) {
   const el = document.getElementById('si-preview'); if (!el || SI.rows[SI.idx] !== r) return;
-  if (u.mime !== 'application/pdf') { el.innerHTML = `<a href="${u.url}" target="_blank" rel="noopener"><img src="${u.url}" alt="receipt"></a>`; return; }
+  if (u.mime !== 'application/pdf') { el.innerHTML = `<img src="${u.url}" alt="receipt" onclick="siZoom(this.src)"><button class="si-zoomhint" onclick="siZoom('${u.url}')">${hubIcon('zoom-in', 16)} Tap to enlarge</button>`; return; }
   el.innerHTML = '<span style="color:var(--ink-4)">Drawing PDF…</span>';
   try {
     if (!window.pdfjsLib) await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc); });
@@ -7076,7 +7148,7 @@ function siPick(n) { SI.proj = n; SI.noProj = false; SI.touched = true; const pi
 function siPickNone() { SI.noProj = true; SI.proj = ''; SI.touched = true; const pi = document.getElementById('si-proj'); if (pi) pi.value = ''; siRefreshChips(); }
 function siSupChanged(v) { const r = SI.rows[SI.idx]; if (r) r.supplier = v.trim(); SI.cat = null; SI.tax = ''; siRender(); }
 function siDateChanged(v) { const r = SI.rows[SI.idx]; if (r) { r.receipt_date = v; (r.lines||[]).forEach(l => l.date = v); } if (!SI.touched) { SI.proj = ''; SI.noProj = false; } SI.ref = (document.getElementById('si-ref')||{}).value || null; SI.desc = (document.getElementById('si-desc')||{}).value || null; siRender(); }
-function siReset() { SI.proj = ''; SI.noProj = false; SI.touched = false; SI.cat = null; SI.tax = ''; SI.ref = null; SI.desc = null; }
+function siReset() { SI.showLines = null; SI.proj = ''; SI.noProj = false; SI.touched = false; SI.cat = null; SI.tax = ''; SI.ref = null; SI.desc = null; }
 function siMove(d) { if (!SI.rows.length) return; SI.idx = (SI.idx + d + SI.rows.length) % SI.rows.length; siReset(); siRender(); window.scrollTo({ top: 0 }); }
 function siLine(i, f, v) { const r = SI.rows[SI.idx]; const l = r.lines[i]; if (f === 'description') l.description = v.trim(); else if (f === 'project') { l.project = v.trim(); siRender(); } else { l[f] = parseFloat(v) || 0; l.amount = Math.round((parseFloat(l.qty)||1) * (parseFloat(l.unit_price)||0) * 100) / 100; } }
 function siLineDel(i) { const r = SI.rows[SI.idx]; r.lines.splice(i, 1); SI.showLines = true; siRender(); }
@@ -8039,6 +8111,11 @@ async function bootHub() {
   loadData();
 }
 
+// ── Icons: Lucide (open-source, ISC licence) as inline SVG ──
+const HUB_ICONS = {"ban":"<circle cx=\"12\" cy=\"12\" r=\"10\"/> <path d=\"m4.9 4.9 14.2 14.2\"/>","book-open":"<path d=\"M12 7v14\"/> <path d=\"M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z\"/>","calendar-days":"<path d=\"M8 2v4\"/> <path d=\"M16 2v4\"/> <rect width=\"18\" height=\"18\" x=\"3\" y=\"4\" rx=\"2\"/> <path d=\"M3 10h18\"/> <path d=\"M8 14h.01\"/> <path d=\"M12 14h.01\"/> <path d=\"M16 14h.01\"/> <path d=\"M8 18h.01\"/> <path d=\"M12 18h.01\"/> <path d=\"M16 18h.01\"/>","camera":"<path d=\"M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z\"/> <circle cx=\"12\" cy=\"13\" r=\"3\"/>","check":"<path d=\"M20 6 9 17l-5-5\"/>","chevron-left":"<path d=\"m15 18-6-6 6-6\"/>","chevron-right":"<path d=\"m9 18 6-6-6-6\"/>","clock":"<circle cx=\"12\" cy=\"12\" r=\"10\"/> <polyline points=\"12 6 12 12 16 14\"/>","ellipsis":"<circle cx=\"12\" cy=\"12\" r=\"1\"/> <circle cx=\"19\" cy=\"12\" r=\"1\"/> <circle cx=\"5\" cy=\"12\" r=\"1\"/>","files":"<path d=\"M20 7h-3a2 2 0 0 1-2-2V2\"/> <path d=\"M9 18a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h7l4 4v10a2 2 0 0 1-2 2Z\"/> <path d=\"M3 7.6v12.8A1.6 1.6 0 0 0 4.6 22h9.8\"/>","folder-kanban":"<path d=\"M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z\"/> <path d=\"M8 10v4\"/> <path d=\"M12 10v2\"/> <path d=\"M16 10v6\"/>","folder":"<path d=\"M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z\"/>","hammer":"<path d=\"m15 12-8.373 8.373a1 1 0 1 1-3-3L12 9\"/> <path d=\"m18 15 4-4\"/> <path d=\"m21.5 11.5-1.914-1.914A2 2 0 0 1 19 8.172V7l-2.26-2.26a6 6 0 0 0-4.202-1.756L9 2.96l.92.82A6.18 6.18 0 0 1 12 8.4V10l2 2h1.172a2 2 0 0 1 1.414.586L18.5 14.5\"/>","inbox":"<polyline points=\"22 12 16 12 14 15 10 15 8 12 2 12\"/> <path d=\"M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z\"/>","layout-grid":"<rect width=\"7\" height=\"7\" x=\"3\" y=\"3\" rx=\"1\"/> <rect width=\"7\" height=\"7\" x=\"14\" y=\"3\" rx=\"1\"/> <rect width=\"7\" height=\"7\" x=\"14\" y=\"14\" rx=\"1\"/> <rect width=\"7\" height=\"7\" x=\"3\" y=\"14\" rx=\"1\"/>","mail":"<rect width=\"20\" height=\"16\" x=\"2\" y=\"4\" rx=\"2\"/> <path d=\"m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7\"/>","plus":"<path d=\"M5 12h14\"/> <path d=\"M12 5v14\"/>","receipt":"<path d=\"M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z\"/> <path d=\"M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8\"/> <path d=\"M12 17.5v-11\"/>","refresh-cw":"<path d=\"M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8\"/> <path d=\"M21 3v5h-5\"/> <path d=\"M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16\"/> <path d=\"M8 16H3v5\"/>","skip-forward":"<polygon points=\"5 4 15 12 5 20 5 4\"/> <line x1=\"19\" x2=\"19\" y1=\"5\" y2=\"19\"/>","upload":"<path d=\"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4\"/> <polyline points=\"17 8 12 3 7 8\"/> <line x1=\"12\" x2=\"12\" y1=\"3\" y2=\"15\"/>","user-round":"<circle cx=\"12\" cy=\"8\" r=\"5\"/> <path d=\"M20 21a8 8 0 0 0-16 0\"/>","zoom-in":"<circle cx=\"11\" cy=\"11\" r=\"8\"/> <line x1=\"21\" x2=\"16.65\" y1=\"21\" y2=\"16.65\"/> <line x1=\"11\" x2=\"11\" y1=\"8\" y2=\"14\"/> <line x1=\"8\" x2=\"14\" y1=\"11\" y2=\"11\"/>"};
+function hubIcon(n, size) { size = size || 22; return '<svg viewBox="0 0 24 24" width="' + size + '" height="' + size + '" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (HUB_ICONS[n] || '') + '</svg>'; }
+function hubIconsFill() { document.querySelectorAll('[data-ic]').forEach(e => { if (!e.firstChild) e.innerHTML = hubIcon(e.dataset.ic, +e.dataset.sz || 24); }); }
+
 // ── Usage tracking (2026-11-06) ───────────────────────────────────────────
 // Records which tabs are opened and which buttons are tapped (function name only,
 // never text or client names) into usage_events via hub-track. Failures are silent.
@@ -8093,6 +8170,9 @@ function hubNavSync(name) {
 }
 ['sch-count', 'fa-count'].forEach(id => { const e = document.getElementById(id); if (e) new MutationObserver(() => hubNavSync(hubTrackTab)).observe(e, { childList: true, characterData: true, subtree: true, attributes: true }); });
 hubNavSync('timesheet');
+hubIconsFill();
+function hubHdr() { const h = document.querySelector('.header'); if (h) document.documentElement.style.setProperty('--hdr', h.offsetHeight + 'px'); }
+hubHdr(); addEventListener('resize', hubHdr); setTimeout(hubHdr, 1500);
 
 // ── Quick "Log hours" sheet (2026-11-06) ─────────────────────────────────
 let QL = { hours: 8 };
