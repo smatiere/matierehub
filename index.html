@@ -6708,8 +6708,8 @@ function siClassify(r, x, copyIds) {
   if (d && d.missing.length && d.matched.length >= d.missing.length && d.matched.length >= 2) {
     // Only "add missing lines" when each missing line is truly absent: if a saved expense that is still unmatched looks like it
     // (same wording, price just differs), it is probably the same line saved at another price, so leave the receipt for a human.
-    const t0 = new Date((r.receipt_date || '').slice(0, 10) + 'T00:00:00').getTime();
-    const spare = (D.expense_log || []).filter(e => siSameSup(e.supplier, siGuessSupplier(r)) && Math.abs(new Date(String(e.date).slice(0, 10) + 'T00:00:00').getTime() - t0) <= 3 * 86400000 && !d.matched.some(m => m.e === e) && !(d.priceDiff || []).some(m => m.e === e));
+    const t0s = siRecTimes(r);
+    const spare = (D.expense_log || []).filter(e => siSameSup(e.supplier, siGuessSupplier(r)) && t0s.some(t0 => Math.abs(new Date(String(e.date).slice(0, 10) + 'T00:00:00').getTime() - t0) <= 3 * 86400000) && !d.matched.some(m => m.e === e) && !(d.priceDiff || []).some(m => m.e === e));
     if (d.missing.every(l => !spare.some(e => siDescSim(e.description, l.description) >= 0.5))) return { k: 'partial', d, x };
     // some "missing" line looks like a saved one with another price: pair them up and let a human check
     d.missing.slice().forEach(l => { const e = spare.filter(z => !d.priceDiff.some(p2 => p2.e === z)).sort((p2, q2) => siDescSim(q2.description, l.description) - siDescSim(p2.description, l.description))[0]; if (e && siDescSim(e.description, l.description) >= 0.5) { d.priceDiff.push({ l, e }); d.missing.splice(d.missing.indexOf(l), 1); } });
@@ -6733,7 +6733,7 @@ async function siBulkScan() {
   rows.forEach(r => { if (siProcMatch(r)) copyIds.add(r.id); });
   let xmap = {};
   try {
-    const items = rows.filter(r => !copyIds.has(r.id) && siGuessSupplier(r) && r.receipt_date && Number(r.total_inc) > 0).map(r => ({ id: r.id, supplier: siGuessSupplier(r), date: (r.receipt_date || '').slice(0, 10), total: Number(r.total_inc) }));
+    const items = rows.filter(r => !copyIds.has(r.id) && siGuessSupplier(r) && r.receipt_date && Number(r.total_inc) > 0).map(r => ({ id: r.id, supplier: siGuessSupplier(r), date: (r.receipt_date || '').slice(0, 10), alt_date: siPhotoDate(r), total: Number(r.total_inc) }));
     const resp = await fetch('/.netlify/functions/receipt-xero', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'check_many', items }) });
     const j = await resp.json();
     if (!j.ok) throw new Error(j.error || 'Xero check failed');
@@ -7087,6 +7087,10 @@ function siHabitField(sup, field, minShare, minRows) {
 }
 // ── Duplicate protection ──
 const siNorm = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+// The date the photo was taken is in the file name ("Receipt 2026-09-05 14-09.jpg"). The reader sometimes misreads the printed date
+// (5 Sep read as 5 Nov), so matching also looks around the photo date.
+function siPhotoDate(r) { const m = String(r.file_name || '').match(/(\d{4}-\d{2}-\d{2})/); return m ? m[1] : ''; }
+function siRecTimes(r) { return [(r.receipt_date || '').slice(0, 10), siPhotoDate(r)].filter(Boolean).filter((d, i, a) => a.indexOf(d) === i).map(d => new Date(d + 'T00:00:00').getTime()); }
 // Same supplier even when named differently ("Bunnings" vs "Bunnings Warehouse").
 function siSameSup(a, b) { const x = siNorm(a), y = siNorm(b); return !!x && !!y && (x === y || (x.length >= 5 && y.length >= 5 && (x.startsWith(y.slice(0, 5)) || y.startsWith(x.slice(0, 5))))); }
 const siToks = (t) => new Set(String(t || '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 3));
@@ -7104,13 +7108,13 @@ function siDupes(r) {
   const supName = siGuessSupplier(r);
   const date = (r.receipt_date || '').slice(0, 10);
   if (!lines.length || !supName || !date) return null;
-  const t0 = new Date(date + 'T00:00:00').getTime();
+  const t0s = siRecTimes(r);
   const ref = siNorm(r.reference);
   // Candidates: saved expenses near the date from the same supplier, OR (whatever the supplier is called: "H&G Locks" vs "Hardware and General Supplies")
   // an expense with the same price and similar wording as one of this receipt's lines.
   const lineHit = e => lines.some(l => { const a = parseFloat(l.amount) || 0; return Math.abs(Number(e.amount) - a) <= Math.max(0.10, Math.abs(a) * 0.03) && siDescSim(e.description, l.description) >= 0.5; });
   const cand = (D.expense_log || []).filter(e => (siSameSup(e.supplier, supName) || lineHit(e)) && e.id !== undefined && (
-    Math.abs(new Date(String(e.date).slice(0,10) + 'T00:00:00').getTime() - t0) <= 3 * 86400000 || (ref && siNorm(e.reference) === ref)));
+    t0s.some(t0 => Math.abs(new Date(String(e.date).slice(0,10) + 'T00:00:00').getTime() - t0) <= 3 * 86400000) || (ref && siNorm(e.reference) === ref)));
   if (!cand.length) return null;
   const used = new Set(), matched = [], missing = [];
   lines.forEach(l => {
@@ -7184,10 +7188,10 @@ function siIsCopy(r) { return siTwins(r).some(o => String(o.received_at || o.cre
 // "Look in job costs": everything saved around this receipt's date that could be it (same supplier, a line with the same price, or similar wording).
 function siSearchSaved() {
   const r = SI.rows[SI.idx]; if (!r) return;
-  const lines = Array.isArray(r.lines) ? r.lines : [], t0 = new Date((r.receipt_date || '').slice(0, 10) + 'T00:00:00').getTime(), sup = siGuessSupplier(r);
+  const lines = Array.isArray(r.lines) ? r.lines : [], t0s = siRecTimes(r), sup = siGuessSupplier(r);
   const hits = [];
   (D.expense_log || []).forEach(e => {
-    const dd = Math.abs(new Date(String(e.date).slice(0, 10) + 'T00:00:00').getTime() - t0) / 86400000; if (!(dd <= 7)) return;
+    const dd = Math.min(...t0s.map(t0 => Math.abs(new Date(String(e.date).slice(0, 10) + 'T00:00:00').getTime() - t0))) / 86400000; if (!(dd <= 7)) return;
     const why = [];
     if (sup && siSameSup(e.supplier, sup)) why.push('same supplier');
     if (lines.some(l => Math.abs((parseFloat(l.amount) || 0) - Number(e.amount)) <= 0.02 && Number(e.amount) > 0)) why.push('same price as a line');
@@ -7249,7 +7253,7 @@ async function siXeroCheck(r) {
   if (SI.xchk[key] === undefined) {
     SI.xchk[key] = null;
     try {
-      const resp = await fetch('/.netlify/functions/receipt-xero', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'check', id: r.id }) });
+      const resp = await fetch('/.netlify/functions/receipt-xero', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'check', id: r.id, alt_date: siPhotoDate(r) }) });
       SI.xchk[key] = await resp.json();
     } catch (e) { SI.xchk[key] = { error: true }; }
   }
@@ -7279,6 +7283,7 @@ function siTwinBanner(r) {
     <div>Another card in this Inbox has the same supplier, date and total (${fmt(Number(r.total_inc), 2)}). It is probably the same receipt added twice.</div>
     <div class="si-dup-act"><button class="si-primary2" onclick="siTwinRemove()">Remove this copy</button><button onclick="siTwinKeep()">Different receipt — keep both</button></div></div>`;
 }
+function siUsePhotoDate(d) { const r = SI.rows[SI.idx]; if (!r) return; r.receipt_date = d; const el = document.getElementById('si-date'); if (el) el.value = d; siDateChanged(d); siRender(); }
 function siTwinKeep() { const r = SI.rows[SI.idx]; if (r) { SI.twinOk = SI.twinOk || {}; SI.twinOk[r.id] = true; siRender(); } }
 async function siTwinRemove() {
   const r = SI.rows[SI.idx]; if (!r) return;
@@ -7374,7 +7379,7 @@ function siCardHtml() {
     <div class="si-grid">
       <label class="si-full">Supplier<input id="si-sup" list="si-sups" enterkeyhint="next" value="${attrEsc(sup)}" onchange="siSupChanged(this.value)"><datalist id="si-sups">${siSupplierList().map(x => `<option value="${attrEsc(x)}">`).join('')}</datalist></label>
       <label>Total (inc GST)<input id="si-total" inputmode="decimal" enterkeyhint="next" value="${total}"></label>
-      <label>Date<input id="si-date" type="date" value="${attrEsc((r.receipt_date||'').slice(0,10))}" onchange="siDateChanged(this.value)"></label>
+      <label>Date<input id="si-date" type="date" value="${attrEsc((r.receipt_date||'').slice(0,10))}" onchange="siDateChanged(this.value)">${(() => { const pd = siPhotoDate(r), rd = (r.receipt_date || '').slice(0, 10); return pd && rd && Math.abs(new Date(pd + 'T00:00:00') - new Date(rd + 'T00:00:00')) > 3 * 86400000 ? `<small style="color:var(--amber)">Photo taken ${fmtDMY(pd)}. <a href="#" onclick="siUsePhotoDate('${pd}');return false" style="color:var(--amber);text-decoration:underline">Use that date</a></small>` : ''; })()}</label>
       ${lineCount ? '' : `<label class="si-full">What was it for?<input id="si-desc" value="${attrEsc(desc)}" placeholder="e.g. Google Workspace – November"></label>`}
     </div>
     <div class="si-note">${chk}</div>

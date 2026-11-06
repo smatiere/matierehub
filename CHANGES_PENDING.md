@@ -66,6 +66,9 @@ Review after 2-3 weeks: rank tabs/buttons by device, then re-score iPhone UX.
   returned GST-inclusive prices; receipt-inbox `exGstFix` (server, on every read) and `siFixGst` (client, for cards already stored) divide amounts by 1.1 so
   matching, saving and Xero use ex GST. Found 11 such cards pending/personal and 2 processed receipts whose job costs were saved inc GST (see below, not yet corrected).
 
+- **Photo date as a fallback (2026-11-06):** the reader sometimes misreads the printed date (5 Sep read as 5 Nov). Matching (Hub + Xero check/check_many) now also looks around the
+  date in the photo's file name ("Receipt 2026-09-05 14-09.jpg"), and the card shows "Photo taken ... Use that date" when the two differ by more than 3 days.
+
 ## Feature — 2026-11-01 (Schedule tab: pipeline + bookings calendar)
 
 Seb asked for a pipeline / future-bookings tool: approved quotes (Xero or direct in the Hub)

@@ -186,7 +186,9 @@ exports.handler = async (event) => {
       const safe = sup.replace(/"/g, '');
       const f = await xeroCall(`Contacts?where=${encodeURIComponent('Name=="' + safe + '"')}`, 'GET', c.token, c.tenant);
       const contactId = f.Contacts && f.Contacts.length ? f.Contacts[0].ContactID : null;
-      const have = await findExisting(c, contactId, date, total, sup);
+      let have = await findExisting(c, contactId, date, total, sup);
+      const alt = String(b.alt_date || '').slice(0, 10);
+      if (!have && /^\d{4}-\d{2}-\d{2}$/.test(alt) && alt !== date) have = await findExisting(c, contactId, alt, total, sup);   // the reader may have misread the printed date: try the photo's date
       return out(200, { ok: true, found: !!have, have: have ? { id: have.id, kind: have.kind, contact: have.contact, hadFile: have.hadFile, total: have.total, date: have.date, multiple: have.multiple } : null });
     }
     // Many receipts at once: one pass over the year's Spend Money in Xero (a handful of calls), matched in memory.
@@ -196,7 +198,8 @@ exports.handler = async (event) => {
       if (!items.length) return out(200, { ok: true, results: [] });
       const c = await xeroContext();
       const day = (d) => new Date(String(d).slice(0, 10) + 'T00:00:00Z').getTime();
-      const lo = new Date(Math.min(...items.map(x => day(x.date))) - 6 * 86400000), hi = new Date(Math.max(...items.map(x => day(x.date))) + 6 * 86400000);
+      const allDays = items.flatMap(x => [x.date, x.alt_date].filter(z => /^\d{4}-\d{2}-\d{2}$/.test(String(z || ''))).map(day));
+      const lo = new Date(Math.min(...allDays) - 6 * 86400000), hi = new Date(Math.max(...allDays) + 6 * 86400000);
       const pad = (n) => String(n).padStart(2, '0'), dt = (x) => `DateTime(${x.getUTCFullYear()},${pad(x.getUTCMonth() + 1)},${pad(x.getUTCDate())})`;
       const where = encodeURIComponent(`Type=="SPEND"&&Status!="DELETED"&&Date>=${dt(lo)}&&Date<=${dt(hi)}`);
       let txns = [];
@@ -208,7 +211,8 @@ exports.handler = async (event) => {
       const norm = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
       const similar = (a2, b2) => { const x = norm(a2), y = norm(b2); return x && y && (x.includes(y.slice(0, 5)) || y.includes(x.slice(0, 5))); };
       const results = items.map(it => {
-        const d0 = day(it.date);
+        const tryOn = (dstr) => {
+        const d0 = day(dstr);
         const fits = txns.filter(x => Math.abs(Number(x.Total) - Number(it.total)) <= 0.06 && Math.abs(day(String(x.DateString || x.Date || '').slice(0, 10) || '1970-01-01') - d0) <= 5 * 86400000 && similar(x.Contact && x.Contact.Name, it.supplier));
         fits.sort((p2, q) => (p2.HasAttachments ? 1 : 0) - (q.HasAttachments ? 1 : 0));
         let h = fits[0];
@@ -216,7 +220,9 @@ exports.handler = async (event) => {
           const alt = txns.filter(x => Math.abs(Number(x.Total) - Number(it.total)) <= 0.06 && Math.abs(day(String(x.DateString || x.Date || '').slice(0, 10) || '1970-01-01') - d0) <= 5 * 86400000);
           if (alt.length === 1) h = alt[0];
         }
-        return h ? { id: it.id, found: true, hadFile: !!h.HasAttachments, txn: h.BankTransactionID, contact: (h.Contact && h.Contact.Name) || '' } : { id: it.id, found: false };
+        return h ? { id: it.id, found: true, hadFile: !!h.HasAttachments, txn: h.BankTransactionID, contact: (h.Contact && h.Contact.Name) || '' } : null;
+        };
+        return tryOn(it.date) || (/^\d{4}-\d{2}-\d{2}$/.test(String(it.alt_date || '')) && it.alt_date !== it.date ? tryOn(it.alt_date) : null) || { id: it.id, found: false };
       });
       return out(200, { ok: true, results, scanned: txns.length });
     }
