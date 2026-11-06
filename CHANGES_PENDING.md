@@ -59,6 +59,9 @@ Review after 2-3 weeks: rank tabs/buttons by device, then re-score iPhone UX.
 - **Exact printed total settles it (2026-11-06):** when the saved expenses for one job and day equal the receipt's printed total (inc or ex GST) to within ~0.4%,
   the receipt counts as saved whatever the photo reader made of the lines (e.g. it listed the GST amount as an extra product line). Re-tested Greg and Vicky.
 
+- **Match by item + price whatever the supplier is called (2026-11-06):** saved expenses near the date are now candidates if they have the same supplier OR a line with the
+  same price (within 3%) and similar wording, so "H&G Locks/Doors/Windows" matches "Hardware and General Supplies". Regression-checked: H&G, Greg, Vicky, handrail, Payless cases.
+
 ## Feature — 2026-11-01 (Schedule tab: pipeline + bookings calendar)
 
 Seb asked for a pipeline / future-bookings tool: approved quotes (Xero or direct in the Hub)

@@ -7091,7 +7091,10 @@ function siDupes(r) {
   if (!lines.length || !supName || !date) return null;
   const t0 = new Date(date + 'T00:00:00').getTime();
   const ref = siNorm(r.reference);
-  const cand = (D.expense_log || []).filter(e => siSameSup(e.supplier, supName) && e.id !== undefined && (
+  // Candidates: saved expenses near the date from the same supplier, OR (whatever the supplier is called: "H&G Locks" vs "Hardware and General Supplies")
+  // an expense with the same price and similar wording as one of this receipt's lines.
+  const lineHit = e => lines.some(l => { const a = parseFloat(l.amount) || 0; return Math.abs(Number(e.amount) - a) <= Math.max(0.10, Math.abs(a) * 0.03) && siDescSim(e.description, l.description) >= 0.5; });
+  const cand = (D.expense_log || []).filter(e => (siSameSup(e.supplier, supName) || lineHit(e)) && e.id !== undefined && (
     Math.abs(new Date(String(e.date).slice(0,10) + 'T00:00:00').getTime() - t0) <= 3 * 86400000 || (ref && siNorm(e.reference) === ref)));
   if (!cand.length) return null;
   const used = new Set(), matched = [], missing = [];
