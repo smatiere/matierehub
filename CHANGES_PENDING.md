@@ -44,6 +44,10 @@ Review after 2-3 weeks: rank tabs/buttons by device, then re-score iPhone UX.
   the supplier, the items or the invoice number match (`siProcMatch`), in the card panel and in the bulk clear. Xero lookups (single check, send and
   check_many) also accept a single payment with the same amount and date when the contact name differs (amount >= $20, must be unique).
 
+- **Photo viewer + price-difference group (2026-11-06):** photos are cropped to the paper (brightness threshold) and shown big (fills the window on phones),
+  scrolled to the busiest stretch (items + total); tap opens our own viewer (pinch, drag, double-tap, Fit, fixed Done) so the page never zooms.
+  New group "Saved, but prices differ" (same wording, different price: photo misread or wrong saved line) shown in the card panel and the bulk clear (unticked).
+
 ## Feature — 2026-11-01 (Schedule tab: pipeline + bookings calendar)
 
 Seb asked for a pipeline / future-bookings tool: approved quotes (Xero or direct in the Hub)

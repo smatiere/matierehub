@@ -532,8 +532,14 @@ body.claude-bar-off #app{padding-bottom:calc(24px + env(safe-area-inset-bottom))
 .si-preview{position:relative}
 .si-preview img{cursor:zoom-in}
 .si-zoomhint{position:absolute;right:8px;bottom:8px;display:inline-flex;align-items:center;gap:5px;background:rgba(0,0,0,.72);color:#fff;border:none;border-radius:14px;padding:6px 10px;font-size:11px}
-.si-zoom{position:fixed;inset:0;z-index:900;background:#000;overflow:auto;-webkit-overflow-scrolling:touch;touch-action:pinch-zoom pan-x pan-y}
-.si-zoom img{display:block;width:100%;height:auto}
+.si-zoom{position:fixed;inset:0;z-index:900;background:#000;overflow:hidden;touch-action:none;overscroll-behavior:contain;-webkit-user-select:none;user-select:none}
+.si-zoom-stage{position:absolute;left:0;top:0;width:100%;height:100%;overflow:hidden}
+.si-zoom canvas{position:absolute;left:0;top:0;transform-origin:0 0;max-width:none;will-change:transform}
+.si-zoom-fit{position:fixed;top:max(12px,env(safe-area-inset-top));left:12px;z-index:3;display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 14px;background:rgba(0,0,0,.7);color:#fff;border:1px solid var(--border-2);border-radius:22px;font-size:13px;font-weight:600}
+.si-zoom-note{position:fixed;bottom:max(14px,env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);z-index:3;font-size:11px;color:rgba(255,255,255,.6);background:rgba(0,0,0,.55);padding:4px 12px;border-radius:12px;pointer-events:none}
+.si-zoom-x{z-index:3}
+.si-preview.si-big{touch-action:pan-y;overflow-y:auto;cursor:zoom-in}
+.si-preview.si-big canvas,.si-preview.si-big img{display:block;width:100%;height:auto;max-height:none}
 .si-zoom-x{position:fixed;top:max(12px,env(safe-area-inset-top));right:12px;z-index:2;display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 16px;background:var(--amber);color:#000;border:none;border-radius:22px;font-weight:700;font-size:14px}
 .si-more>summary{min-height:40px;display:flex;align-items:center}
 .si-savehint{padding:9px 12px;background:var(--bg-2);border-radius:8px;color:var(--ink-3)}
@@ -541,8 +547,8 @@ body.claude-bar-off #app{padding-bottom:calc(24px + env(safe-area-inset-bottom))
   .rc-wrap{padding:0}
   .rc-tabs{margin-bottom:8px}
   .si-top{margin-bottom:4px}
-  .si-card .si-preview{max-height:30vh}
-  .si-card .si-preview img{max-height:30vh;object-fit:contain}
+  .si-card .si-preview.si-big{height:calc(100dvh - var(--hdr,65px) - 150px);max-height:none;min-height:260px}
+  .si-card .si-preview.si-big img{max-height:none}
   .si-grid input,.si-grid select,.si-wide{height:46px}
   .si-chips .hub-pill-btn{min-height:40px;display:inline-flex;align-items:center}
   #hub-nav button .ni svg{display:block}
@@ -6652,6 +6658,7 @@ const SIB_GROUPS = [
   { k: 'sendnew',  title: 'Send to Xero',          hub: 'ok',  xe: 'no',  file: 'no', text: 'Saved to a job. Not in Xero yet: it gets created there with the file.', on: true },
   { k: 'partial',  title: 'Add missing lines',     hub: 'part', xe: 'q',  file: 'no', text: 'Most lines are on a job. The missing lines are added to that job, then it goes to Xero.', on: true },
   { k: 'copy',     title: 'Copies',                hub: '',    xe: '',    file: '',   text: 'Same date, total and items as another card or an already-processed receipt. The copy is removed.', on: true },
+  { k: 'check',   title: 'Saved, but prices differ', hub: 'part', xe: 'q', file: 'no', text: 'Same items are saved to a job, but some prices differ. Check before closing.', on: false, left: true },
   { k: 'needjob',  title: 'Needs a job',           hub: 'no',  xe: 'ok',  file: '',   text: 'In Xero, but not saved to any job. Left for you to pick the job. Tick to close it anyway (no job cost is saved).', on: false, left: true },
   { k: 'fresh',    title: 'New',                   hub: 'no',  xe: 'no',  file: 'no', text: 'Not in the Hub or Xero. Left for you.', on: false, left: true, nobox: true }
 ];
@@ -6674,12 +6681,13 @@ function siClassify(r, x, copyIds) {
   const lines = Array.isArray(r.lines) ? r.lines : [];
   const d = lines.length && siGuessSupplier(r) && r.receipt_date ? siDupes(r) : null;
   const S = lines.reduce((t, l) => t + (parseFloat(l.amount) || 0), 0);
+  if (d && !d.missing.length && d.priceDiff && d.priceDiff.length) return { k: 'check', d, x };
   if (d && !d.missing.length && Math.abs(d.total - S) <= Math.max(2, S * 0.03)) return { k: x && x.found ? (x.hadFile ? 'done' : 'sendfile') : 'sendnew', d, x };
   if (d && d.missing.length && d.matched.length >= d.missing.length && d.matched.length >= 2) {
     // Only "add missing lines" when each missing line is truly absent: if a saved expense that is still unmatched looks like it
     // (same wording, price just differs), it is probably the same line saved at another price, so leave the receipt for a human.
     const t0 = new Date((r.receipt_date || '').slice(0, 10) + 'T00:00:00').getTime();
-    const spare = (D.expense_log || []).filter(e => siSameSup(e.supplier, siGuessSupplier(r)) && Math.abs(new Date(String(e.date).slice(0, 10) + 'T00:00:00').getTime() - t0) <= 3 * 86400000 && !d.matched.some(m => m.e === e));
+    const spare = (D.expense_log || []).filter(e => siSameSup(e.supplier, siGuessSupplier(r)) && Math.abs(new Date(String(e.date).slice(0, 10) + 'T00:00:00').getTime() - t0) <= 3 * 86400000 && !d.matched.some(m => m.e === e) && !(d.priceDiff || []).some(m => m.e === e));
     if (d.missing.every(l => !spare.some(e => siDescSim(e.description, l.description) >= 0.5))) return { k: 'partial', d, x };
   }
   if (x && x.found) return { k: 'needjob', x };
@@ -6712,6 +6720,7 @@ async function siBulkScan() {
   const line = (g, o) => {
     let t = siBulkLine(o.r);
     if (o.d && o.d.project) t += ' → ' + attrEsc(o.d.project);
+    if (g.k === 'check') t += ' · ' + o.d.priceDiff.map(p => attrEsc((p.l.description || '').slice(0, 24)) + ' saved ' + fmt(Number(p.e.amount), 2) + ' vs ' + fmt(parseFloat(p.l.amount) || 0, 2)).join('; ');
     if (g.k === 'copy' && o.pm) t += ' · same as ' + attrEsc(o.pm.supplier || 'a processed receipt') + ' (processed)';
     if (g.k === 'partial') t += ' · adds: ' + o.d.missing.map(l => attrEsc((l.description || '').slice(0, 28)) + ' ' + fmt(parseFloat(l.amount) || 0, 2)).join(', ');
     return t;
@@ -6757,6 +6766,7 @@ function siBulkPartialJob(r, d) {
   const d2 = { ...d, matched: d.matched.concat(d.missing.map(l => ({ l, e: { category: cat || l.category || '' } }))) };
   return siBulkLinkJob(r, d2, { partial: true, items, note: `Matched ${d.matched.length} expenses already saved; added ${items.length} missing line${items.length > 1 ? 's' : ''} (bulk clear)` });
 }
+function siMergeDiff(d) { return { ...d, matched: d.matched.concat(d.priceDiff || []), ids: d.ids.concat((d.priceDiff || []).map(p => p.e.id)) }; }
 function siBulkApply() {
   const plan = SIB.plan; if (!plan) return;
   const on = {}; document.querySelectorAll('.sib-ck').forEach(c => { on[c.dataset.k] = c.checked; });
@@ -6765,6 +6775,7 @@ function siBulkApply() {
   if (on.sendfile) plan.sendfile.forEach(o => jobs.push(siBulkLinkJob(o.r, o.d)));
   if (on.sendnew)  plan.sendnew.forEach(o => jobs.push(siBulkLinkJob(o.r, o.d)));
   if (on.partial)  plan.partial.forEach(o => jobs.push(siBulkPartialJob(o.r, o.d)));
+  if (on.check)    plan.check.forEach(o => jobs.push(siBulkLinkJob(o.r, siMergeDiff(o.d), { note: 'Linked to expenses already saved; some prices differ (bulk clear)' })));
   if (on.copy)     plan.copy.forEach(o => jobs.push({ id: o.r.id, label: siBulkLine(o.r), kind: 'update', fields: { status: 'ignored', notes: 'Duplicate of another Inbox card (bulk clear)' }, link: [], st: 'pending' }));
   if (on.needjob)  plan.needjob.forEach(o => jobs.push({ id: o.r.id, label: siBulkLine(o.r), kind: 'update', fields: { status: 'processed', xero_status: o.x.hadFile ? 'sent' : 'queued', xero_txn_id: o.x.txn || '', xero_attached: !!o.x.hadFile, xero_error: 'Already in Xero — closed in bulk, no job cost saved here', notes: 'Already in Xero' }, link: [], st: 'pending' }));
   if (!jobs.length) return;
@@ -7071,6 +7082,13 @@ function siDupes(r) {
     });
     if (best >= 0) { used.add(best); matched.push({ l, e: cand[best] }); } else missing.push(l);
   });
+  // Same wording but a different price (e.g. the photo was misread, or the saved line has the wrong quantity): remember it, don't call it "missing".
+  const priceDiff = [];
+  for (let i = missing.length - 1; i >= 0; i--) {
+    let best = -1, bs = 0;
+    cand.forEach((e, k) => { if (used.has(k)) return; const sim = siDescSim(e.description, missing[i].description); if (sim >= 0.7 && sim > bs) { bs = sim; best = k; } });
+    if (best >= 0) { used.add(best); priceDiff.push({ l: missing[i], e: cand[best] }); missing.splice(i, 1); }
+  }
   // Whole-receipt check: the saved expenses for one job and day add up to this receipt (within 2.5%).
   const S = lines.reduce((t, l) => t + (parseFloat(l.amount) || 0), 0);
   const groups = {};
@@ -7079,13 +7097,13 @@ function siDupes(r) {
     const gs = g.reduce((t, e) => t + (Number(e.amount) || 0), 0);
     if (S > 0 && Math.abs(gs - S) <= Math.max(2, S * 0.025) && g.length >= lines.length * 0.6 && g.length <= lines.length * 1.6 && missing.length) {
       const left = g.filter(e => !matched.some(m => m.e === e));
-      if (left.length >= missing.length) missing.splice(0).forEach(l => { matched.push({ l, e: left.shift() }); });   // only if every missing line has a saved expense to pair with
+      if (left.length >= missing.length && !priceDiff.length) missing.splice(0).forEach(l => { matched.push({ l, e: left.shift() }); });   // only if every missing line has a saved expense to pair with
     }
   });
-  if (!matched.length) return null;
-  const pc = {}; matched.forEach(m => { const p = m.e.project || ''; pc[p] = (pc[p] || 0) + 1; });
+  if (!matched.length && !priceDiff.length) return null;
+  const pc = {}; matched.concat(priceDiff).forEach(m => { const p = m.e.project || ''; pc[p] = (pc[p] || 0) + 1; });
   const project = Object.entries(pc).sort((a, b) => b[1] - a[1])[0][0];
-  return { matched, missing, ids: matched.map(m => m.e.id), project, total: matched.reduce((t, m) => t + (Number(m.e.amount) || 0), 0), date: String(matched[0].e.date).slice(0, 10) };
+  return { matched, missing, priceDiff, ids: matched.map(m => m.e.id), project, total: matched.reduce((t, m) => t + (Number(m.e.amount) || 0), 0), date: String((matched[0] || priceDiff[0]).e.date).slice(0, 10) };
 }
 function siDupBanner(r) {
   const d = SI.dupDismissed === r.id ? null : siDupes(r);
@@ -7118,7 +7136,7 @@ function siStatusHtml(r) {
   const g = SIB_GROUPS.find(z => z.k === c.k);
   const note = xi === null ? '<div style="font-size:11px;color:var(--ink-4);margin-top:3px">Couldn’t check Xero just now.</div>' : '';
   if (c.k === 'fresh') return `<div class="si-note" style="color:var(--ink-4)">${siPill('Job', 'no')}${siPill('Xero', 'no')} New — not in your job costs or Xero.${note}</div>`;
-  const col = { done: 'var(--sage)', sendfile: 'var(--sage)', sendnew: 'var(--sage)', partial: 'var(--amber)', copy: 'var(--amber)', needjob: 'var(--blue,#5aa9ff)' }[c.k];
+  const col = { done: 'var(--sage)', sendfile: 'var(--sage)', sendnew: 'var(--sage)', partial: 'var(--amber)', check: 'var(--amber)', copy: 'var(--amber)', needjob: 'var(--blue,#5aa9ff)' }[c.k];
   const pills = g.hub ? siPill('Job', g.hub) + (g.xe ? siPill('Xero', g.xe) : '') + (g.file ? siPill('File', g.file) : '') : '';
   const jobTxt = c.d && c.d.project ? `<b>${attrEsc(c.d.project)}</b>` : '';
   const xTxt = c.x && c.x.found ? ` Xero: ${c.x.contact ? attrEsc(c.x.contact) + ', ' : ''}${fmtDMY(c.x.date)}, ${fmt(c.x.total, 2)}.${c.x.multiple ? ' (More than one similar payment — check Xero.)' : ''}` : '';
@@ -7130,11 +7148,12 @@ function siStatusHtml(r) {
     sendnew:  btn('✓ Send to Xero &amp; close', "siStAct('link')", 1),
     partial:  btn(`✓ Add the ${miss} missing line${miss > 1 ? 's' : ''} &amp; close`, "siStAct('partial')", 1),
     copy:     btn('✓ Remove this copy', 'siTwinRemove()', 1) + btn('Different receipt — keep both', 'siTwinKeep()'),
+    check:    btn('Link anyway &amp; close', "siStAct('link')", 1),
     needjob:  btn('Close without a job', 'siXeroClose()')
   }[c.k];
   const more = c.k === 'needjob' ? '<div style="font-size:12px;margin-top:4px;color:var(--ink-3)">Or choose the job below and Save: Xero’s entry is reused, nothing new is created there.</div>' : '';
   return `<div class="si-dup" style="border-color:${col}"><b>${g.title}</b><div style="margin:4px 0">${pills}</div>
-    <div>${c.k === 'copy' && pm ? `Same date, total and items as <b>${attrEsc(pm.supplier || 'a receipt')}</b> (${fmtDMY((pm.receipt_date || '').slice(0, 10))}, ${fmt(Number(pm.total_inc), 2)}), which is already processed${pm.xero_status === 'sent' ? ' and in Xero' : ''}. This one is a copy.` : g.text}${jobTxt ? ' Job: ' + jobTxt + '.' : ''}${xTxt}${c.k === 'partial' ? ' Adds: ' + c.d.missing.map(l => attrEsc((l.description || '').slice(0, 30)) + ' ' + fmt(parseFloat(l.amount) || 0, 2)).join(', ') + '.' : ''}</div>${more}${note}
+    <div>${c.k === 'copy' && pm ? `Same date, total and items as <b>${attrEsc(pm.supplier || 'a receipt')}</b> (${fmtDMY((pm.receipt_date || '').slice(0, 10))}, ${fmt(Number(pm.total_inc), 2)}), which is already processed${pm.xero_status === 'sent' ? ' and in Xero' : ''}. This one is a copy.` : g.text}${jobTxt ? ' Job: ' + jobTxt + '.' : ''}${xTxt}${c.k === 'check' ? '<div style="margin-top:4px;color:var(--ink-2)">' + c.d.priceDiff.map(p => attrEsc((p.l.description || '').slice(0, 34)) + ': <b>saved ' + fmt(Number(p.e.amount), 2) + '</b>, receipt says ' + fmt(parseFloat(p.l.amount) || 0, 2)).join('<br>') + '</div>' : ''}${c.k === 'partial' ? ' Adds: ' + c.d.missing.map(l => attrEsc((l.description || '').slice(0, 30)) + ' ' + fmt(parseFloat(l.amount) || 0, 2)).join(', ') + '.' : ''}</div>${more}${note}
     <div class="si-dup-act">${acts}${c.k === 'copy' ? '' : btn('Different — save normally', 'siStDismiss()')}</div></div>`;
 }
 function siStDismiss() { const r = SI.rows[SI.idx]; if (r) { SI.dupDismissed = r.id; SI.dupOk[r.id] = true; siRender(); } }
@@ -7142,7 +7161,7 @@ function siStDismiss() { const r = SI.rows[SI.idx]; if (r) { SI.dupDismissed = r
 function siStAct(kind) {
   const r = SI.rows[SI.idx]; if (!r) return;
   const c = siClassify(r, siXeroInfo(r), null); if (!c.d) return;
-  const job = kind === 'partial' ? siBulkPartialJob(r, c.d) : siBulkLinkJob(r, c.d, c.k === 'done' ? { sent: true, txn: c.x.txn } : {});
+  const job = kind === 'partial' ? siBulkPartialJob(r, c.d) : c.k === 'check' ? siBulkLinkJob(r, siMergeDiff(c.d), { note: 'Linked to expenses already saved; some prices differ' }) : siBulkLinkJob(r, c.d, c.k === 'done' ? { sent: true, txn: c.x.txn } : {});
   siqSave(siqLoad().filter(j => j.id !== r.id).concat([job]));
   siAdvance(r.id); siqRun();
 }
@@ -7312,12 +7331,88 @@ function siCardHtml() {
     <div class="si-note si-savehint">Save puts it in your expenses. It goes to Xero (with the file attached) in the next batch — see <b>Processed</b>.</div>
   </div>`;
 }
-// Full-screen receipt: pinch to zoom, tap the cross to close.
-function siZoom(url) {
+// ── Photos: find the paper in the picture, crop to it, show the dense part (items + total) big; tap for our own pinch-zoom viewer
+// (the Done button stays put because we do the zooming ourselves instead of the browser zooming the whole page).
+function siPaperCrop(img) {
+  try {
+    const k = Math.min(1, 320 / Math.max(img.naturalWidth, img.naturalHeight)), W = Math.max(8, Math.round(img.naturalWidth * k)), H = Math.max(8, Math.round(img.naturalHeight * k));
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H; const cx = cv.getContext('2d', { willReadFrequently: true }); cx.drawImage(img, 0, 0, W, H);
+    const px = cx.getImageData(0, 0, W, H).data, g = new Uint8Array(W * H), hist = new Array(256).fill(0);
+    for (let i = 0; i < W * H; i++) { const v = (px[i * 4] * 0.3 + px[i * 4 + 1] * 0.59 + px[i * 4 + 2] * 0.11) | 0; g[i] = v; hist[v]++; }
+    let sum = 0; for (let t = 0; t < 256; t++) sum += t * hist[t];
+    let wB = 0, sB = 0, best = 0, T = 128; for (let t = 0; t < 256; t++) { wB += hist[t]; if (!wB) continue; const wF = W * H - wB; if (!wF) break; sB += t * hist[t]; const mB = sB / wB, mF = (sum - sB) / wF, v = wB * wF * (mB - mF) * (mB - mF); if (v > best) { best = v; T = t; } }
+    const bright = new Uint8Array(W * H); let nb = 0; for (let i = 0; i < W * H; i++) if (g[i] > T) { bright[i] = 1; nb++; }
+    const full = { x: 0, y: 0, w: img.naturalWidth, h: img.naturalHeight, ink: null, cropped: false };
+    if (nb / (W * H) > 0.92 || nb / (W * H) < 0.08) return full;   // nothing to crop (already a clean picture) or no clear paper
+    const col = new Array(W).fill(0), row = new Array(H).fill(0);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (bright[y * W + x]) { col[x]++; row[y]++; }
+    const cm = Math.max(...col), rm = Math.max(...row);
+    let x0 = col.findIndex(v => v >= cm * 0.35), x1 = W - 1 - [...col].reverse().findIndex(v => v >= cm * 0.35);
+    let y0 = row.findIndex(v => v >= rm * 0.25), y1 = H - 1 - [...row].reverse().findIndex(v => v >= rm * 0.25);
+    if (x0 < 0 || y0 < 0 || x1 <= x0 || y1 <= y0) return full;
+    const mx = Math.round(W * 0.01), my = Math.round(H * 0.01); x0 = Math.max(0, x0 - mx); x1 = Math.min(W - 1, x1 + mx); y0 = Math.max(0, y0 - my); y1 = Math.min(H - 1, y1 + my);
+    if ((x1 - x0) * (y1 - y0) < W * H * 0.12) return full;
+    // ink (dark text) per row inside the paper, to find the busiest stretch = the items and total
+    const ink = []; for (let y = y0; y <= y1; y++) { let n = 0; for (let x = x0; x <= x1; x++) if (g[y * W + x] < T * 0.8) n++; ink.push(n / (x1 - x0 + 1)); }
+    return { x: Math.round(x0 / k), y: Math.round(y0 / k), w: Math.round((x1 - x0 + 1) / k), h: Math.round((y1 - y0 + 1) / k), ink, cropped: true };
+  } catch (e) { return null; }   // picture came from another origin / unreadable: show it as is
+}
+function siBusyStart(crop, viewRatio) {   // viewRatio = visible height / width; returns the best top offset as a fraction of the crop height
+  if (!crop.ink || !crop.ink.length) return 0;
+  const n = crop.ink.length, win = Math.min(n, Math.max(4, Math.round(crop.w * viewRatio * (n / crop.h)))); let sum = 0, bestSum = -1, bestI = 0;
+  for (let i = 0; i < n; i++) { sum += crop.ink[i]; if (i >= win) sum -= crop.ink[i - win]; if (i >= win - 1 && sum > bestSum) { bestSum = sum; bestI = i - win + 1; } }
+  return bestI / n;
+}
+function siShowPhoto(el, r, url) {
+  const img = new Image(); img.crossOrigin = 'anonymous';
+  const plain = () => { if (SI.rows[SI.idx] !== r) return; el.classList.add('si-big'); el.innerHTML = `<img src="${url}" alt="receipt">`; el.onclick = () => siZoom({ url }); };
+  img.onload = () => {
+    if (SI.rows[SI.idx] !== r) return;
+    const crop = siPaperCrop(img); if (!crop) return plain();
+    const cv = document.createElement('canvas'), sc = Math.min(1, 1500 / crop.w); cv.width = Math.round(crop.w * sc); cv.height = Math.round(crop.h * sc);
+    cv.getContext('2d').drawImage(img, crop.x, crop.y, crop.w, crop.h, 0, 0, cv.width, cv.height);
+    el.classList.add('si-big'); el.innerHTML = ''; el.appendChild(cv);
+    const hint = document.createElement('button'); hint.className = 'si-zoomhint'; hint.innerHTML = hubIcon('zoom-in', 16) + ' Tap to zoom'; el.appendChild(hint);
+    const start = siBusyStart(crop, el.clientHeight / Math.max(1, el.clientWidth));
+    el.scrollTop = start * cv.clientHeight;
+    el.onclick = () => siZoom({ img, crop, start });
+  };
+  img.onerror = () => { if (SI.rows[SI.idx] !== r) return; const i2 = new Image(); i2.onload = plain; i2.onerror = plain; i2.src = url; };   // retry without cross-origin mode
+  img.src = url;
+}
+// Full-screen viewer with our own pinch / drag / double-tap zoom. opts = {url} (plain picture) or {img, crop, start}.
+function siZoom(opts) {
   const o = document.createElement('div'); o.className = 'si-zoom';
-  o.innerHTML = `<button class="si-zoom-x" aria-label="Close">${hubIcon('check', 22)}<span>Done</span></button><img src="${url}" alt="receipt">`;
-  o.querySelector('button').onclick = () => { o.remove(); document.body.style.overflow = ''; };
+  const pic = document.createElement('canvas'); let W, H;
+  const draw = (src, c) => { const sc = Math.min(1, 2400 / c.w); pic.width = W = Math.round(c.w * sc); pic.height = H = Math.round(c.h * sc); pic.getContext('2d').drawImage(src, c.x, c.y, c.w, c.h, 0, 0, W, H); };
+  o.innerHTML = `<button class="si-zoom-x" aria-label="Done">${hubIcon('check', 22)}<span>Done</span></button><button class="si-zoom-fit" aria-label="Fit to screen">${hubIcon('zoom-in', 18)}<span>Fit</span></button><div class="si-zoom-note">Pinch to zoom · double-tap · drag</div>`;
+  const stage = document.createElement('div'); stage.className = 'si-zoom-stage'; stage.appendChild(pic); o.appendChild(stage);
+  let s = 1, tx = 0, ty = 0, s0 = 1;
+  const vw = () => o.clientWidth, vh = () => o.clientHeight;
+  const clamp = () => { const w = W * s, h = H * s; tx = w <= vw() ? (vw() - w) / 2 : Math.min(0, Math.max(vw() - w, tx)); ty = h <= vh() ? (vh() - h) / 2 : Math.min(0, Math.max(vh() - h, ty)); };
+  const apply = () => { clamp(); pic.style.transform = `translate(${tx}px,${ty}px) scale(${s})`; };
+  const setup = () => { s0 = s = vw() / W; tx = 0; ty = -(opts.start || 0) * H * s; apply(); };
+  const zoomAt = (px, py, ns) => { ns = Math.max(s0, Math.min(s0 * 8, ns)); tx = px - (px - tx) * (ns / s); ty = py - (py - ty) * (ns / s); s = ns; apply(); };
+  const close = () => { o.remove(); document.body.style.overflow = ''; document.removeEventListener('keydown', esc); };
+  const esc = e => { if (e.key === 'Escape') close(); };
+  o.querySelector('.si-zoom-x').onclick = close; document.addEventListener('keydown', esc);
+  o.querySelector('.si-zoom-fit').onclick = () => { s = s0; tx = 0; ty = -(opts.start || 0) * H * s; apply(); };
+  let mode = null, lx = 0, ly = 0, d0 = 0, s00 = 1, lastTap = 0, moved = 0;
+  const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  o.addEventListener('touchstart', e => { if (e.target.closest('button')) return; e.preventDefault(); moved = 0;
+    if (e.touches.length === 2) { mode = 'pinch'; d0 = dist(e.touches); s00 = s; } else { mode = 'pan'; lx = e.touches[0].clientX; ly = e.touches[0].clientY; } }, { passive: false });
+  o.addEventListener('touchmove', e => { if (!mode) return; e.preventDefault();
+    if (mode === 'pinch' && e.touches.length === 2) { const mx = (e.touches[0].clientX + e.touches[1].clientX) / 2, my = (e.touches[0].clientY + e.touches[1].clientY) / 2; zoomAt(mx, my, s00 * dist(e.touches) / d0); moved = 99; }
+    else if (mode === 'pan' && e.touches.length === 1) { const x = e.touches[0].clientX, y = e.touches[0].clientY; tx += x - lx; ty += y - ly; moved += Math.abs(x - lx) + Math.abs(y - ly); lx = x; ly = y; apply(); } }, { passive: false });
+  o.addEventListener('touchend', e => { if (e.touches.length === 1) { mode = 'pan'; lx = e.touches[0].clientX; ly = e.touches[0].clientY; return; }
+    if (mode === 'pan' && moved < 10 && e.changedTouches[0] && !e.target.closest('button')) { const now = Date.now(), t = e.changedTouches[0]; if (now - lastTap < 320) { zoomAt(t.clientX, t.clientY, s > s0 * 1.3 ? s0 : s0 * 3); lastTap = 0; } else lastTap = now; }
+    mode = null; });
+  o.addEventListener('wheel', e => { e.preventDefault(); zoomAt(e.clientX, e.clientY, s * (e.deltaY < 0 ? 1.15 : 0.87)); }, { passive: false });
+  let dragging = false; o.addEventListener('mousedown', e => { if (e.target.closest('button')) return; dragging = true; lx = e.clientX; ly = e.clientY; });
+  addEventListener('mouseup', () => { dragging = false; }); o.addEventListener('mousemove', e => { if (!dragging) return; tx += e.clientX - lx; ty += e.clientY - ly; lx = e.clientX; ly = e.clientY; apply(); });
   document.body.style.overflow = 'hidden'; document.body.appendChild(o);
+  if (opts.img) { draw(opts.img, opts.crop); setup(); }
+  else { const im = new Image(); im.crossOrigin = 'anonymous'; im.onload = () => { draw(im, { x: 0, y: 0, w: im.naturalWidth, h: im.naturalHeight }); setup(); }; im.onerror = () => { const i2 = new Image(); i2.onload = () => { draw(i2, { x: 0, y: 0, w: i2.naturalWidth, h: i2.naturalHeight }); setup(); }; i2.src = opts.url; }; im.src = opts.url; }
 }
 // Swipe left/right on a receipt card to move between receipts (not while touching a field, the picture or a button).
 (function () {
@@ -7346,7 +7441,8 @@ function siWireCard() {
 // Shows the receipt right on the page: photos as pictures, PDFs drawn page by page.
 async function siShowFile(r, u) {
   const el = document.getElementById('si-preview'); if (!el || SI.rows[SI.idx] !== r) return;
-  if (u.mime !== 'application/pdf') { el.innerHTML = `<img src="${u.url}" alt="receipt" onclick="siZoom(this.src)"><button class="si-zoomhint" onclick="siZoom('${u.url}')">${hubIcon('zoom-in', 16)} Tap to enlarge</button>`; return; }
+  if (u.mime !== 'application/pdf') { siShowPhoto(el, r, u.url); return; }
+  el.classList.add('si-big');
   el.innerHTML = '<span style="color:var(--ink-4)">Drawing PDF…</span>';
   try {
     if (!window.pdfjsLib) await new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'; sc.onload = res; sc.onerror = rej; document.head.appendChild(sc); });
