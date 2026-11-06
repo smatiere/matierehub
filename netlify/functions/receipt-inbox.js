@@ -28,6 +28,22 @@ async function rest(method, path, body, prefer) {
 }
 const extOf = (mime) => ({ 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/heic': 'heic', 'image/heif': 'heic', 'application/pdf': 'pdf' }[mime] || 'bin');
 
+// The reader is asked for EX-GST amounts, but on receipts that only print GST-inclusive prices (Kimbriki, Warringah Timbers...) it sometimes
+// returns those printed prices as they are. Tell: the GST is shown as included, and the lines add up to the printed TOTAL instead of total / 1.1.
+// Then every amount is divided by 1.1 so the Hub (which stores ex GST) and Xero get the right numbers.
+const r2 = (x) => Math.round((Number(x) || 0) * 100) / 100;
+function exGstFix(j) {
+  try {
+    const c = j.check;
+    if (!c || c.gst_status !== 'included' || !(Number(c.total) > 0)) return j;
+    const S = j.items.reduce((t, i) => t + (Number(i.amount) || 0), 0), tol = Math.max(0.05, c.total * 0.005);
+    if (Math.abs(S - c.total) <= tol && Math.abs(S - c.total / 1.1) > tol) {
+      j.items.forEach(i => { i.amount = r2(i.amount / 1.1); i.unit_price = r2(i.unit_price / 1.1); });
+      j.check = { ...c, ok: true, lines_inc_gst: r2(S), fixed_inc_gst: true };
+    }
+  } catch (e) { /* leave as read */ }
+  return j;
+}
 async function readReceipt(event, name, mime, data) {
   try {
     const { handler } = require('./claude-parse');
@@ -38,7 +54,7 @@ async function readReceipt(event, name, mime, data) {
     const r = await handler({ httpMethod: 'POST', headers: internal, body: JSON.stringify({ previewOnly: true, images: [{ name, mediaType: mime, data }] }) });
     const j = JSON.parse(r.body);
     if (j.status !== 'preview' || !Array.isArray(j.items) || !j.items.length) return null;
-    return j;
+    return exGstFix(j);
   } catch (e) { return null; }
 }
 

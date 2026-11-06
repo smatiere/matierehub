@@ -62,6 +62,10 @@ Review after 2-3 weeks: rank tabs/buttons by device, then re-score iPhone UX.
 - **Match by item + price whatever the supplier is called (2026-11-06):** saved expenses near the date are now candidates if they have the same supplier OR a line with the
   same price (within 3%) and similar wording, so "H&G Locks/Doors/Windows" matches "Hardware and General Supplies". Regression-checked: H&G, Greg, Vicky, handrail, Payless cases.
 
+- **GST-inclusive amounts from the reader fixed (2026-11-06):** when GST is shown as included and the lines add up to the printed TOTAL (not total / 1.1), the reader
+  returned GST-inclusive prices; receipt-inbox `exGstFix` (server, on every read) and `siFixGst` (client, for cards already stored) divide amounts by 1.1 so
+  matching, saving and Xero use ex GST. Found 11 such cards pending/personal and 2 processed receipts whose job costs were saved inc GST (see below, not yet corrected).
+
 ## Feature — 2026-11-01 (Schedule tab: pipeline + bookings calendar)
 
 Seb asked for a pipeline / future-bookings tool: approved quotes (Xero or direct in the Hub)

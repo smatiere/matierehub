@@ -6893,9 +6893,24 @@ async function siApi(body) {
   if (!r.ok || !j.ok) throw new Error(j.error || ('Inbox error ' + r.status));
   return j;
 }
+// Same safeguard as the server (receipt-inbox exGstFix) for cards read before it existed: if GST is shown as included and the lines add up to the
+// printed TOTAL rather than total / 1.1, the reader gave GST-inclusive prices; bring them back to ex GST so matching, saving and Xero are right.
+function siFixGst(r) {
+  try {
+    const c = r.check_info, lines = Array.isArray(r.lines) ? r.lines : [], T = Number(r.total_inc) || 0;
+    if (r._gstFixed || !c || c.gst_status !== 'included' || !(T > 0) || !lines.length) return;
+    const S = lines.reduce((t, l) => t + (parseFloat(l.amount) || 0), 0), tol = Math.max(0.05, T * 0.005);
+    if (Math.abs(S - T) <= tol && Math.abs(S - T / 1.1) > tol) {
+      const r2 = x => Math.round((parseFloat(x) || 0) * 100) / 100;
+      lines.forEach(l => { l.amount = r2(l.amount / 1.1); l.unit_price = r2(l.unit_price / 1.1); });
+      r.check_info = { ...c, ok: true, lines_inc_gst: r2(S), fixed_inc_gst: true }; r._gstFixed = true;
+    }
+  } catch (e) {}
+}
 async function siLoad(pile) {
   const j = await siApi({ action:'list', status: pile });
   SI.rows = j.rows; SI.counts = j.counts || {};
+  if (pile === 'pending') SI.rows.forEach(siFixGst);
   if (pile === 'pending') SI.counts.pending = j.rows.length;
   if (SI.idx >= SI.rows.length) SI.idx = 0;
 }
