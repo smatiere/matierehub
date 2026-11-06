@@ -52,6 +52,10 @@ Review after 2-3 weeks: rank tabs/buttons by device, then re-score iPhone UX.
   check now also uses the receipt's PRINTED total (within ~1%) so garbled lines no longer hide a receipt that is already saved; "saved but a similar line
   with another price" becomes "Saved, but prices differ" instead of falling through to "Needs a job".
 
+- **Windows can always be closed + "Look in job costs" (2026-11-06):** phone windows get a grip bar, a bigger X, a Close button at the bottom (sticky), drag-down on
+  the title bar, a bigger dim area to tap, and the browser Back button closes them (history state). Receipt cards the system calls "New"/"Needs a job" show
+  a "Look in job costs" link: lists saved expenses within 7 days with the same supplier, same price as a line, or similar wording.
+
 ## Feature — 2026-11-01 (Schedule tab: pipeline + bookings calendar)
 
 Seb asked for a pipeline / future-bookings tool: approved quotes (Xero or direct in the Hub)

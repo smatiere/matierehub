@@ -559,6 +559,15 @@ body.claude-bar-off #app{padding-bottom:calc(24px + env(safe-area-inset-bottom))
 #siq-pill{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(68px + env(safe-area-inset-bottom));z-index:560;display:inline-flex;align-items:center;gap:8px;min-height:40px;padding:0 16px;border-radius:20px;border:1px solid var(--border-2);background:var(--bg-3);color:var(--ink);font-size:13px;font-weight:600;box-shadow:0 6px 24px rgba(0,0,0,.6);touch-action:manipulation}
 #siq-pill.bad{background:var(--pink);color:#fff;border-color:var(--pink)}
 @media (min-width:721px){#siq-pill{bottom:20px}}
+.modal-grip,.modal-foot{display:none}
+@media (max-width:720px){
+  .modal,.modal.modal-wide{max-height:88vh!important}
+  .modal-close{min-width:48px;min-height:48px;font-size:19px}
+  .modal-grip{display:block;position:absolute;left:50%;top:6px;width:42px;height:4px;margin-left:-21px;border-radius:2px;background:var(--border-2)}
+  .modal-head{position:sticky;touch-action:none}
+  .modal-foot{display:block;position:sticky;bottom:0;background:var(--bg-2);border-top:1px solid var(--border);padding:8px 16px calc(8px + env(safe-area-inset-bottom))}
+  .modal-foot button{width:100%;min-height:48px;border-radius:12px;background:var(--bg-3);border:1px solid var(--border-2);color:var(--ink);font-size:16px;font-weight:600}
+}
 @media (max-width:720px){.hide-sm{display:none}}
 @keyframes sheetIn{from{transform:translateY(40px);opacity:0}to{transform:none;opacity:1}}
 
@@ -720,8 +729,9 @@ body.claude-bar-off #app{padding-bottom:calc(24px + env(safe-area-inset-bottom))
 
 <div id="modal-overlay" class="modal-overlay" onclick="if(event.target===this)closeModal()">
   <div class="modal">
-    <div class="modal-head"><h3 id="modal-title"></h3><button class="modal-close" onclick="closeModal()">✕</button></div>
+    <div class="modal-head"><span class="modal-grip" aria-hidden="true"></span><h3 id="modal-title"></h3><button class="modal-close" onclick="closeModal()" aria-label="Close">✕</button></div>
     <div class="modal-body" id="modal-body"></div>
+    <div class="modal-foot"><button onclick="closeModal()">Close</button></div>
   </div>
 </div>
 
@@ -3405,13 +3415,24 @@ function openModal(title, bodyHtml, wide) {
   document.querySelector('.modal').classList.toggle('modal-wide', !!wide);
   document.getElementById('modal-overlay').classList.add('open');
   document.body.style.overflow = 'hidden';
+  try { if (!(history.state && history.state.hubModal)) history.pushState({ hubModal: 1 }, ''); } catch (e) {}
 }
 function closeModal() {
+  const wasOpen = document.getElementById('modal-overlay').classList.contains('open');
   document.getElementById('modal-overlay').classList.remove('open');
+  try { if (wasOpen && history.state && history.state.hubModal) history.back(); } catch (e) {}
   document.querySelector('.modal').classList.remove('modal-wide');
   document.body.style.overflow = '';
 }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal(); tsDismissPopup(); } });
+addEventListener('popstate', () => { const ov = document.getElementById('modal-overlay'); if (ov && ov.classList.contains('open')) { ov.classList.remove('open'); document.querySelector('.modal').classList.remove('modal-wide'); document.body.style.overflow = ''; } });
+// phones: drag the title bar of a window down to close it
+(function () {
+  let y0 = null, dy = 0;
+  document.addEventListener('touchstart', e => { const h = e.target.closest && e.target.closest('.modal-head'); if (!h || e.target.closest('.modal-close') || innerWidth > 720) { y0 = null; return; } y0 = e.touches[0].clientY; dy = 0; }, { passive: true });
+  document.addEventListener('touchmove', e => { if (y0 == null) return; dy = Math.max(0, e.touches[0].clientY - y0); const m = document.querySelector('.modal'); if (m) m.style.transform = `translateY(${dy}px)`; }, { passive: true });
+  document.addEventListener('touchend', () => { if (y0 == null) return; const m = document.querySelector('.modal'); y0 = null; if (m) m.style.transform = ''; if (dy > 90) closeModal(); dy = 0; }, { passive: true });
+})();
 
 // 2026-06-30 batch — rewritten: clickable status pills, quote-line linking
 // (mirrors invoice linking) feeding Est. Value, manual Est. Value as fallback,
@@ -7133,6 +7154,27 @@ function siXeroInfo(r) {   // what Xero said about this card, in the same shape 
   return x.found ? { found: true, hadFile: !!x.have.hadFile, txn: x.have.id, contact: x.have.contact, date: x.have.date, total: x.have.total, multiple: x.have.multiple } : { found: false };
 }
 function siIsCopy(r) { return siTwins(r).some(o => String(o.received_at || o.created_at) < String(r.received_at || r.created_at) || (String(o.received_at || o.created_at) === String(r.received_at || r.created_at) && o.id < r.id)); }
+// "Look in job costs": everything saved around this receipt's date that could be it (same supplier, a line with the same price, or similar wording).
+function siSearchSaved() {
+  const r = SI.rows[SI.idx]; if (!r) return;
+  const lines = Array.isArray(r.lines) ? r.lines : [], t0 = new Date((r.receipt_date || '').slice(0, 10) + 'T00:00:00').getTime(), sup = siGuessSupplier(r);
+  const hits = [];
+  (D.expense_log || []).forEach(e => {
+    const dd = Math.abs(new Date(String(e.date).slice(0, 10) + 'T00:00:00').getTime() - t0) / 86400000; if (!(dd <= 7)) return;
+    const why = [];
+    if (sup && siSameSup(e.supplier, sup)) why.push('same supplier');
+    if (lines.some(l => Math.abs((parseFloat(l.amount) || 0) - Number(e.amount)) <= 0.02 && Number(e.amount) > 0)) why.push('same price as a line');
+    if (lines.some(l => siDescSim(e.description, l.description) >= 0.6)) why.push('similar item');
+    if (why.length) hits.push({ e, why });
+  });
+  const groups = {}; hits.forEach(h => { const k = (h.e.project || '(no job)') + '|' + String(h.e.date).slice(0, 10) + '|' + (h.e.supplier || ''); (groups[k] = groups[k] || []).push(h); });
+  const body = Object.keys(groups).length ? Object.entries(groups).map(([k, arr]) => { const [pr, d, su] = k.split('|'); const tot = arr.reduce((a, h) => a + (Number(h.e.amount) || 0), 0);
+    return `<div style="border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px"><b>${attrEsc(pr)}</b><div style="font-size:12px;color:var(--ink-3)">${fmtDMY(d)} · ${attrEsc(su || 'no supplier')} · ${arr.length} line${arr.length > 1 ? 's' : ''} · ${fmt(tot, 2)} ex GST (${fmt(tot * 1.1, 2)} inc)</div>
+      <div style="font-size:12px;color:var(--ink-4);margin-top:4px">${[...new Set(arr.flatMap(h => h.why))].join(' · ')}</div>
+      <details style="margin-top:4px"><summary style="font-size:12px;color:var(--ink-3)">See the lines</summary><div style="font-size:12px;color:var(--ink-3);line-height:1.6">${arr.map(h => attrEsc((h.e.description || '').slice(0, 44)) + ' ' + fmt(Number(h.e.amount), 2)).join('<br>')}</div></details></div>`; }).join('')
+    : '<div style="color:var(--ink-3)">Nothing saved in the 7 days either side looks like this receipt. It really is new.</div>';
+  openModal('Saved around ' + fmtDMY((r.receipt_date || '').slice(0, 10)), `<div style="font-size:12px;color:var(--ink-4);margin-bottom:8px">This receipt: ${attrEsc(sup || 'unknown supplier')} · ${fmt(Number(r.total_inc) || 0, 2)} inc GST (${fmt((Number(r.total_inc) || 0) / 1.1, 2)} ex).</div>${body}`);
+}
 function siStatusHtml(r) {
   if (SI.dupDismissed === r.id) return '';
   if (r.status !== 'pending') return '';
@@ -7143,7 +7185,7 @@ function siStatusHtml(r) {
   const c = siClassify(r, xi, copy ? new Set([r.id]) : null);
   const g = SIB_GROUPS.find(z => z.k === c.k);
   const note = xi === null ? '<div style="font-size:11px;color:var(--ink-4);margin-top:3px">Couldn’t check Xero just now.</div>' : '';
-  if (c.k === 'fresh') return `<div class="si-note" style="color:var(--ink-4)">${siPill('Job', 'no')}${siPill('Xero', 'no')} New — not in your job costs or Xero.${note}</div>`;
+  if (c.k === 'fresh') return `<div class="si-note" style="color:var(--ink-4)">${siPill('Job', 'no')}${siPill('Xero', 'no')} New — not in your job costs or Xero. <a href="#" onclick="siSearchSaved();return false" style="color:var(--amber)">Look in job costs</a>${note}</div>`;
   const col = { done: 'var(--sage)', sendfile: 'var(--sage)', sendnew: 'var(--sage)', partial: 'var(--amber)', check: 'var(--amber)', copy: 'var(--amber)', needjob: 'var(--blue,#5aa9ff)' }[c.k];
   const pills = g.hub ? siPill('Job', g.hub) + (g.xe ? siPill('Xero', g.xe) : '') + (g.file ? siPill('File', g.file) : '') : '';
   const jobTxt = c.d && c.d.project ? `<b>${attrEsc(c.d.project)}</b>` : '';
@@ -7159,7 +7201,7 @@ function siStatusHtml(r) {
     check:    btn('Link anyway &amp; close', "siStAct('link')", 1),
     needjob:  btn('Close without a job', 'siXeroClose()')
   }[c.k];
-  const more = c.k === 'needjob' ? '<div style="font-size:12px;margin-top:4px;color:var(--ink-3)">Or choose the job below and Save: Xero’s entry is reused, nothing new is created there.</div>' : '';
+  const more = c.k === 'needjob' ? '<div style="font-size:12px;margin-top:4px;color:var(--ink-3)">Or choose the job below and Save: Xero’s entry is reused, nothing new is created there. <a href="#" onclick="siSearchSaved();return false" style="color:var(--amber)">Look in job costs</a> first if you think it is saved.</div>' : '';
   return `<div class="si-dup" style="border-color:${col}"><b>${g.title}</b><div style="margin:4px 0">${pills}</div>
     <div>${c.k === 'copy' && pm ? `Same date, total and items as <b>${attrEsc(pm.supplier || 'a receipt')}</b> (${fmtDMY((pm.receipt_date || '').slice(0, 10))}, ${fmt(Number(pm.total_inc), 2)}), which is already processed${pm.xero_status === 'sent' ? ' and in Xero' : ''}. This one is a copy.` : g.text}${jobTxt ? ' Job: ' + jobTxt + '.' : ''}${xTxt}${c.k === 'check' ? '<div style="margin-top:4px;color:var(--ink-2)">' + c.d.priceDiff.map(p => attrEsc((p.l.description || '').slice(0, 34)) + ': <b>saved ' + fmt(Number(p.e.amount), 2) + '</b>, receipt says ' + fmt(parseFloat(p.l.amount) || 0, 2)).join('<br>') + '</div>' : ''}${c.k === 'partial' ? ' Adds: ' + c.d.missing.map(l => attrEsc((l.description || '').slice(0, 30)) + ' ' + fmt(parseFloat(l.amount) || 0, 2)).join(', ') + '.' : ''}</div>${more}${note}
     <div class="si-dup-act">${acts}${c.k === 'copy' ? '' : btn('Different — save normally', 'siStDismiss()')}</div></div>`;
