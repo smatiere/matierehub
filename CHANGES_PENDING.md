@@ -26,6 +26,11 @@ Review after 2-3 weeks: rank tabs/buttons by device, then re-score iPhone UX.
   new -> stay), applies only after confirm. Server: receipt-xero `check_many` (one pass over Xero Spend Money). Workflow
   receipts-to-xero.yml scheduled 21:23 and 05:37 UTC (8:23am / 4:37pm Sydney). Tested with fake data in a 390px frame.
 
+- **Bulk clear simplified (2026-11-06):** groups now answer two questions per receipt (Job costs in the Hub? Xero entry? file on it?):
+  Already done / Send the file to Xero / Send to Xero / Add missing lines / Copies cleared (each group has a tick box); Needs a job and New stay.
+  "Add missing lines" only when each missing line is truly absent (a similar unmatched saved expense sends it to manual review).
+  Fixed: the whole-receipt total check no longer drops missing lines when there is nothing to pair them with.
+
 ## Feature — 2026-11-01 (Schedule tab: pipeline + bookings calendar)
 
 Seb asked for a pipeline / future-bookings tool: approved quotes (Xero or direct in the Hub)
