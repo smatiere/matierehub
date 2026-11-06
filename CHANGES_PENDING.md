@@ -36,6 +36,10 @@ Review after 2-3 weeks: rank tabs/buttons by device, then re-score iPhone UX.
   red pill + toast with Retry / Forget (failed receipts are untouched in the Inbox). Missing-line adds are guarded against double adding on resume.
   Tested with 5 fake jobs incl. one failure + retry.
 
+- **One status panel per receipt (2026-11-06):** the amber "already in expenses", green "already in Xero" and "looks like a copy" boxes are
+  replaced by a single panel using the same groups/tags as the bulk clear (Already done / Send the file to Xero / Send to Xero / Add missing lines /
+  Copy / Needs a job / New). Both use `siClassify()`. One-tap actions run as a one-job background queue.
+
 ## Feature — 2026-11-01 (Schedule tab: pipeline + bookings calendar)
 
 Seb asked for a pipeline / future-bookings tool: approved quotes (Xero or direct in the Hub)

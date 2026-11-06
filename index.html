@@ -6655,6 +6655,25 @@ const SIB_GROUPS = [
   { k: 'needjob',  title: 'Needs a job',           hub: 'no',  xe: 'ok',  file: '',   text: 'In Xero, but not saved to any job. Left for you to pick the job. Tick to close it anyway (no job cost is saved).', on: false, left: true },
   { k: 'fresh',    title: 'New',                   hub: 'no',  xe: 'no',  file: 'no', text: 'Not in the Hub or Xero. Left for you.', on: false, left: true, nobox: true }
 ];
+// ONE rule for "where does this receipt stand?" used by the card panel and by the bulk clear, so both always agree.
+// x = what Xero said: {found, hadFile, txn} or undefined/null when unknown.
+function siClassify(r, x, copyIds) {
+  if (copyIds && copyIds.has(r.id)) return { k: 'copy' };
+  const lines = Array.isArray(r.lines) ? r.lines : [];
+  const d = lines.length && siGuessSupplier(r) && r.receipt_date ? siDupes(r) : null;
+  const S = lines.reduce((t, l) => t + (parseFloat(l.amount) || 0), 0);
+  if (d && !d.missing.length && Math.abs(d.total - S) <= Math.max(2, S * 0.03)) return { k: x && x.found ? (x.hadFile ? 'done' : 'sendfile') : 'sendnew', d, x };
+  if (d && d.missing.length && d.matched.length >= d.missing.length && d.matched.length >= 2) {
+    // Only "add missing lines" when each missing line is truly absent: if a saved expense that is still unmatched looks like it
+    // (same wording, price just differs), it is probably the same line saved at another price, so leave the receipt for a human.
+    const t0 = new Date((r.receipt_date || '').slice(0, 10) + 'T00:00:00').getTime();
+    const spare = (D.expense_log || []).filter(e => siSameSup(e.supplier, siGuessSupplier(r)) && Math.abs(new Date(String(e.date).slice(0, 10) + 'T00:00:00').getTime() - t0) <= 3 * 86400000 && !d.matched.some(m => m.e === e));
+    if (d.missing.every(l => !spare.some(e => siDescSim(e.description, l.description) >= 0.5))) return { k: 'partial', d, x };
+  }
+  if (x && x.found) return { k: 'needjob', x };
+  return { k: 'fresh' };
+}
+const siPill = (label, st) => `<span style="font-size:10.5px;padding:2px 7px;border-radius:9px;margin-right:4px;white-space:nowrap;${st === 'ok' ? 'background:rgba(52,211,153,.15);color:#34d399' : st === 'part' || st === 'q' ? 'background:rgba(255,190,11,.15);color:var(--amber)' : 'background:var(--bg-3);color:var(--ink-4)'}">${label} ${st === 'ok' ? '✓' : st === 'part' ? 'part' : st === 'q' ? '' : '✗'}</span>`;
 async function siBulkScan() {
   if (SI.pile !== 'pending') return;
   openModal('Clear what is already handled', '<div style="padding:20px;text-align:center;color:var(--ink-3)"><span class="spinner-sm"></span> Checking ' + SI.rows.length + ' receipts against your job costs and Xero…</div>');
@@ -6674,25 +6693,9 @@ async function siBulkScan() {
     if (!j.ok) throw new Error(j.error || 'Xero check failed');
     j.results.forEach(x => { xmap[x.id] = x; });
   } catch (e) { plan.xeroOk = false; plan.xeroErr = e.message; }
-  rows.forEach(r => {
-    if (copyIds.has(r.id)) { plan.copy.push({ r }); return; }
-    const lines = Array.isArray(r.lines) ? r.lines : [];
-    const d = lines.length && siGuessSupplier(r) && r.receipt_date ? siDupes(r) : null;
-    const S = lines.reduce((t, l) => t + (parseFloat(l.amount) || 0), 0);
-    const x = xmap[r.id];
-    if (d && !d.missing.length && Math.abs(d.total - S) <= Math.max(2, S * 0.03)) { plan[x && x.found ? (x.hadFile ? 'done' : 'sendfile') : 'sendnew'].push({ r, d, x }); return; }
-    if (d && d.missing.length && d.matched.length >= d.missing.length && d.matched.length >= 2) {
-      // Only "add missing lines" when each missing line is truly absent: if a saved expense that is still unmatched looks like it
-      // (same wording, price just differs), it is probably the same line saved at another price, so leave the receipt for a human.
-      const t0 = new Date((r.receipt_date || '').slice(0, 10) + 'T00:00:00').getTime();
-      const spare = (D.expense_log || []).filter(e => siSameSup(e.supplier, siGuessSupplier(r)) && Math.abs(new Date(String(e.date).slice(0, 10) + 'T00:00:00').getTime() - t0) <= 3 * 86400000 && !d.matched.some(m => m.e === e));
-      if (d.missing.every(l => !spare.some(e => siDescSim(e.description, l.description) >= 0.5))) { plan.partial.push({ r, d, x }); return; }
-    }
-    if (x && x.found) { plan.needjob.push({ r, x }); return; }
-    plan.fresh.push({ r });
-  });
+  rows.forEach(r => { const c = siClassify(r, xmap[r.id], copyIds); plan[c.k].push({ r, d: c.d, x: c.x }); });
   SIB.plan = plan;
-  const pill = (label, st) => `<span style="font-size:10.5px;padding:2px 7px;border-radius:9px;margin-right:4px;white-space:nowrap;${st === 'ok' ? 'background:rgba(52,211,153,.15);color:#34d399' : st === 'part' || st === 'q' ? 'background:rgba(255,190,11,.15);color:var(--amber)' : 'background:var(--bg-3);color:var(--ink-4)'}">${label} ${st === 'ok' ? '✓' : st === 'part' ? 'part' : st === 'q' ? '' : '✗'}</span>`;
+  const pill = siPill;
   const line = (g, o) => {
     let t = siBulkLine(o.r);
     if (o.d && o.d.project) t += ' → ' + attrEsc(o.d.project);
@@ -6814,7 +6817,7 @@ async function siqRun() {
   SI.idx = idx >= 0 ? idx : 0; SIQ.cleared = new Set();
   if (idx < 0 && SI.pile === 'pending' && document.getElementById('rc-body')) { siReset(); siRender(); }
   if (failed.length) claudeToast(`⚠ ${failed.length} not cleared — still in the Inbox. Tap the red bar.`, 'error', 9000);
-  else claudeToast(`✓ Cleared ${okN} receipt${okN === 1 ? '' : 's'} — ${SI.rows.length} left to review`, 'success', 6000);
+  else if (okN > 1) claudeToast(`✓ Cleared ${okN} receipts — ${SI.rows.length} left to review`, 'success', 6000);
 }
 function siqDetails() {
   const q = siqLoad(), pend = q.filter(j => j.st === 'pending'), fail = q.filter(j => j.st === 'failed');
@@ -7083,16 +7086,50 @@ function siDupBanner(r) {
 }
 // ── Is it already in Xero? (asked at review time, so a receipt Xero already has is never logged twice) ──
 function siXeroKey(r) { return [r.id, siNorm(r.supplier), (r.receipt_date || '').slice(0, 10), r.total_inc].join('|'); }
-function siXeroHtml(r) {
+function siXeroInfo(r) {   // what Xero said about this card, in the same shape the bulk clear uses
   const x = (SI.xchk || {})[siXeroKey(r)];
-  if (x === undefined) return '<div class="si-note" style="color:var(--ink-4)">Checking Xero for an existing entry…</div>';
-  if (!x || x.error || x.skipped) return '';
-  if (!x.found) return '<div class="si-note" style="color:var(--ink-4)">Checked Xero: no matching payment yet, so this will be created.</div>';
-  const h = x.have;
-  return `<div class="si-dup" style="border-color:var(--sage);background:rgba(52,211,153,.08)"><b>✓ Already in Xero</b>
-    <div>${h.kind === 'Invoices' ? 'A bill' : 'Spend Money'}${h.contact ? ' under <b>' + attrEsc(h.contact) + '</b>' : ''} on ${fmtDMY(h.date)} for ${fmt(h.total, 2)}${h.hadFile ? ' — a file is already attached.' : ' — no file attached yet.'}
-    Saving here will <b>not</b> create a second entry in Xero${h.hadFile ? '' : '; the photo will be attached to the existing one'}.${h.multiple ? ' (More than one similar payment found — check Xero.)' : ''}</div>
-    <div class="si-dup-act"><button class="si-primary2" onclick="siXeroClose()">${h.hadFile ? '✓ Done — remove from Inbox' : 'Attach photo to Xero &amp; remove'}</button></div></div>`;
+  if (x === undefined || x === null) return undefined;
+  if (x.error || x.skipped) return null;
+  return x.found ? { found: true, hadFile: !!x.have.hadFile, txn: x.have.id, contact: x.have.contact, date: x.have.date, total: x.have.total, multiple: x.have.multiple } : { found: false };
+}
+function siIsCopy(r) { return siTwins(r).some(o => String(o.received_at || o.created_at) < String(r.received_at || r.created_at) || (String(o.received_at || o.created_at) === String(r.received_at || r.created_at) && o.id < r.id)); }
+function siStatusHtml(r) {
+  if (SI.dupDismissed === r.id) return '';
+  if (r.status !== 'pending') return '';
+  const xi = siXeroInfo(r);
+  if (xi === undefined) return '<div class="si-note" style="color:var(--ink-4)">Checking your job costs and Xero…</div>';
+  const copy = siIsCopy(r) && !(SI.twinOk || {})[r.id];
+  const c = siClassify(r, xi, copy ? new Set([r.id]) : null);
+  const g = SIB_GROUPS.find(z => z.k === c.k);
+  const note = xi === null ? '<div style="font-size:11px;color:var(--ink-4);margin-top:3px">Couldn’t check Xero just now.</div>' : '';
+  if (c.k === 'fresh') return `<div class="si-note" style="color:var(--ink-4)">${siPill('Job', 'no')}${siPill('Xero', 'no')} New — not in your job costs or Xero.${note}</div>`;
+  const col = { done: 'var(--sage)', sendfile: 'var(--sage)', sendnew: 'var(--sage)', partial: 'var(--amber)', copy: 'var(--amber)', needjob: 'var(--blue,#5aa9ff)' }[c.k];
+  const pills = g.hub ? siPill('Job', g.hub) + (g.xe ? siPill('Xero', g.xe) : '') + (g.file ? siPill('File', g.file) : '') : '';
+  const jobTxt = c.d && c.d.project ? `<b>${attrEsc(c.d.project)}</b>` : '';
+  const xTxt = c.x && c.x.found ? ` Xero: ${c.x.contact ? attrEsc(c.x.contact) + ', ' : ''}${fmtDMY(c.x.date)}, ${fmt(c.x.total, 2)}.${c.x.multiple ? ' (More than one similar payment — check Xero.)' : ''}` : '';
+  const miss = c.d && c.d.missing ? c.d.missing.length : 0;
+  const btn = (label, fn, primary) => `<button ${primary ? 'class="si-primary2"' : ''} onclick="${fn}">${label}</button>`;
+  const acts = {
+    done:     btn('✓ Close it', "siStAct('link')", 1),
+    sendfile: btn('✓ Attach the file &amp; close', "siStAct('link')", 1),
+    sendnew:  btn('✓ Send to Xero &amp; close', "siStAct('link')", 1),
+    partial:  btn(`✓ Add the ${miss} missing line${miss > 1 ? 's' : ''} &amp; close`, "siStAct('partial')", 1),
+    copy:     btn('✓ Remove this copy', 'siTwinRemove()', 1) + btn('Different receipt — keep both', 'siTwinKeep()'),
+    needjob:  btn('Close without a job', 'siXeroClose()')
+  }[c.k];
+  const more = c.k === 'needjob' ? '<div style="font-size:12px;margin-top:4px;color:var(--ink-3)">Or choose the job below and Save: Xero’s entry is reused, nothing new is created there.</div>' : '';
+  return `<div class="si-dup" style="border-color:${col}"><b>${g.title}</b><div style="margin:4px 0">${pills}</div>
+    <div>${g.text}${jobTxt ? ' Job: ' + jobTxt + '.' : ''}${xTxt}${c.k === 'partial' ? ' Adds: ' + c.d.missing.map(l => attrEsc((l.description || '').slice(0, 30)) + ' ' + fmt(parseFloat(l.amount) || 0, 2)).join(', ') + '.' : ''}</div>${more}${note}
+    <div class="si-dup-act">${acts}${c.k === 'copy' ? '' : btn('Different — save normally', 'siStDismiss()')}</div></div>`;
+}
+function siStDismiss() { const r = SI.rows[SI.idx]; if (r) { SI.dupDismissed = r.id; SI.dupOk[r.id] = true; siRender(); } }
+// Clear this one receipt using the same background job as the bulk clear.
+function siStAct(kind) {
+  const r = SI.rows[SI.idx]; if (!r) return;
+  const c = siClassify(r, siXeroInfo(r), null); if (!c.d) return;
+  const job = kind === 'partial' ? siBulkPartialJob(r, c.d) : siBulkLinkJob(r, c.d, c.k === 'done' ? { sent: true, txn: c.x.txn } : {});
+  siqSave(siqLoad().filter(j => j.id !== r.id).concat([job]));
+  siAdvance(r.id); siqRun();
 }
 async function siXeroCheck(r) {
   SI.xchk = SI.xchk || {};
@@ -7106,7 +7143,7 @@ async function siXeroCheck(r) {
     } catch (e) { SI.xchk[key] = { error: true }; }
   }
   const el = document.getElementById('si-xero');
-  if (el && SI.rows[SI.idx] === r) el.innerHTML = siXeroHtml(r);
+  if (el && SI.rows[SI.idx] === r) el.innerHTML = siStatusHtml(r);
 }
 // Same photo imported twice: another card in this pile with the same supplier, date and total.
 // Already in Xero: close the card without saving any new expenses (nothing is added to a job, nothing created in Xero).
@@ -7220,9 +7257,7 @@ function siCardHtml() {
     </div>
     <div class="si-meta"><span class="si-src">${src}</span><span class="si-hint">swipe ← → to change receipt</span></div>
     ${r.email_subject ? `<div class="si-subj">${attrEsc(r.email_subject)}</div>` : ''}
-    ${siDupBanner(r)}
-    ${siTwinBanner(r)}
-    <div id="si-xero">${siXeroHtml(r)}</div>
+    <div id="si-xero">${siStatusHtml(r)}</div>
     <div id="si-preview" class="si-preview">Loading receipt…</div>
 
     <div class="si-grid">
