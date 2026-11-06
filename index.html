@@ -550,6 +550,9 @@ body.claude-bar-off #app{padding-bottom:calc(24px + env(safe-area-inset-bottom))
 }
 @media (min-width:721px){.si-hint{display:none}}
 #hub-nav button .ni{display:flex;align-items:center;justify-content:center;height:24px}
+#siq-pill{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(68px + env(safe-area-inset-bottom));z-index:560;display:inline-flex;align-items:center;gap:8px;min-height:40px;padding:0 16px;border-radius:20px;border:1px solid var(--border-2);background:var(--bg-3);color:var(--ink);font-size:13px;font-weight:600;box-shadow:0 6px 24px rgba(0,0,0,.6);touch-action:manipulation}
+#siq-pill.bad{background:var(--pink);color:#fff;border-color:var(--pink)}
+@media (min-width:721px){#siq-pill{bottom:20px}}
 @media (max-width:720px){.hide-sm{display:none}}
 @keyframes sheetIn{from{transform:translateY(40px);opacity:0}to{transform:none;opacity:1}}
 
@@ -6717,48 +6720,113 @@ function siBulkCount() {
   let n = 0; document.querySelectorAll('.sib-ck').forEach(c => { if (c.checked) n += plan[c.dataset.k].length; });
   const b = document.getElementById('sib-go'); if (b) { b.textContent = n ? `Clear ${n} now` : 'Nothing ticked'; b.disabled = !n; }
 }
-async function siBulkLink(r, d, opt) {
+// ── Jobs are built from your ticked groups, saved on this phone, then run in the background ──
+function siBulkLinkJob(r, d, opt) {
   opt = opt || {};
   const sup = siGuessSupplier(r).trim();
   const detected = (r.check_info && r.check_info.gst_status) || 'unknown';
   const tax = detected === 'none' ? 'free' : detected === 'included' ? 'gst' : ((SI.taxHist || {})[sup.toLowerCase()] || 'gst');
   const lines = (r.lines || []).map(l => { const m = d.matched.find(m2 => m2.l === l); return { description: l.description, qty: l.qty, unit_price: l.unit_price, amount: l.amount, category: (m && m.e.category) || l.category || '', project: '' }; });
-  await siApi({ action: 'update', id: r.id, fields: { status: 'processed', supplier: sup, receipt_date: (r.receipt_date || '').slice(0, 10), total_inc: r.total_inc, lines, project: d.project, no_project: !d.project, expense_ids: d.ids, reference: r.reference || '', tax_mode: tax,
-    xero_status: opt.sent ? 'sent' : 'queued', xero_txn_id: opt.txn || '', xero_attached: !!opt.sent, xero_error: opt.sent ? 'Already in Xero with the file — closed in bulk' : '', notes: opt.note || 'Linked to expenses already saved — nothing added (bulk clear)' } });
-  for (const m of d.matched) { if (m.e.id && !m.e.receipt_id) { try { await hubWrite('expense_log', m.e.id, { receipt_id: r.id }); m.e.receipt_id = r.id; } catch (e) {} } }
+  return { id: r.id, label: siBulkLine(r), kind: opt.partial ? 'partial' : 'update',
+    fields: { status: 'processed', supplier: sup, receipt_date: (r.receipt_date || '').slice(0, 10), total_inc: r.total_inc, lines, project: d.project, no_project: !d.project, expense_ids: d.ids, reference: r.reference || '', tax_mode: tax,
+      xero_status: opt.sent ? 'sent' : 'queued', xero_txn_id: opt.txn || '', xero_attached: !!opt.sent, xero_error: opt.sent ? 'Already in Xero with the file — closed in bulk' : '', notes: opt.note || 'Linked to expenses already saved — nothing added (bulk clear)' },
+    link: d.matched.filter(m => m.e.id && !m.e.receipt_id).map(m => m.e.id), items: opt.items || null, st: 'pending' };
 }
-// Add the lines that are missing from the job (same job, same category as the lines already there), then link everything.
-async function siBulkPartial(r, d, x) {
+function siBulkPartialJob(r, d) {
   const cc = {}; d.matched.forEach(m => { if (m.e.category) cc[m.e.category] = (cc[m.e.category] || 0) + 1; });
   const cat = (Object.entries(cc).sort((a, b) => b[1] - a[1])[0] || [''])[0];
   const items = d.missing.map(l => ({ action: 'new', type: 'expense', date: (r.receipt_date || '').slice(0, 10), supplier: siGuessSupplier(r).trim(), description: l.description || '', category: cat || l.category || '', project: d.project || '',
     qty: parseFloat(l.qty) || 1, unit_price: parseFloat(l.unit_price) || 0, amount: parseFloat(l.amount) || 0, receipt_id: r.id, reference: r.reference || '' }));
-  const res = await fetch('/.netlify/functions/claude-parse', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pendingAction: { action: 'expense_batch', items } }) });
-  const data = await res.json();
-  if (data.status !== 'success') throw new Error(data.message || 'Save failed');
-  if (data.entries && D) { D.expense_log = D.expense_log || []; data.entries.forEach(e => D.expense_log.push(e)); }
-  const added = (data.entries || []).map(e => e.id);
-  const d2 = { ...d, ids: d.ids.concat(added), matched: d.matched.concat(d.missing.map(l => ({ l, e: { category: cat || l.category || '' } }))) };
-  await siBulkLink(r, d2, { note: `Matched ${d.matched.length} expenses already saved; added ${items.length} missing line${items.length > 1 ? 's' : ''} (bulk clear)` });
+  const d2 = { ...d, matched: d.matched.concat(d.missing.map(l => ({ l, e: { category: cat || l.category || '' } }))) };
+  return siBulkLinkJob(r, d2, { partial: true, items, note: `Matched ${d.matched.length} expenses already saved; added ${items.length} missing line${items.length > 1 ? 's' : ''} (bulk clear)` });
 }
-async function siBulkApply() {
+function siBulkApply() {
   const plan = SIB.plan; if (!plan) return;
   const on = {}; document.querySelectorAll('.sib-ck').forEach(c => { on[c.dataset.k] = c.checked; });
-  const btn = document.getElementById('sib-go'); if (btn) { btn.disabled = true; btn.textContent = 'Working…'; }
-  let ok = 0, fail = 0; const jobs = [];
-  if (on.done)     plan.done.forEach(o => jobs.push(() => siBulkLink(o.r, o.d, { sent: true, txn: o.x.txn })));
-  if (on.sendfile) plan.sendfile.forEach(o => jobs.push(() => siBulkLink(o.r, o.d)));
-  if (on.sendnew)  plan.sendnew.forEach(o => jobs.push(() => siBulkLink(o.r, o.d)));
-  if (on.partial)  plan.partial.forEach(o => jobs.push(() => siBulkPartial(o.r, o.d, o.x)));
-  if (on.copy)     plan.copy.forEach(o => jobs.push(() => siApi({ action: 'update', id: o.r.id, fields: { status: 'ignored', notes: 'Duplicate of another Inbox card (bulk clear)' } })));
-  if (on.needjob)  plan.needjob.forEach(o => jobs.push(() => siApi({ action: 'update', id: o.r.id, fields: { status: 'processed', xero_status: o.x.hadFile ? 'sent' : 'queued', xero_txn_id: o.x.txn || '', xero_attached: !!o.x.hadFile, xero_error: 'Already in Xero — closed in bulk, no job cost saved here', notes: 'Already in Xero' } })));
-  const q = jobs.slice();
-  await Promise.all([0, 1, 2].map(async () => { while (q.length) { const j = q.shift(); try { await j(); ok++; } catch (e) { fail++; } } }));
-  closeModal(); SIB.plan = null;
-  await siLoad('pending').catch(() => {}); SI.idx = 0; siReset();
-  claudeToast(`✓ Cleared ${ok}${fail ? `, ${fail} failed (still in the Inbox)` : ''} — ${SI.rows.length} left to review`, fail ? 'unclear' : 'success', 6000);
-  renderReceipts();
+  const jobs = [];
+  if (on.done)     plan.done.forEach(o => jobs.push(siBulkLinkJob(o.r, o.d, { sent: true, txn: o.x.txn })));
+  if (on.sendfile) plan.sendfile.forEach(o => jobs.push(siBulkLinkJob(o.r, o.d)));
+  if (on.sendnew)  plan.sendnew.forEach(o => jobs.push(siBulkLinkJob(o.r, o.d)));
+  if (on.partial)  plan.partial.forEach(o => jobs.push(siBulkPartialJob(o.r, o.d)));
+  if (on.copy)     plan.copy.forEach(o => jobs.push({ id: o.r.id, label: siBulkLine(o.r), kind: 'update', fields: { status: 'ignored', notes: 'Duplicate of another Inbox card (bulk clear)' }, link: [], st: 'pending' }));
+  if (on.needjob)  plan.needjob.forEach(o => jobs.push({ id: o.r.id, label: siBulkLine(o.r), kind: 'update', fields: { status: 'processed', xero_status: o.x.hadFile ? 'sent' : 'queued', xero_txn_id: o.x.txn || '', xero_attached: !!o.x.hadFile, xero_error: 'Already in Xero — closed in bulk, no job cost saved here', notes: 'Already in Xero' }, link: [], st: 'pending' }));
+  if (!jobs.length) return;
+  SIB.plan = null;
+  const q = siqLoad().filter(j => j.st !== 'done' && !jobs.some(n => n.id === j.id)).concat(jobs);
+  siqSave(q); closeModal();
+  claudeToast(`Clearing ${jobs.length} in the background — keep working, I’ll tell you if anything fails`, 'success', 5000);
+  siqRun();
 }
+
+// ── Background runner: survives closing the window, switching app, even closing the app (it carries on next time you open it) ──
+const SIQ_KEY = 'si_bulk_queue';
+const SIQ = { running: false, total: 0, done: 0, cleared: new Set() };
+function siqLoad() { try { return JSON.parse(localStorage.getItem(SIQ_KEY) || '[]'); } catch (e) { return []; } }
+function siqSave(q) { try { localStorage.setItem(SIQ_KEY, JSON.stringify(q)); } catch (e) {} }
+function siqPill() {
+  let el = document.getElementById('siq-pill');
+  const q = siqLoad(), pend = q.filter(j => j.st === 'pending').length, fail = q.filter(j => j.st === 'failed').length;
+  if (!pend && !fail) { if (el) el.remove(); return; }
+  if (!el) { el = document.createElement('button'); el.id = 'siq-pill'; el.onclick = siqDetails; document.body.appendChild(el); }
+  el.className = fail && !SIQ.running ? 'bad' : '';
+  el.innerHTML = SIQ.running || (pend && !fail) ? `<span class="spinner-sm"></span> Clearing receipts… ${SIQ.done}/${SIQ.total || pend}` : (fail ? `⚠ ${fail} receipt${fail > 1 ? 's' : ''} not cleared — tap` : `⏸ ${pend} waiting — tap`);
+}
+async function siqExec(j) {
+  if (j.kind === 'partial') {
+    let ids = (j.newIds && j.newIds.length) ? j.newIds : ((D && D.expense_log) || []).filter(e => e.receipt_id === j.id).map(e => e.id);   // already added before? don't add twice
+    if (!ids.length) {
+      const res = await fetch('/.netlify/functions/claude-parse', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pendingAction: { action: 'expense_batch', items: j.items } }) });
+      const data = await res.json();
+      if (data.status !== 'success') throw new Error(data.message || 'Could not add the missing lines');
+      if (data.entries && D) { D.expense_log = D.expense_log || []; data.entries.forEach(e => D.expense_log.push(e)); }
+      ids = (data.entries || []).map(e => e.id);
+      j.newIds = ids; siqSave(siqLoad().map(x => x.id === j.id ? { ...x, newIds: ids } : x));
+    }
+    j.fields.expense_ids = (j.fields.expense_ids || []).concat(ids.filter(i => !(j.fields.expense_ids || []).includes(i)));
+  }
+  await siApi({ action: 'update', id: j.id, fields: j.fields });
+  for (const id of (j.link || [])) { try { await hubWrite('expense_log', id, { receipt_id: j.id }); } catch (e) {} }
+}
+async function siqRun() {
+  if (SIQ.running) return;
+  let q = siqLoad(); if (!q.some(j => j.st === 'pending')) { siqPill(); return; }
+  SIQ.running = true; SIQ.done = 0; SIQ.total = q.filter(j => j.st === 'pending').length; siqPill();
+  const set = (id, patch) => { q = siqLoad().map(x => x.id === id ? { ...x, ...patch } : x); siqSave(q); };
+  const claimed = new Set();
+  const worker = async () => {
+    for (;;) {
+      const j = siqLoad().find(x => x.st === 'pending' && !claimed.has(x.id)); if (!j) return;
+      claimed.add(j.id);
+      try { await siqExec(j); set(j.id, { st: 'done', err: '' }); SIQ.cleared.add(j.id); }
+      catch (e) { set(j.id, { st: 'failed', err: String(e.message || e).slice(0, 160) }); }
+      SIQ.done++; siqPill();
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]);
+  SIQ.running = false;
+  q = siqLoad(); const failed = q.filter(j => j.st === 'failed'), okN = SIQ.cleared.size;
+  siqSave(q.filter(j => j.st !== 'done'));
+  siqPill();
+  // update the list quietly: remove what was cleared; only re-draw if the card on screen was one of them
+  const cur = SI.rows[SI.idx];
+  SI.rows = SI.rows.filter(r => !SIQ.cleared.has(r.id)); SI.counts.pending = SI.rows.length;
+  const idx = cur ? SI.rows.findIndex(r => r.id === cur.id) : -1;
+  SI.idx = idx >= 0 ? idx : 0; SIQ.cleared = new Set();
+  if (idx < 0 && SI.pile === 'pending' && document.getElementById('rc-body')) { siReset(); siRender(); }
+  if (failed.length) claudeToast(`⚠ ${failed.length} not cleared — still in the Inbox. Tap the red bar.`, 'error', 9000);
+  else claudeToast(`✓ Cleared ${okN} receipt${okN === 1 ? '' : 's'} — ${SI.rows.length} left to review`, 'success', 6000);
+}
+function siqDetails() {
+  const q = siqLoad(), pend = q.filter(j => j.st === 'pending'), fail = q.filter(j => j.st === 'failed');
+  openModal('Clearing receipts', `
+    <div style="font-size:13px;color:var(--ink-2);margin-bottom:10px">${SIQ.running ? `Working in the background: ${SIQ.done} of ${SIQ.total} done. You can close this and keep working.` : pend.length ? `${pend.length} waiting to run.` : 'Nothing running.'}</div>
+    ${fail.length ? `<div class="si-dup" style="border-color:var(--pink)"><b>⚠ ${fail.length} not cleared</b> (still in your Inbox, nothing was lost)<div style="margin-top:6px;line-height:1.6">${fail.map(j => attrEsc(j.label) + '<br><span style="color:var(--ink-4);font-size:11px">' + attrEsc(j.err || '') + '</span>').join('<br>')}</div></div>` : ''}
+    <div class="si-dup-act">${fail.length ? '<button class="si-primary2" onclick="siqRetry()">Retry them</button><button onclick="siqDismiss()">Forget them</button>' : ''}${!SIQ.running && pend.length ? '<button class="si-primary2" onclick="closeModal();siqRun()">Run now</button>' : ''}<button onclick="closeModal()">Close</button></div>`);
+}
+function siqRetry() { siqSave(siqLoad().map(j => j.st === 'failed' ? { ...j, st: 'pending', err: '' } : j)); closeModal(); siqRun(); }
+function siqDismiss() { siqSave(siqLoad().filter(j => j.st !== 'failed')); closeModal(); siqPill(); }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && !SIQ.running && siqLoad().some(j => j.st === 'pending')) siqRun(); });
+setTimeout(() => { if (localStorage.getItem('hub_auth_token')) { siqPill(); if (siqLoad().some(j => j.st === 'pending')) siqRun(); } }, 4000);
 
 // ═══ RECEIPT INBOX ══════════════════════════════════════════════════════════
 // Every receipt (photo, upload, email) lands in Pending. Swipe through, pick a project, save:

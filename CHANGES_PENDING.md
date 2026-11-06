@@ -31,6 +31,11 @@ Review after 2-3 weeks: rank tabs/buttons by device, then re-score iPhone UX.
   "Add missing lines" only when each missing line is truly absent (a similar unmatched saved expense sends it to manual review).
   Fixed: the whole-receipt total check no longer drops missing lines when there is nothing to pair them with.
 
+- **Bulk clear runs in the background (2026-11-06):** pressing Clear saves the jobs on the phone (localStorage `si_bulk_queue`) and closes the window;
+  a runner (3 at a time) works through them, shows a pill "Clearing receipts… n/N", resumes when the app is reopened, and on any failure shows a
+  red pill + toast with Retry / Forget (failed receipts are untouched in the Inbox). Missing-line adds are guarded against double adding on resume.
+  Tested with 5 fake jobs incl. one failure + retry.
+
 ## Feature — 2026-11-01 (Schedule tab: pipeline + bookings calendar)
 
 Seb asked for a pipeline / future-bookings tool: approved quotes (Xero or direct in the Hub)
