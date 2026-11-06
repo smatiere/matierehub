@@ -1,12 +1,12 @@
 name: Receipts to Xero (batch)
 
 # Sends receipts that are saved in the Hub's Receipt Inbox and waiting ("queued") to Xero as Spend Money,
-# with the file attached. Manual for now (Actions tab > Run workflow). To run it twice a day,
-# remove the leading # on the two cron lines below once the first manual batch has been checked in Xero.
+# with the file attached. Runs twice a day (switched on 2026-11-06) and can still be run by hand
+# (Actions tab > Run workflow) or from the Hub's "Send to Xero now" button.
 on:
-  # schedule:
-  #   - cron: "23 21 * * *"   # ~8:23am Sydney
-  #   - cron: "37 5 * * *"    # ~4:37pm Sydney
+  schedule:
+    - cron: "23 21 * * *"   # ~8:23am Sydney
+    - cron: "37 5 * * *"    # ~4:37pm Sydney
   workflow_dispatch:
 
 jobs:

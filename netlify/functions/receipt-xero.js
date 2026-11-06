@@ -187,6 +187,33 @@ exports.handler = async (event) => {
       const have = await findExisting(c, contactId, date, total, sup);
       return out(200, { ok: true, found: !!have, have: have ? { id: have.id, kind: have.kind, contact: have.contact, hadFile: have.hadFile, total: have.total, date: have.date, multiple: have.multiple } : null });
     }
+    // Many receipts at once: one pass over the year's Spend Money in Xero (a handful of calls), matched in memory.
+    // Same rule as the single check: same amount (within 6c) within 5 days, on our bank account, similar supplier name.
+    if (b.action === 'check_many') {
+      const items = (Array.isArray(b.items) ? b.items : []).filter(x => x && x.id && x.date && Number(x.total) > 0).slice(0, 300);
+      if (!items.length) return out(200, { ok: true, results: [] });
+      const c = await xeroContext();
+      const day = (d) => new Date(String(d).slice(0, 10) + 'T00:00:00Z').getTime();
+      const lo = new Date(Math.min(...items.map(x => day(x.date))) - 6 * 86400000), hi = new Date(Math.max(...items.map(x => day(x.date))) + 6 * 86400000);
+      const pad = (n) => String(n).padStart(2, '0'), dt = (x) => `DateTime(${x.getUTCFullYear()},${pad(x.getUTCMonth() + 1)},${pad(x.getUTCDate())})`;
+      const where = encodeURIComponent(`Type=="SPEND"&&Status!="DELETED"&&Date>=${dt(lo)}&&Date<=${dt(hi)}`);
+      let txns = [];
+      for (let page = 1; page <= 8; page++) {
+        const r = await xeroCall(`BankTransactions?where=${where}&page=${page}`, 'GET', c.token, c.tenant);
+        const got = r.BankTransactions || []; txns = txns.concat(got); if (got.length < 100) break;
+      }
+      txns = txns.filter(x => !c.bank || !x.BankAccount || x.BankAccount.AccountID === c.bank.AccountID);
+      const norm = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+      const similar = (a2, b2) => { const x = norm(a2), y = norm(b2); return x && y && (x.includes(y.slice(0, 5)) || y.includes(x.slice(0, 5))); };
+      const results = items.map(it => {
+        const d0 = day(it.date);
+        const fits = txns.filter(x => Math.abs(Number(x.Total) - Number(it.total)) <= 0.06 && Math.abs(day(String(x.DateString || x.Date || '').slice(0, 10) || '1970-01-01') - d0) <= 5 * 86400000 && similar(x.Contact && x.Contact.Name, it.supplier));
+        fits.sort((p2, q) => (p2.HasAttachments ? 1 : 0) - (q.HasAttachments ? 1 : 0));
+        const h = fits[0];
+        return h ? { id: it.id, found: true, hadFile: !!h.HasAttachments, txn: h.BankTransactionID, contact: (h.Contact && h.Contact.Name) || '' } : { id: it.id, found: false };
+      });
+      return out(200, { ok: true, results, scanned: txns.length });
+    }
     if (b.action === 'banks') {
       const c = await xeroContext();
       return out(200, { ok: true, chosen: c.bank ? c.bank.Name : null, banks: c.banks.map(x => ({ id: x.AccountID, name: x.Name, code: x.Code, bank_type: x.BankAccountType, currency: x.CurrencyCode })) });

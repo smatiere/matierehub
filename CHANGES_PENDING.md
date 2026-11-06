@@ -21,6 +21,11 @@ Review after 2-3 weeks: rank tabs/buttons by device, then re-score iPhone UX.
   line list collapses when the lines add up to the printed total; swipe left/right changes receipt. Icons: Lucide (ISC) inline SVG
   (`HUB_ICONS`, `hubIcon()`) for bottom bar and receipt page. Checked in a 390px frame with fake data, not yet on a real iPhone.
 
+- **Bulk clear + auto-send (2026-11-06):** Inbox (Pending, >3 cards) gets a list-checks button: scans all pending cards, shows a preview
+  (already saved to a job -> link file + queue for Xero; identical copies -> Not a cost; in Xero but no job cost -> left unless ticked;
+  new -> stay), applies only after confirm. Server: receipt-xero `check_many` (one pass over Xero Spend Money). Workflow
+  receipts-to-xero.yml scheduled 21:23 and 05:37 UTC (8:23am / 4:37pm Sydney). Tested with fake data in a 390px frame.
+
 ## Feature — 2026-11-01 (Schedule tab: pipeline + bookings calendar)
 
 Seb asked for a pipeline / future-bookings tool: approved quotes (Xero or direct in the Hub)
