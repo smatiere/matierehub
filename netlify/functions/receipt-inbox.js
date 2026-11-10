@@ -85,6 +85,19 @@ exports.handler = async (event) => {
     const addOnly = inboxKey && b.action === 'add' && sent && sent.length === inboxKey.length && crypto.timingSafeEqual(Buffer.from(sent), Buffer.from(inboxKey));
     if (!addOnly) { const denied = guardHub(event, headers); if (denied) return denied; }
 
+    // Is this receipt already in the common record (scanned OR pulled in)? Same total within 6c, within 5 days, similar supplier.
+    if (b.action === 'find_match') {
+      const total = Number(b.total), d = String(b.date || '').slice(0, 10);
+      if (!(total > 0) || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return out(200, { ok: true, matches: [] });
+      const t = new Date(d + 'T00:00:00Z').getTime(), day = 86400000;
+      const iso = (x) => new Date(x).toISOString().slice(0, 10);
+      const rows = await rest('GET', `receipt_inbox?select=id,status,source,supplier,receipt_date,total_inc,xero_status&status=in.(pending,processed)&receipt_date=gte.${iso(t - 5 * day)}&receipt_date=lte.${iso(t + 5 * day)}`);
+      const norm = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+      const sup = norm(b.supplier);
+      const matches = rows.filter(r => r.total_inc != null && Math.abs(Number(r.total_inc) - total) <= 0.06 && (!sup || !norm(r.supplier) || norm(r.supplier).includes(sup.slice(0, 5)) || sup.includes(norm(r.supplier).slice(0, 5))));
+      return out(200, { ok: true, matches });
+    }
+
     if (b.action === 'add') {
       const mime = String(b.mime || '').toLowerCase();
       if (!ALLOWED_MIME.test(mime)) return out(400, { error: 'Only photos and PDFs can be added' });
@@ -108,8 +121,19 @@ exports.handler = async (event) => {
       const first = items[0] || {};
       const supplierRead = parsed ? (parsed.supplier || first.supplier || '') : '';
       const ignoredWhy = await ignoreReason(supplierRead, b.email_from, b.email_subject);
+      // Same receipt already scanned (or pulled in) from a different photo? Flag it on the card, don't hide it.
+      let dupNote = '';
+      try {
+        const tot0 = parsed && parsed.check && parsed.check.total ? Number(parsed.check.total) : 0, d0 = String(first.date || '').slice(0, 10);
+        if (!ignoredWhy && tot0 > 0 && /^\d{4}-\d{2}-\d{2}$/.test(d0)) {
+          const t0 = new Date(d0 + 'T00:00:00Z').getTime(), iso0 = (x) => new Date(x).toISOString().slice(0, 10);
+          const near = await rest('GET', `receipt_inbox?select=id,status,source,supplier,receipt_date,total_inc&status=in.(pending,processed)&receipt_date=gte.${iso0(t0 - 5 * 86400000)}&receipt_date=lte.${iso0(t0 + 5 * 86400000)}`);
+          const hit = near.find(r => r.total_inc != null && Math.abs(Number(r.total_inc) - tot0) <= 0.06);
+          if (hit) dupNote = `Possible duplicate: a receipt for the same total (${hit.supplier || 'unknown'}, ${hit.receipt_date}) is already in the record as ${hit.status}${hit.source === 'scan' ? ' (scanned)' : ''}.`;
+        }
+      } catch (e) { /* the check is a courtesy only */ }
       const row = (await rest('POST', 'receipt_inbox', {
-        status: ignoredWhy ? 'ignored' : 'pending', notes: ignoredWhy || '', source: ['upload', 'photo', 'email'].includes(b.source) ? b.source : 'upload',
+        status: ignoredWhy ? 'ignored' : 'pending', notes: ignoredWhy || dupNote || '', source: ['upload', 'photo', 'email', 'scan'].includes(b.source) ? b.source : 'upload',
         file_path: path, file_name: String(b.name || '').slice(0, 120), mime, size: buf.length, file_hash: hash,
         email_from: String(b.email_from || '').slice(0, 200), email_subject: String(b.email_subject || '').slice(0, 300), email_date: b.email_date || null,
         supplier: parsed ? (parsed.supplier || first.supplier || '') : '', receipt_date: first.date || b.email_date || null,

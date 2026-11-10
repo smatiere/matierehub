@@ -7347,7 +7347,7 @@ function siCardHtml() {
   const fromReceipt = detected === 'none' ? 'free' : detected === 'included' ? 'gst' : '';
   const tax = SI.tax || fromReceipt || mem.tax || hist || 'gst';
   const taxWhy = SI.tax ? '' : fromReceipt ? (detected === 'none' ? 'no GST shown on this invoice' : 'GST shown on this invoice') : (mem.tax || hist) ? 'learned from this supplier\'s past invoices' : 'assumed — nothing to go on';
-  const src = r.source === 'email' ? `${hubIcon('mail', 14)} ${attrEsc(r.email_from || 'email')}` : r.source === 'photo' ? `${hubIcon('camera', 14)} Photo` : `${hubIcon('upload', 14)} Upload`;
+  const src = r.source === 'email' ? `${hubIcon('mail', 14)} ${attrEsc(r.email_from || 'email')}` : r.source === 'photo' ? `${hubIcon('camera', 14)} Photo` : r.source === 'scan' ? `${hubIcon('upload', 14)} Scanned` : `${hubIcon('upload', 14)} Upload`;
   const sug = siSuggest((r.receipt_date||'').slice(0,10));
   const dupInfo = SI.dupDismissed === r.id ? null : siDupes(r);
   if (dupInfo && !SI.touched && !SI.noProj && !SI.proj) { if (dupInfo.project) SI.proj = dupInfo.project; else SI.noProj = true; }
@@ -7895,7 +7895,7 @@ function rcRenderTable() {
         <button onclick="rcAddRow()" style="padding:7px 12px;background:var(--bg-1);color:var(--ink-2);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:12px">+ Add line</button>
         <button id="rc-save-btn" onclick="rcSave()" style="padding:7px 16px;background:var(--sage);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700">Save lines</button>
       </div>
-      <div style="flex-basis:100%;text-align:right;font-size:11px;color:var(--ink-4)">⚡ Also sent to Xero as Spend Money (one entry per receipt, each line on its own account)</div>
+      <div style="flex-basis:100%;text-align:right;font-size:11px;color:var(--ink-4)">⚡ Also filed in the receipts record and sent to Xero with the photo (one entry per receipt, each line on its own account)</div>
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px;padding:10px 12px;background:var(--bg-2);border-radius:8px">
       <span style="font-size:12px;color:var(--ink-3)">Allocate one project to every line:</span>
@@ -8047,17 +8047,37 @@ function rcCancel() {
   rcRenderScan();
 }
 
+// Each scanned receipt becomes ONE record in the same table the Receipt Inbox uses (photo, lines, jobs, Xero status), so scanned and
+// pulled-in receipts are reconciled in one place. Before saving we look for the same receipt already in that record.
+function rcReceiptGroups(rows) {
+  const g = {};
+  rows.forEach(r => { (g[r._rc] = g[r._rc] || []).push(r); });
+  return Object.keys(g).map(k => {
+    const lines = g[k], meta = (RC.receipts || []).find(x => String(x.id) === String(k)) || {};
+    const inc = Math.round(lines.reduce((t, x) => t + (parseFloat(x.amount) || 0), 0) * 110) / 100;
+    return { id: k, lines, supplier: lines[0].supplier || meta.supplier || RC.supplier || '', date: String(lines[0].date || meta.date || '').slice(0, 10), total: (meta.check && meta.check.total) || inc, check: meta.check || null };
+  });
+}
+
 async function rcSave() {
   const rows = (RC.items||[]).filter(r => r._inc);
   if (!rows.length) { claudeToast('No lines ticked to save', 'unclear'); return; }
+  const groups = rcReceiptGroups(rows);
+  // 1. Already in the record? (scanned before, or pulled in by the Receipt Inbox)
+  for (const g of groups) {
+    try {
+      const m = await siApi({ action: 'find_match', supplier: g.supplier, date: g.date, total: g.total });
+      if (m.matches && m.matches.length) {
+        const h = m.matches[0];
+        if (!confirm(`This looks already in your receipts: ${h.supplier || 'unknown'}, ${h.receipt_date}, ${fmt(h.total_inc, 2)} (${h.status}${h.source === 'scan' ? ', scanned' : ''}). Save it again anyway?`)) return;
+      }
+    } catch (e) { /* the check is a courtesy: carry on */ }
+  }
   const items = rows.map(r => ({
     action:'new', type:'expense', date:r.date, supplier:r.supplier||RC.supplier||'',
     description:r.description||'', category:r.category||'', project:r.project||'',
     qty:parseFloat(r.qty)||1, unit_price:parseFloat(r.unit_price)||0, amount:r.amount
   }));
-  // Remember before rcRenderScan() resets RC — the Xero export (if ticked) runs
-  // straight after the local save succeeds, using the same line items.
-  const wantsXeroExport = true;   // always sent to Xero by the server (no phone connection needed)
   const btn = document.getElementById('rc-save-btn');
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
   try {
@@ -8067,10 +8087,34 @@ async function rcSave() {
     });
     const data = await res.json();
     if (data.status !== 'success') throw new Error(data.message || 'Save failed');
-    // Optimistic in-memory update so Expenses/Projects reflect it immediately
     if (data.entries && D) { D.expense_log = D.expense_log || []; data.entries.forEach(e => D.expense_log.push(e)); }
     claudeToast(`✓ ${data.label || (items.length+' lines saved')}`, 'success');
-    if (wantsXeroExport) await rcSendToXero(items);
+    // 2. One record per receipt (photo + lines + expenses), queued for Xero, then sent with the photo attached.
+    const entries = Array.isArray(data.entries) && data.entries.length === rows.length ? data.entries : null;
+    const files = RC.files || [];
+    for (const g of groups) {
+      const f = files[+g.id];
+      const ids = entries ? g.lines.map(l => entries[rows.indexOf(l)] && entries[rows.indexOf(l)].id).filter(Boolean) : [];
+      const lines = g.lines.map(l => ({ description:l.description, qty:parseFloat(l.qty)||1, unit_price:parseFloat(l.unit_price)||0, amount:l.amount, category:l.category||'', project:l.project||'' }));
+      const projects = [...new Set(g.lines.map(l => l.project || '').filter(Boolean))];
+      let rowId = null;
+      try {
+        if (!f) throw new Error('no file');
+        const add = await siApi({ action:'add', name:f.name, mime:f.type, data:f.data, source:'scan', prefill:{ items: g.lines.map(l => ({ ...l, _inc: undefined })), supplier:g.supplier, check:g.check } });
+        if (add.duplicate) { claudeToast(`ℹ This photo is already in your receipts (${add.row.status}) — not added twice`, 'unclear'); continue; }
+        rowId = add.row.id;
+        await siApi({ action:'update', id: rowId, fields:{ status:'processed', supplier:g.supplier, receipt_date:g.date, total_inc:g.total, lines, project: projects.length === 1 ? projects[0] : '', no_project: !projects.length, expense_ids: ids, tax_mode:'gst', xero_status:'queued', xero_error:'', notes:'Scanned in the Scan Receipt tab' } });
+        const px = await fetch('/.netlify/functions/receipt-xero', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'push', ids:[rowId] }) });
+        const pj = await px.json();
+        const r0 = (pj.results || [])[0] || {};
+        if (r0.ok) claudeToast(r0.existing ? `✓ ${g.supplier}: already in Xero — photo attached, nothing duplicated` : `✓ ${g.supplier} sent to Xero with the photo`, 'success');
+        else claudeToast(`⚠ Saved, but Xero did not take ${g.supplier} yet (${r0.error || 'it stays queued and retries'})`, 'error');
+      } catch (e) {
+        if (rowId) { claudeToast(`⚠ Saved, but Xero did not take ${g.supplier} yet — it stays queued and retries`, 'error'); continue; }
+        // no photo could be stored (too big, etc.): still send the lines to Xero without it
+        await rcSendToXero(g.lines.map(l => ({ supplier:g.supplier, date:g.date, description:l.description, category:l.category, qty:l.qty, unit_price:l.unit_price })));
+      }
+    }
     RC.items = null; RC.receipts = []; RC.files = []; RC.supplier = ''; RC.note = ''; RC.presetProject = null;
     rcRenderScan();
   } catch(err) {
