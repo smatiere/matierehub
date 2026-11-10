@@ -851,7 +851,7 @@ async function loadData() {
       // supabase_quote_items_setup.sql in the Supabase SQL editor it 404s.
       // Swallow that one failure so a missing table doesn't take down the
       // whole HUB; quote-linking just stays empty until the table exists.
-      sbGet('/rest/v1/quote_items?select=id,quote_number,contact,contact_id,line_amount,status,date,expiry_date,description,item,project').catch(() => []),
+      sbGet('/rest/v1/quote_items?select=id,quote_number,contact,contact_id,qty,line_amount,status,date,expiry_date,description,item,project').catch(() => []),
       // shopping_lists (added 2026-09-18) — same "table might not exist yet"
       // guard until supabase_shopping_list_and_baseline.sql has been run.
       sbGet('/rest/v1/shopping_lists?select=*&order=created_at.desc').catch(() => []),
@@ -2056,13 +2056,15 @@ async function schAddAllAccepted() {
   schRender();
   claudeToast('✓ Added ' + list.length + ' approved quote' + (list.length === 1 ? '' : 's') + ' to the pipeline');
 }
-async function schAddFromProject(name) {
+async function schAddFromProject(name, o) {
+  o = o || {};
   const p = (D.projects || []).find(x => x.name === name);
   if (!p) return;
   if (p.status !== 'Won' && p.status !== 'Active') { try { Object.assign(p, await hubWrite('projects', p.id, { status: 'Won' })); } catch (e) {} }
   const b = await schCreate({
-    project: p.name, title: p.baseline_scope || '', approval_source: 'hub', approved_at: todayStr(), status: 'approved',
-    client_name: p.name, hours: Number(p.baseline_labour_hours) || null
+    project: p.name, title: o.title != null ? o.title : (p.baseline_scope || ''), approval_source: 'hub', approved_at: todayStr(), status: 'approved',
+    client_name: p.name, hours: o.hours != null ? o.hours : (Number(p.baseline_labour_hours) || null),
+    ...(o.env ? { env: o.env } : {}), ...(o.notes ? { notes: o.notes } : {})
   });
   schFillFromContact(b.id);
   closeModal(); schRender(); schOpen(b.id);
@@ -2075,16 +2077,83 @@ async function schAddBlank() {
   closeModal(); schRender(); schOpen(b.id);
 }
 
-function schAddModal() {
+// ── Add a job: search + recent first, then pick which quote lines were approved ──
+const SCH_OUT_RX = /\b(fenc\w*|gate\w*|deck\w*|pergola\w*|cladding|pool|retaining|garden|balcon\w*|outdoor|outside|shed|carport|letterbox|hot ?tub|roof\w*|gutter\w*|pathway|patio|verandah?|boundary|external|exterior|screen\w*|pickets?|paling\w*|bbq|stair ?rail)\b/i;
+const SCH_IN_RX = /\b(kitchen|bedroom|wardrobe\w*|bookcase\w*|bathroom|cabinet\w*|cupboard\w*|shelf|shelves|shelving|laundry|vanity|ceiling|floor\w*|skirting|architrave|partition|wall|robe|study|office|lounge|living|internal|interior|pantry|door|doors|window|windows|stairs?)\b/i;
+function schGuessEnv(text) {
+  const o = (String(text || '').match(new RegExp(SCH_OUT_RX.source, 'gi')) || []).length;
+  const i = (String(text || '').match(new RegExp(SCH_IN_RX.source, 'gi')) || []).length;
+  return o && i ? (o > i ? 'outdoor' : i > o ? 'indoor' : 'both') : o ? 'outdoor' : 'indoor';
+}
+function schProjLines(name) {
+  return (D.quote_items || []).filter(q => (q.project || '').toLowerCase() === String(name || '').toLowerCase() && !['DELETED', 'DECLINED'].includes(String(q.status || '').toUpperCase()));
+}
+function schAddCands() {
   const taken = new Set(schAll().filter(b => b.status !== 'cancelled').map(b => (b.project || '').toLowerCase()));
-  const projs = (D.projects || []).filter(p => ['Quoted', 'Lost', 'Inactive'].includes(p.status) && !taken.has((p.name || '').toLowerCase()));
-  const row = (t, sub, act) => '<button class="sch-pick" onclick="' + act + '"><span><b>' + attrEsc(t) + '</b><small>' + attrEsc(sub) + '</small></span><i>＋</i></button>';
+  return (D.projects || []).filter(p => ['Quoted', 'Lost', 'Inactive'].includes(p.status) && !taken.has((p.name || '').toLowerCase()))
+    .map(p => ({ p, when: schProjLines(p.name).map(q => q.date || '').sort().pop() || String(p.baseline_set_at || p.created_at || '').slice(0, 10) }))
+    .sort((a, c) => String(c.when).localeCompare(String(a.when)));
+}
+function schAddList(q) {
+  const toks = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
+  const all = schAddCands();
+  const list = all.filter(c => { const hay = ((c.p.name || '') + ' ' + (c.p.baseline_scope || '')).toLowerCase(); return toks.every(t => hay.includes(t)); });
+  const row = (c) => '<button class="sch-pick" onclick="schAddPick(' + attrEsc(JSON.stringify(c.p.name)).replace(/'/g, '&#39;') + ')"><span><b>' + attrEsc(c.p.name) + '</b><small>' + attrEsc(c.p.status + (c.p.baseline_labour_hours ? ' · ' + c.p.baseline_labour_hours + 'h' : '') + (c.when ? ' · quoted ' + fmtShort(c.when) : '')) + '</small></span><i>＋</i></button>';
+  if (!list.length) return '<div class="sch-empty">' + (toks.length ? 'No job matches “' + attrEsc(q) + '”.' : 'No quoted jobs waiting.') + '</div>';
+  return (toks.length ? '' : '<div class="sch-lbl">Last quoted</div>') + list.map(row).join('');
+}
+function schAddFilter(q) { const el = document.getElementById('sch-add-list'); if (el) el.innerHTML = schAddList(q); }
+function schAddModal() {
   openModal('Add a job to the schedule', `
-    <div class="sch-hint" style="margin-bottom:8px">Won jobs are added automatically. Pick a job below to mark it <b>Won</b> and schedule it.</div>
-    <div class="sch-lbl">Quoted / lost jobs</div>
-    ${projs.length ? projs.map(p => row(p.name, p.status + (p.baseline_labour_hours ? ' · ' + p.baseline_labour_hours + 'h' : ''), "schAddFromProject('" + attrEsc(p.name).replace(/'/g, "\\'") + "')")).join('') : '<div class="sch-empty">No quoted jobs waiting.</div>'}
+    <input id="sch-add-q" class="sch-in" type="search" placeholder="Search jobs (name, suburb, scope)…" oninput="schAddFilter(this.value)" style="width:100%;margin-bottom:10px" autocomplete="off">
+    <div id="sch-add-list">${schAddList('')}</div>
     <div class="sch-lbl">Something new</div>
     <div style="display:flex;gap:8px"><input id="sch-new-name" class="sch-in" placeholder="Client – suburb (e.g. Sam – Manly)" style="flex:1"><button class="sch-btn pri" onclick="schAddBlank()">Add</button></div>`);
+}
+function schAddPick(name) {
+  const p = (D.projects || []).find(x => x.name === name); if (!p) return;
+  const lines = schProjLines(name);
+  SCH.addSel = { name, lines, on: Object.fromEntries(lines.map(l => [l.id, true])), hoursManual: false };
+  SCH.addSel.env = schGuessEnv(name + ' ' + (p.baseline_scope || '') + ' ' + lines.map(l => l.description).join(' '));
+  SCH.addSel.hours = Number(p.baseline_labour_hours) || 0;
+  openModal(name, `
+    <div class="sch-lbl">Indoor / outdoor <span style="font-weight:400;text-transform:none">(suggested from the job)</span></div>
+    <div class="sch-seg" id="sch-add-env" style="margin-bottom:12px"></div>
+    ${lines.length ? `<div class="sch-lbl">What was approved? <span style="font-weight:400;text-transform:none">Untick anything not going ahead</span></div>
+    <div id="sch-add-lines">${lines.map(l => `<label class="sch-pick" style="cursor:pointer"><span style="display:flex;gap:10px;align-items:flex-start"><input type="checkbox" checked onchange="schAddToggle('${attrEsc(l.id)}',this.checked)" style="margin-top:3px"><span><b style="font-weight:600">${attrEsc((l.description || l.item || 'Line').slice(0, 140))}</b><small>${fmt(Number(l.line_amount) || 0, 2)} ex GST</small></span></span></label>`).join('')}</div>`
+      : '<div class="sch-hint" style="margin-bottom:8px">No quote lines are linked to this job, so there is nothing to tick: set the hours yourself.</div>'}
+    <div class="sch-lbl">Hours</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px"><input id="sch-add-h" class="sch-in" type="number" step="0.5" min="0" style="width:110px" oninput="schAddHours(this.value)"><span id="sch-add-hnote" class="sch-hint"></span></div>
+    <div style="display:flex;gap:8px;margin-top:12px"><button class="sch-btn" onclick="schAddModal()">‹ Back</button><button class="sch-btn pri" style="flex:1" onclick="schAddConfirm()">Mark Won and add to schedule</button></div>`);
+  schAddRefresh();
+}
+function schAddRefresh() {
+  const a = SCH.addSel; if (!a) return;
+  const p = (D.projects || []).find(x => x.name === a.name) || {};
+  const all = a.lines.reduce((t, l) => t + (Number(l.line_amount) || 0), 0);
+  const on = a.lines.filter(l => a.on[l.id]).reduce((t, l) => t + (Number(l.line_amount) || 0), 0);
+  const full = Number(p.baseline_labour_hours) || 0;
+  if (!a.hoursManual && a.lines.length && all > 0) a.hours = Math.round(full * (on / all) * 2) / 2;
+  const env = document.getElementById('sch-add-env');
+  if (env) env.innerHTML = [['indoor', '⌂ Indoor'], ['outdoor', '☀︎ Outdoor'], ['both', '◐ Both']].map(x => '<button class="' + (a.env === x[0] ? 'on' : '') + '" onclick="schAddEnv(\'' + x[0] + '\')">' + x[1] + '</button>').join('');
+  const h = document.getElementById('sch-add-h'); if (h && document.activeElement !== h) h.value = a.hours || '';
+  const n = document.getElementById('sch-add-hnote');
+  if (n) n.textContent = a.lines.length && all > 0 && full ? (on < all - 0.005 ? 'Scaled to ' + Math.round(on / all * 100) + '% of the quote (full job ' + full + 'h)' : 'Full quote (' + full + 'h)') : '';
+}
+function schAddToggle(id, v) { SCH.addSel.on[id] = v; SCH.addSel.hoursManual = false; schAddRefresh(); }
+function schAddEnv(e) { SCH.addSel.env = e; schAddRefresh(); }
+function schAddHours(v) { SCH.addSel.hours = parseFloat(v) || 0; SCH.addSel.hoursManual = true; }
+async function schAddConfirm() {
+  const a = SCH.addSel; if (!a) return;
+  const kept = a.lines.filter(l => a.on[l.id]);
+  if (a.lines.length && !kept.length) { claudeToast('Tick at least one line, or go back', 'unclear'); return; }
+  const partial = a.lines.length && kept.length < a.lines.length;
+  const p = (D.projects || []).find(x => x.name === a.name) || {};
+  try {
+    await schAddFromProject(a.name, { hours: a.hours || null, env: a.env,
+      title: partial ? kept.map(l => (l.description || l.item || '').split('\n')[0].slice(0, 60)).join('; ').slice(0, 300) : undefined,
+      notes: partial ? `Partial scope approved: ${kept.length} of ${a.lines.length} quote lines.` : '' });
+  } catch (e) { claudeToast('⚠ ' + (e.message || 'Could not add the job'), 'error'); }
 }
 
 // ═══ RENDER ═════════════════════════════════════════════════════════════════
