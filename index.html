@@ -7895,6 +7895,7 @@ function rcRenderTable() {
         <button onclick="rcAddRow()" style="padding:7px 12px;background:var(--bg-1);color:var(--ink-2);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:12px">+ Add line</button>
         <button id="rc-save-btn" onclick="rcSave()" style="padding:7px 16px;background:var(--sage);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700">Save lines</button>
       </div>
+      <div style="flex-basis:100%;text-align:right;font-size:11px;color:var(--ink-4)">⚡ Also sent to Xero as Spend Money (one entry per receipt, each line on its own account)</div>
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px;padding:10px 12px;background:var(--bg-2);border-radius:8px">
       <span style="font-size:12px;color:var(--ink-3)">Allocate one project to every line:</span>
@@ -7903,7 +7904,6 @@ function rcRenderTable() {
       <span style="font-size:11px;color:var(--ink-4)">Sets the project on all lines below — then tweak any exceptions individually.</span>
     </div>
     ${(RC.receipts||[]).filter(r => r.error).map(r => `<div style="padding:8px 12px;margin-bottom:8px;background:rgba(255,0,110,.1);border-radius:8px;font-size:12px;color:var(--pink)">⚠ Couldn't read ${attrEsc(r.name||'a receipt')}: ${attrEsc(r.error)} — try a clearer photo.</div>`).join('')}
-    ${rcRenderXeroExportBox()}
     <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
       <thead><tr style="background:var(--bg-2);text-align:left">
         <th style="padding:8px 8px;width:34px;text-align:center" title="Include">✓</th>
@@ -8057,7 +8057,7 @@ async function rcSave() {
   }));
   // Remember before rcRenderScan() resets RC — the Xero export (if ticked) runs
   // straight after the local save succeeds, using the same line items.
-  const wantsXeroExport = !!(document.getElementById('rc-xero-export') || {}).checked;
+  const wantsXeroExport = true;   // always sent to Xero by the server (no phone connection needed)
   const btn = document.getElementById('rc-save-btn');
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
   try {
@@ -8070,7 +8070,7 @@ async function rcSave() {
     // Optimistic in-memory update so Expenses/Projects reflect it immediately
     if (data.entries && D) { D.expense_log = D.expense_log || []; data.entries.forEach(e => D.expense_log.push(e)); }
     claudeToast(`✓ ${data.label || (items.length+' lines saved')}`, 'success');
-    if (wantsXeroExport) await rcExportToXero(items, data.label);
+    if (wantsXeroExport) await rcSendToXero(items);
     RC.items = null; RC.receipts = []; RC.files = []; RC.supplier = ''; RC.note = ''; RC.presetProject = null;
     rcRenderScan();
   } catch(err) {
@@ -8089,6 +8089,22 @@ async function rcSave() {
 // connector, no new OAuth scopes (accounting.contacts + .banktransactions are
 // already granted). Nothing here writes to expense_log — the payment method
 // lives only in which Xero bank account the transaction is posted against.
+// Sends the saved lines to Xero through the server (its own Xero connection): one Spend Money per supplier + date.
+async function rcSendToXero(items) {
+  const groups = {};
+  items.forEach(it => { const k = (it.supplier || '') + '|' + (it.date || ''); (groups[k] = groups[k] || []).push(it); });
+  for (const g of Object.values(groups)) {
+    const supplier = g[0].supplier || 'Unknown supplier';
+    try {
+      const r = await fetch('/.netlify/functions/receipt-xero', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ action:'push_lines', supplier, date: g[0].date, lines: g.map(x => ({ description:x.description, category:x.category, qty:x.qty, unit_price:x.unit_price })) }) });
+      const d = await r.json();
+      if (d.ok) claudeToast(d.existing ? `✓ ${supplier}: ${d.note} — nothing duplicated` : `✓ ${supplier} sent to Xero (${d.status === 'AUTHORISED' ? 'approved' : 'draft'})`, 'success');
+      else claudeToast(`⚠ Saved here, but Xero did not take ${supplier}: ${d.error || r.status}`, 'error');
+    } catch (e) { claudeToast(`⚠ Saved here, but could not reach Xero for ${supplier}`, 'error'); }
+  }
+}
+
 async function rcLoadXeroAccounts() {
   if (RC.xeroAccounts) return RC.xeroAccounts;
   const res = await xeroApiCall('Accounts', 'GET');

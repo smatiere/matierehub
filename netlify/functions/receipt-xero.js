@@ -116,11 +116,11 @@ async function pushOne(ctx, r) {
   const expectedInc = r.total_inc != null ? Number(r.total_inc) : (r.tax_mode === 'gst' || !r.tax_mode ? sumEx * 1.1 : sumEx);
   const have = await findExisting(ctx, contactId, date, expectedInc, sup);
   if (have) {
-    const f0 = await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${r.file_path}`, { headers: sbH() });
+    const f0 = r.file_path ? await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${r.file_path}`, { headers: sbH() }) : { ok: false };
     let att0 = !!have.hadFile;
     if (f0.ok && !have.hadFile) { const buf0 = Buffer.from(await f0.arrayBuffer()); const nm = String(sup + '-' + date).replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 60) + '.' + ext(r.mime); att0 = (await attach(ctx, have.id, nm, r.mime, buf0, have.kind)).status < 400; }
-    await rest('PATCH', `receipt_inbox?id=eq.${encodeURIComponent(r.id)}`, { xero_status: 'sent', xero_txn_id: have.id, xero_attached: att0, xero_error: `Already in Xero (${have.kind === 'Invoices' ? 'as a bill' : 'as Spend Money'}${have.contact ? ', under ' + have.contact : ''}) — nothing duplicated${have.hadFile ? ' (it already had a file, so none added)' : att0 ? ', file attached to it' : ''}`, xero_sent_at: new Date().toISOString(), updated_at: new Date().toISOString() });
-    return { id: r.id, ok: true, attached: att0, existing: true };
+    if (r.id) await rest('PATCH', `receipt_inbox?id=eq.${encodeURIComponent(r.id)}`, { xero_status: 'sent', xero_txn_id: have.id, xero_attached: att0, xero_error: `Already in Xero (${have.kind === 'Invoices' ? 'as a bill' : 'as Spend Money'}${have.contact ? ', under ' + have.contact : ''}) — nothing duplicated${have.hadFile ? ' (it already had a file, so none added)' : att0 ? ', file attached to it' : ''}`, xero_sent_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+    return { id: r.id, ok: true, attached: att0, existing: true, note: `Already in Xero${have.contact ? ' under ' + have.contact : ''}` };
   }
   const mk = (status) => ({ BankTransactions: [{
     Type: 'SPEND', Contact: { ContactID: contactId }, Date: date, Status: status, LineAmountTypes: 'Exclusive',
@@ -137,15 +137,15 @@ async function pushOne(ctx, r) {
   const txn = res.BankTransactions && res.BankTransactions[0];
   if (!txn || !txn.BankTransactionID) throw new Error('Xero did not return the new transaction');
   // the original file
-  const f = await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${r.file_path}`, { headers: sbH() });
+  const f = r.file_path ? await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${r.file_path}`, { headers: sbH() }) : { ok: false, none: true };
   let attached = false, attachNote = '';
   if (f.ok) {
     const buf = Buffer.from(await f.arrayBuffer());
     const nice = String(sup + '-' + date).replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 60) + '.' + ext(r.mime);
     const a = await attach(ctx, txn.BankTransactionID, nice, r.mime, buf);
     attached = a.status < 400; if (!attached) attachNote = 'File did not attach: ' + a.body.slice(0, 120);
-  } else attachNote = 'Could not read the stored file';
-  await rest('PATCH', `receipt_inbox?id=eq.${encodeURIComponent(r.id)}`, {
+  } else attachNote = f.none ? '' : 'Could not read the stored file';
+  if (r.id) await rest('PATCH', `receipt_inbox?id=eq.${encodeURIComponent(r.id)}`, {
     xero_status: 'sent', xero_txn_id: txn.BankTransactionID, xero_attached: attached, xero_error: attachNote || (used === 'AUTHORISED' ? 'Posted as approved (Xero has no draft for Spend Money)' : ''),
     xero_sent_at: new Date().toISOString(), updated_at: new Date().toISOString()
   });
@@ -225,6 +225,19 @@ exports.handler = async (event) => {
         return tryOn(it.date) || (/^\d{4}-\d{2}-\d{2}$/.test(String(it.alt_date || '')) && it.alt_date !== it.date ? tryOn(it.alt_date) : null) || { id: it.id, found: false };
       });
       return out(200, { ok: true, results, scanned: txns.length });
+    }
+    // Lines saved from the Scan Receipt tab: one Spend Money per receipt (one line per product, each on its own account), no file.
+    if (b.action === 'push_lines') {
+      const lines = (Array.isArray(b.lines) ? b.lines : []).filter(l => l && (parseFloat(l.unit_price) || 0) !== 0);
+      if (!lines.length) return out(400, { error: 'No lines to send' });
+      const ctx = await xeroContext();
+      try {
+        const res = await pushOne(ctx, { supplier: b.supplier, receipt_date: b.date, lines, tax_mode: b.tax_mode || 'gst', reference: b.reference });
+        return out(200, { ok: true, ...res });
+      } catch (e) {
+        if (/\b429\b|rate limit|too many requests/i.test(String(e.message))) return out(200, { ok: false, busy: true, error: 'Xero is busy, try again in a minute' });
+        return out(200, { ok: false, error: e.message });
+      }
     }
     if (b.action === 'banks') {
       const c = await xeroContext();
