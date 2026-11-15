@@ -35,8 +35,8 @@ const r2 = (x) => Math.round((Number(x) || 0) * 100) / 100;
 function exGstFix(j) {
   try {
     const c = j.check;
-    if (!c || c.gst_status !== 'included' || !(Number(c.total) > 0)) return j;
-    const S = j.items.reduce((t, i) => t + (Number(i.amount) || 0), 0), tol = Math.max(0.05, c.total * 0.005);
+    if (!c || c.gst_status !== 'included' || !(Number(c.total) !== 0)) return j;
+    const S = j.items.reduce((t, i) => t + (Number(i.amount) || 0), 0), tol = Math.max(0.05, Math.abs(c.total) * 0.005);
     if (Math.abs(S - c.total) <= tol && Math.abs(S - c.total / 1.1) > tol) {
       j.items.forEach(i => { i.amount = r2(i.amount / 1.1); i.unit_price = r2(i.unit_price / 1.1); });
       j.check = { ...c, ok: true, lines_inc_gst: r2(S), fixed_inc_gst: true };

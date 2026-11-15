@@ -8053,14 +8053,22 @@ function rcReceiptHeader(id) {
   const dup = (D.expense_log || []).filter(e => String(e.supplier || '').toLowerCase() === sup && String(e.date || '').slice(0, 10) === (lines[0] || {}).date);
   const dupHit = lines.length && lines.filter(l => dup.some(e => String(e.description || '').toLowerCase() === String(l.description || '').toLowerCase())).length / lines.length >= 0.6;
   const ci = 'padding:4px 7px;border:1px solid var(--border);border-radius:5px;background:var(--bg-1);color:var(--ink-1);font-size:12px';
+  const isCr = lines.length && lines.reduce((t, x) => t + (parseFloat(x.amount) || 0), 0) < 0;
+  const crBtn = `<button class="btn" style="font-size:11px;padding:3px 8px" onclick="rcFlipCredit(${id})">${isCr ? 'Not a credit — make positive' : 'This is a credit / return'}</button>`;
   return `<tr class="rc-rhead"><td colspan="8" style="padding:12px 8px 6px;background:var(--bg-2);border-top:2px solid var(--border-2)">
     <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
-      <span style="font-size:15px">🧾</span>
+      <span style="font-size:15px">${isCr ? '↩️' : '🧾'}</span>${isCr ? '<span style="color:var(--pink);font-weight:600;font-size:12px">CREDIT — returned goods, negative amounts (goes to Xero as money received)</span>' : ''}
       <input style="${ci};width:150px" value="${attrEsc((lines[0] && lines[0].supplier) || r.supplier || '')}" placeholder="Supplier" onchange="rcSetReceipt(${id},'supplier',this.value)">
       <input type="date" style="${ci}" value="${attrEsc((lines[0] && lines[0].date) || r.date || '')}" onchange="rcSetReceipt(${id},'date',this.value)">
-      <span style="font-size:11px;color:var(--ink-4)">${lines.length} line${lines.length === 1 ? '' : 's'} · ${fmt(inc, 2)} inc GST${many ? ' · ' + attrEsc(r.name || '') : ''}</span>
+      <span style="font-size:11px;color:var(--ink-4)">${lines.length} line${lines.length === 1 ? '' : 's'} · ${fmt(inc, 2)} inc GST${many ? ' · ' + attrEsc(r.name || '') : ''}</span> ${crBtn}
     </div>
     <div style="font-size:11px;margin-top:4px">${note}${dupHit ? ' · <span style="color:var(--pink)">⚠ looks already saved — untick or Cancel to avoid doubling up</span>' : ''}</div></td></tr>`;
+}
+function rcFlipCredit(id) {
+  RC.items.forEach(it => { if (it._rc === id) { it.unit_price = -(parseFloat(it.unit_price) || 0); it.amount = -(parseFloat(it.amount) || 0); } });
+  const r = (RC.receipts || []).find(x => x.id === id);
+  if (r && r.check && r.check.total) r.check = { ...r.check, total: -r.check.total, lines_inc_gst: -(r.check.lines_inc_gst || 0) };
+  rcRenderTable();
 }
 function rcSetReceipt(id, field, val) {
   RC.items.forEach(it => { if (it._rc === id) it[field] = val.trim(); });

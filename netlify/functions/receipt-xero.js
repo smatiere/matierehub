@@ -64,7 +64,8 @@ function attach(ctx, txnId, filename, mime, buf, kind) {
 
 // Is this already in Xero? Looks for a payment with the same total within a few days: first under the same contact, then
 // (because the bank feed often names the supplier differently: "Bunnings" vs "Bunnings Warehouse") by amount and date alone.
-async function findExisting(ctx, contactId, date, expectedInc, supplierName) {
+async function findExisting(ctx, contactId, date, expectedInc, supplierName, txType) {
+  txType = txType || 'SPEND';
   const d = new Date(date + 'T00:00:00Z'), pad = (n) => String(n).padStart(2, '0');
   const dt = (x) => `DateTime(${x.getUTCFullYear()},${pad(x.getUTCMonth() + 1)},${pad(x.getUTCDate())})`;
   const lo = new Date(d.getTime() - 5 * 86400000), hi = new Date(d.getTime() + 5 * 86400000);
@@ -81,16 +82,17 @@ async function findExisting(ctx, contactId, date, expectedInc, supplierName) {
   };
   try {
     if (contactId) {
-      const bt = await xeroCall(`BankTransactions?where=${encodeURIComponent(`Contact.ContactID==Guid("${contactId}")&&Status!="DELETED"&&${range}`)}`, 'GET', ctx.token, ctx.tenant);
+      const bt = await xeroCall(`BankTransactions?where=${encodeURIComponent(`Contact.ContactID==Guid("${contactId}")&&Type=="${txType}"&&Status!="DELETED"&&${range}`)}`, 'GET', ctx.token, ctx.tenant);
       const a = pick(bt.BankTransactions || [], 'BankTransactionID', 'BankTransactions'); if (a) return a;
     }
     // any contact, our bank account, matching name loosely OR a unique amount match
-    const all = await xeroCall(`BankTransactions?where=${encodeURIComponent(`Type=="SPEND"&&Status!="DELETED"&&${range}`)}`, 'GET', ctx.token, ctx.tenant);
+    const all = await xeroCall(`BankTransactions?where=${encodeURIComponent(`Type=="${txType}"&&Status!="DELETED"&&${range}`)}`, 'GET', ctx.token, ctx.tenant);
     const mine = (all.BankTransactions || []).filter(x => !ctx.bank || !x.BankAccount || x.BankAccount.AccountID === ctx.bank.AccountID);
     const byName = pick(mine.filter(x => similar(x.Contact && x.Contact.Name, supplierName)), 'BankTransactionID', 'BankTransactions'); if (byName) return byName;
     // Names differ (e.g. a screenshot read "EZ Glaze", Xero has "PolyGuru"): accept a single payment with the same amount and date.
     const byAmt = expectedInc >= 20 ? pick(mine, 'BankTransactionID', 'BankTransactions') : null; if (byAmt && !byAmt.multiple) return { ...byAmt, byAmount: true };
     if (!contactId) return null;
+    if (txType === 'RECEIVE') return null;
     const iv = await xeroCall(`Invoices?where=${encodeURIComponent(`Type=="ACCPAY"&&Contact.ContactID==Guid("${contactId}")&&Status!="VOIDED"&&Status!="DELETED"&&${range}`)}`, 'GET', ctx.token, ctx.tenant);
     const b2 = pick(iv.Invoices || [], 'InvoiceID', 'Invoices'); if (b2) return b2;
   } catch (e) { /* if the lookup itself fails, carry on and create */ }
@@ -105,16 +107,19 @@ async function pushOne(ctx, r) {
   const contactId = await findOrCreateContact(ctx, sup);
   const taxType = r.tax_mode === 'free' ? 'EXEMPTEXPENSES' : r.tax_mode === 'excl' ? 'BASEXCLUDED' : 'INPUT';
   const sundry = ctx.expenseMap['sundry expenses'];
+  // A credit / return (negative lines) goes into Xero as money received (Xero will not take a negative Spend Money), with positive amounts.
+  const isCredit = lines.reduce((t, l) => t + (parseFloat(l.qty) || 1) * (parseFloat(l.unit_price) || 0), 0) < 0;
+  const sgn = isCredit ? -1 : 1;
   const lineItems = lines.map(l => {
     const code = ctx.expenseMap[String(l.category || '').toLowerCase().trim()] || sundry;
     if (!code) throw new Error(`No Xero account for category "${l.category || '(blank)'}"`);
-    return { Description: l.description || '(no description)', Quantity: parseFloat(l.qty) || 1, UnitAmount: parseFloat(l.unit_price) || 0, AccountCode: code, TaxType: taxType };
+    return { Description: l.description || '(no description)', Quantity: parseFloat(l.qty) || 1, UnitAmount: sgn * (parseFloat(l.unit_price) || 0), AccountCode: code, TaxType: taxType };
   });
   const date = String(r.receipt_date || '').slice(0, 10) || new Date().toISOString().slice(0, 10);
   // Never create a second copy: if Xero already has it, just attach the file to that one.
   const sumEx = lines.reduce((t2, l) => t2 + (parseFloat(l.qty) || 1) * (parseFloat(l.unit_price) || 0), 0);
-  const expectedInc = r.total_inc != null ? Number(r.total_inc) : (r.tax_mode === 'gst' || !r.tax_mode ? sumEx * 1.1 : sumEx);
-  const have = await findExisting(ctx, contactId, date, expectedInc, sup);
+  const expectedInc = Math.abs(r.total_inc != null ? Number(r.total_inc) : (r.tax_mode === 'gst' || !r.tax_mode ? sumEx * 1.1 : sumEx));
+  const have = await findExisting(ctx, contactId, date, expectedInc, sup, isCredit ? 'RECEIVE' : 'SPEND');
   if (have) {
     const f0 = r.file_path ? await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${r.file_path}`, { headers: sbH() }) : { ok: false };
     let att0 = !!have.hadFile;
@@ -123,8 +128,8 @@ async function pushOne(ctx, r) {
     return { id: r.id, ok: true, attached: att0, existing: true, note: `Already in Xero${have.contact ? ' under ' + have.contact : ''}` };
   }
   const mk = (status) => ({ BankTransactions: [{
-    Type: 'SPEND', Contact: { ContactID: contactId }, Date: date, Status: status, LineAmountTypes: 'Exclusive',
-    Reference: r.reference || `MatiereHub — ${sup} ${date}`, BankAccount: { AccountID: ctx.bank.AccountID }, LineItems: lineItems
+    Type: isCredit ? 'RECEIVE' : 'SPEND', Contact: { ContactID: contactId }, Date: date, Status: status, LineAmountTypes: 'Exclusive',
+    Reference: r.reference || `MatiereHub — ${isCredit ? 'CREDIT ' : ''}${sup} ${date}`, BankAccount: { AccountID: ctx.bank.AccountID }, LineItems: lineItems
   }] });
   let res, used = 'DRAFT';
   try { res = await xeroCall('BankTransactions', 'POST', ctx.token, ctx.tenant, mk('DRAFT')); }
