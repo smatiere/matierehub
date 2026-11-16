@@ -14,9 +14,10 @@ exports.handler = async (event) => {
   try {
     const p = (event.queryStringParameters && event.queryStringParameters.path) || '';
     const q = event.rawQuery && event.rawQuery.includes('path=') ? '' : '';
-    if (!ALLOWED.test(p)) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Path not allowed' }) };
+    const acc = event.queryStringParameters && event.queryStringParameters.api === 'accounting';
+    if (acc ? !/^(BankTransactions|Reports\/[A-Za-z]+)(\?[A-Za-z0-9=&_.:%()+"-]*)?$/.test(p) : !ALLOWED.test(p)) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Path not allowed' }) };
     const token = await getAccessToken(), tenant = await getTenantId(token);
-    const r = await fetch(`https://api.xero.com/payroll.xro/1.0/${p}`, { headers: { Authorization: `Bearer ${token}`, 'xero-tenant-id': tenant, Accept: 'application/json' } });
+    const r = await fetch(`https://api.xero.com/${acc ? 'api.xro/2.0' : 'payroll.xro/1.0'}/${p}`, { headers: { Authorization: `Bearer ${token}`, 'xero-tenant-id': tenant, Accept: 'application/json' } });
     return { statusCode: r.status, headers, body: await r.text() };
   } catch (e) { return { statusCode: 500, headers, body: JSON.stringify({ error: e.message }) }; }
 };
