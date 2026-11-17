@@ -5,7 +5,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const READABLE = { bookings: 'select=*&order=created_at.desc', usage_events: 'select=*&order=ts.desc&limit=20000' };
 
-const BROWSER_TABLES = ['category_list','contacts','expense_log','invoice_items','price_list','projects','quote_items','shopping_lists','timesheets','xero_cache','bank_transactions','bookings'];
+const BROWSER_TABLES = ['category_list','contacts','expense_log','invoice_items','price_list','projects','quote_items','shopping_lists','timesheets','xero_cache','bank_transactions','bookings','quote_followups'];
 
 exports.handler = async (event) => {
   const headers = {

@@ -5894,8 +5894,10 @@ function renderQuotes() {
         </div>
       </div>
     </div></div>` : ''}
+    <div id="qf-section"></div>
     <div id="quotes-content"></div>`;
   if (quotes && quotes.length) renderQuotesData(quotes);
+  qfLoad();
 }
 
 async function loadXeroQuotes() {
@@ -5999,6 +6001,202 @@ function renderQuotesData(quotes) {
       <table><thead><tr><th>Number</th><th>Date</th><th>Client</th><th>Job Type</th><th style="text-align:right">Amount</th><th>Status</th></tr></thead>
       <tbody>${recentRows}</tbody></table>
     </div>`;
+}
+
+// ── Quote follow-ups (added 2026-11-17) ───────────────────────────────────────
+// Every SENT quote gets a nudge date: quote date + 2 weeks, but anything landing in the
+// holiday lull (15 Dec – 31 Jan) moves to the first Monday of February. Seb can snooze to
+// any date, leave a note ("will look again in the new year"), and mark Won / Lost / Stop,
+// which ends the follow-up. Dates and notes live in the private `quote_followups` table
+// (row id = quote number); quotes with no row use the default. Nothing is ever sent from
+// here: the nudge is a draft text to copy or open in Messages.
+const QF = { rows: null, contacts: null, groups: [], open: {} };
+const QF_FRESH_DAYS = 120;   // older sent quotes sit in a folded "Older" list unless already tracked
+const qfIso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+const qfToday = () => qfIso(new Date());
+function qfAdd(iso, days) { const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + days); return qfIso(d); }
+function qfFebMonday(year) { const d = new Date(year, 1, 1, 12); while (d.getDay() !== 1) d.setDate(d.getDate() + 1); return qfIso(d); }
+// Push a date out of the holiday lull.
+function qfHoliday(iso) {
+  const m = +iso.slice(5, 7), day = +iso.slice(8, 10), y = +iso.slice(0, 4);
+  if (m === 12 && day >= 15) return qfFebMonday(y + 1);
+  if (m === 1) return qfFebMonday(y);
+  return iso;
+}
+function qfNextFeb() { const t = qfToday(); const f = qfFebMonday(+t.slice(0, 4)); return f > t ? f : qfFebMonday(+t.slice(0, 4) + 1); }
+const qfNice = iso => iso ? new Date(iso + 'T12:00:00').toLocaleDateString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+const qfEsc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+async function qfLoad() {
+  try { QF.rows = await sbGet('/rest/v1/quote_followups?select=*'); } catch (e) { QF.rows = QF.rows || []; }
+  QF.byId = {}; (QF.rows || []).forEach(r => QF.byId[r.id] = r);
+  if (!QF.contacts) { try { QF.contacts = await sbGet('/rest/v1/contacts?select=id,name,phone&limit=1000'); } catch (e) { QF.contacts = []; } }
+  qfRender();
+}
+
+// One entry per quote number, built from the synced quote lines.
+function qfQuotes() {
+  const by = {};
+  (D.quote_items || []).forEach(l => {
+    if (!l.quote_number) return;
+    const q = by[l.quote_number] = by[l.quote_number] || { number: l.quote_number, contact: l.contact || '', contact_id: l.contact_id, date: (l.date || '').slice(0, 10), status: String(l.status || '').toUpperCase(), total: 0, desc: '', project: '' };
+    q.total += Number(l.line_amount) || 0;
+    if (!q.desc && l.description) q.desc = l.description;
+    if (!q.project && l.project) q.project = l.project;
+  });
+  return Object.values(by);
+}
+const qfProject = q => q.project ? (D.projects || []).find(p => String(p.name).toLowerCase() === q.project.toLowerCase()) : null;
+
+function qfBuild() {
+  const today = qfToday(), cutoff = qfAdd(today, -QF_FRESH_DAYS);
+  const groups = {};
+  qfQuotes().forEach(q => {
+    if (q.status !== 'SENT') return;
+    const row = QF.byId[q.number];
+    if (row && row.status !== 'open') return;                       // won / lost / stopped
+    const pr = qfProject(q);
+    if (pr && ['Won', 'Active', 'Finished', 'Paid', 'Lost', 'Inactive'].includes(pr.status)) return;   // decided already
+    const tracked = !!row;
+    q.due = (row && row.due_date) || qfHoliday(qfAdd(q.date || today, 14));
+    q.note = row ? row.note : ''; q.nudges = row ? row.nudges : 0; q.tracked = tracked;
+    q.old = !tracked && q.date < cutoff;
+    const k = (q.contact || q.number).toLowerCase();
+    (groups[k] = groups[k] || { contact: q.contact || q.number, contact_id: q.contact_id, quotes: [] }).quotes.push(q);
+  });
+  const list = Object.values(groups).map(g => {
+    g.quotes.sort((a, b) => a.date.localeCompare(b.date));
+    g.due = g.quotes.map(q => q.due).sort()[0];
+    g.old = g.quotes.every(q => q.old);
+    g.total = g.quotes.reduce((t, q) => t + q.total, 0);
+    return g;
+  }).sort((a, b) => a.due.localeCompare(b.due));
+  QF.groups = list;
+  return list;
+}
+
+function qfCard(g, i) {
+  const today = qfToday(), due = g.due <= today;
+  const lines = g.quotes.map(q => `
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px 0;border-top:1px solid var(--border-2);font-size:12px">
+      <span style="color:var(--ink-4)">${qfEsc(q.number)} · ${qfEsc(q.date)}</span>
+      <span style="flex:1;min-width:120px;color:var(--ink-3)">${qfEsc((q.project || q.desc || '').slice(0, 60))}${q.note ? `<br><em style="color:var(--amber)">${qfEsc(q.note)}</em>` : ''}</span>
+      <span class="amount">${fmt(q.total)}</span>
+      <button class="sch-btn" style="min-height:30px;padding:0 10px;font-size:11px" data-q="${qfEsc(q.number)}" onclick="qfAct(this.dataset.q,'won')">Won</button>
+      <button class="sch-btn" style="min-height:30px;padding:0 10px;font-size:11px" data-q="${qfEsc(q.number)}" onclick="qfAct(this.dataset.q,'lost')">Lost</button>
+      <button class="sch-btn" style="min-height:30px;padding:0 10px;font-size:11px" data-q="${qfEsc(q.number)}" onclick="qfAct(this.dataset.q,'stopped')" title="Stop following up">Stop</button>
+    </div>`).join('');
+  return `<div style="background:var(--bg-2);border:1px solid ${due ? 'var(--amber)' : 'var(--border-2)'};border-radius:10px;padding:12px 14px;margin-bottom:10px">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:4px">
+      <strong style="font-size:14px">${qfEsc(g.contact)}</strong>
+      <span style="font-size:12px;color:var(--ink-4)">${g.quotes.length} quote${g.quotes.length > 1 ? 's' : ''} · ${fmt(g.total)} ex GST</span>
+      <span class="badge ${due ? 'badge-amber' : 'badge-gray'}" style="margin-left:auto">${due ? 'Nudge due' : 'Next nudge ' + qfNice(g.due)}</span>
+    </div>
+    ${lines}
+    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+      <button class="sch-btn" style="background:var(--amber);color:#000;border-color:var(--amber)" onclick="qfNudge(${i})">✉ Nudge draft</button>
+      <button class="sch-btn" onclick="qfSnooze(${i})">🗓 Snooze / note</button>
+    </div></div>`;
+}
+
+function qfRender() {
+  const el = document.getElementById('qf-section');
+  if (!el || !D) return;
+  if (QF.rows === null) { el.innerHTML = ''; return; }
+  const groups = qfBuild(), today = qfToday();
+  const live = groups.filter(g => !g.old), old = groups.filter(g => g.old);
+  const dueNow = live.filter(g => g.due <= today), later = live.filter(g => g.due > today);
+  const idx = g => groups.indexOf(g);
+  el.innerHTML = `<div class="section" id="qf-box"><div class="section-head"><h2>Quotes to follow up</h2>
+      <span class="badge ${dueNow.length ? 'badge-amber' : 'badge-gray'}">${dueNow.length} due now</span></div>
+    <div class="section-body" style="padding:12px 14px">
+      <div style="font-size:11px;color:var(--ink-4);margin-bottom:10px;line-height:1.6">Sent quotes get a nudge 2 weeks after the date (anything landing 15 Dec – 31 Jan moves to the first Monday of February). Marking a quote Won, Lost or Stop ends its follow-up. Nothing is sent from here.</div>
+      ${dueNow.length ? `<div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--amber);margin:4px 0 6px">Due now</div>${dueNow.map(g => qfCard(g, idx(g))).join('')}` : '<div style="font-size:13px;color:var(--ink-3);margin-bottom:8px">Nothing due right now.</div>'}
+      ${later.length ? `<div style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-4);margin:12px 0 6px">Coming up</div>${later.map(g => qfCard(g, idx(g))).join('')}` : ''}
+      ${old.length ? `<details style="margin-top:12px"${QF.open.old ? ' open' : ''} ontoggle="QF.open.old=this.open"><summary style="cursor:pointer;font-size:12px;color:var(--ink-3)">Older sent quotes (${old.reduce((t, g) => t + g.quotes.length, 0)}), not being followed up</summary><div style="margin-top:8px">${old.map(g => qfCard(g, idx(g))).join('')}</div></details>` : ''}
+    </div></div>`;
+}
+
+// Save to quote_followups: update if the row exists, create it if not.
+async function qfSave(num, fields) {
+  const contact = (qfQuotes().find(q => q.number === num) || {}).contact || '';
+  const f = Object.assign({ contact }, fields, { updated_at: undefined });
+  const post = body => fetch('/.netlify/functions/hub-write', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(async r => { const o = await r.json().catch(() => ({})); if (!r.ok || !o.ok) throw new Error(o.error || 'save failed'); return o.row; });
+  let row;
+  if (QF.byId[num]) row = await post({ table: 'quote_followups', id: num, fields: f });
+  else row = await post({ table: 'quote_followups', insert: true, fields: Object.assign({ id: num }, f) });
+  QF.byId[num] = row; QF.rows = Object.values(QF.byId);
+  return row;
+}
+
+async function qfAct(num, what) {
+  const q = qfQuotes().find(x => x.number === num); if (!q) return;
+  const label = { won: 'Won', lost: 'Lost', stopped: 'Stopped' }[what];
+  try {
+    await qfSave(num, { status: what });
+    const pr = qfProject(q);
+    if (pr && pr.status === 'Quoted' && what !== 'stopped') Object.assign(pr, await hubWrite('projects', pr.id, { status: what === 'won' ? 'Won' : 'Lost' }));
+    claudeToast('✓ ' + num + ' marked ' + label + (what === 'won' && !pr ? ' here. Accept it in Xero too so it reaches the Schedule' : ''), 'success');
+  } catch (e) { claudeToast('⚠ ' + e.message, 'error'); }
+  qfRender();
+}
+
+function qfDraft(g) {
+  const first = (g.contact || '').trim().split(/\s+/)[0] || 'there';
+  const qs = g.quotes, n = qs.length;
+  const what = n > 1 ? 'the ' + n + ' quotes I sent through (' + qs.map(q => q.number).join(', ') + ')' : 'the quote I sent through' + (qs[0].project ? ' for ' + qs[0].project : ' (' + qs[0].number + ')');
+  const m = new Date().getMonth(), nudged = Math.max(...qs.map(q => q.nudges || 0));
+  const hello = (m === 0 || m === 1) ? 'Hi ' + first + ', hope you had a great Christmas and New Year.' : 'Hi ' + first + ', hope you are well.';
+  return nudged ? hello + ' Just following up once more on ' + what + '. No pressure either way. If the timing is not right, let me know and I will close it off. Cheers, Seb'
+                : hello + ' Just a quick nudge on ' + what + '. Happy to answer any questions or adjust anything, and no rush at all. Cheers, Seb';
+}
+
+function qfNudge(i) {
+  const g = QF.groups[i]; if (!g) return;
+  const ct = (QF.contacts || []).find(c => c.id === g.contact_id) || (QF.contacts || []).find(c => String(c.name).toLowerCase() === g.contact.toLowerCase());
+  QF.cur = { i, phone: ct && ct.phone ? ct.phone.replace(/[^\d+]/g, '') : '' };
+  openModal('Nudge ' + g.contact, `
+    <div style="font-size:12px;color:var(--ink-4);margin-bottom:8px">Edit the text, then copy it or open it in Messages. Nothing is sent from the Hub.${QF.cur.phone ? '' : ' (No phone number on file for this contact.)'}</div>
+    <textarea id="qf-text" style="width:100%;min-height:150px;background:var(--bg-1);color:var(--ink-1);border:1px solid var(--border-2);border-radius:8px;padding:10px;font:inherit;font-size:14px">${qfEsc(qfDraft(g))}</textarea>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+      <button class="sch-btn" onclick="qfCopy()">Copy text</button>
+      ${QF.cur.phone ? `<button class="sch-btn" onclick="qfSms()">Open in Messages</button>` : ''}
+    </div>
+    <div style="border-top:1px solid var(--border-2);margin-top:14px;padding-top:12px">
+      <button class="sch-btn pri" style="width:100%;background:var(--amber);color:#000;border-color:var(--amber)" onclick="qfSent()">I've sent it: nudge again in 2 weeks</button>
+    </div>`);
+}
+function qfCopy() { const t = document.getElementById('qf-text'); t.select(); try { navigator.clipboard.writeText(t.value); } catch (e) { document.execCommand('copy'); } claudeToast('✓ Copied', 'success'); }
+function qfSms() { const t = document.getElementById('qf-text').value; location.href = 'sms:' + QF.cur.phone + (/iPhone|iPad|Mac/.test(navigator.userAgent) ? '&' : '?') + 'body=' + encodeURIComponent(t); }
+async function qfSent() {
+  const g = QF.groups[QF.cur.i]; if (!g) return;
+  const today = qfToday(), next = qfHoliday(qfAdd(today, 14));
+  try { for (const q of g.quotes) await qfSave(q.number, { status: 'open', nudges: (q.nudges || 0) + 1, last_nudged: today, due_date: next }); claudeToast('✓ Logged. Next nudge ' + qfNice(next), 'success'); } catch (e) { claudeToast('⚠ ' + e.message, 'error'); }
+  closeModal(); qfRender();
+}
+
+function qfSnooze(i) {
+  const g = QF.groups[i]; if (!g) return;
+  QF.cur = { i };
+  const t = qfToday(), feb = qfNextFeb(), note = (g.quotes.find(q => q.note) || {}).note || '';
+  openModal('Snooze ' + g.contact, `
+    <div style="font-size:12px;color:var(--ink-4);margin-bottom:10px">Pick when to nudge ${g.quotes.length > 1 ? 'all ' + g.quotes.length + ' quotes' : 'this quote'} next.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      <button class="sch-btn" onclick="qfSetDue('${qfAdd(t, 14)}')">In 2 weeks</button>
+      <button class="sch-btn" onclick="qfSetDue('${qfAdd(t, 30)}')">In a month</button>
+      <button class="sch-btn" onclick="qfSetDue('${feb}')">After the holidays (${qfNice(feb)})</button>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px"><input type="date" id="qf-date" value="${g.due}" style="background:var(--bg-1);color:var(--ink-1);border:1px solid var(--border-2);border-radius:8px;padding:8px;font:inherit"><button class="sch-btn" onclick="qfSetDue(document.getElementById('qf-date').value)">Use this date</button></div>
+    <label style="font-size:12px;color:var(--ink-4)">Note (what the client said)</label>
+    <textarea id="qf-note" style="width:100%;min-height:70px;margin-top:4px;background:var(--bg-1);color:var(--ink-1);border:1px solid var(--border-2);border-radius:8px;padding:10px;font:inherit;font-size:14px" placeholder="e.g. Will look at it again in the new year">${qfEsc(note)}</textarea>
+    <div style="font-size:11px;color:var(--ink-4);margin-top:6px">The note is saved when you pick a date.</div>`);
+}
+async function qfSetDue(date) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) { claudeToast('⚠ Pick a date', 'error'); return; }
+  const g = QF.groups[QF.cur.i]; if (!g) return;
+  const note = (document.getElementById('qf-note') || {}).value || '';
+  try { for (const q of g.quotes) await qfSave(q.number, { status: 'open', due_date: date, note, nudges: q.nudges || 0 }); claudeToast('✓ Next nudge ' + qfNice(date), 'success'); } catch (e) { claudeToast('⚠ ' + e.message, 'error'); }
+  closeModal(); qfRender();
 }
 
 function showCategoryDetail(cat) {

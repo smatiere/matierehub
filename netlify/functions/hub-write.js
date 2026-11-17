@@ -45,7 +45,9 @@ const WRITABLE = {
   // 2026-11-01 — Schedule tab (supabase_bookings.sql): dates, status, constraints, client message log.
   bookings:          ['project','title','quote_number','approval_source','approved_at','status','client_name','client_phone','client_email',
                      'site_address','lat','lng','env','priority','hours','hours_per_day','start_date','start_time','end_date',
-                     'window_days','constraints','notify_log','notified_start','notes']
+                     'window_days','constraints','notify_log','notified_start','notes'],
+  // 2026-11-17 — quote follow-ups (supabase_quote_followups.sql); id = quote number.
+  quote_followups:   ['contact','status','due_date','nudges','last_nudged','note']
 };
 
 // ── Insert allow-list: { table: [columns the HUB may set when CREATING a row] }
@@ -63,7 +65,9 @@ const CREATABLE = {
   // Row id (BK-###) is generated server-side.
   bookings:       ['project','title','quote_number','approval_source','approved_at','status','client_name','client_phone','client_email',
                      'site_address','lat','lng','env','priority','hours','hours_per_day','start_date','start_time','end_date',
-                     'window_days','constraints','notify_log','notified_start','notes']
+                     'window_days','constraints','notify_log','notified_start','notes'],
+  // id (the quote number) is supplied by the Hub, checked below.
+  quote_followups: ['id','contact','status','due_date','nudges','last_nudged','note']
 };
 
 async function sbPatch(table, query, body) {
@@ -205,6 +209,10 @@ exports.handler = async (event) => {
         row.rate     = 100;
         row.value    = h * 100;
         row.id       = await nextTimesheetId();
+      }
+      if (table === 'quote_followups') {
+        if (!/^[A-Za-z0-9 _-]{1,40}$/.test(String(row.id || ''))) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Quote number required' }) };
+        row.status = row.status || 'open';
       }
       if (table === 'bookings') {
         row.id     = await nextBookingId();

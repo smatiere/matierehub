@@ -2,6 +2,10 @@
 
 **Purpose:** accumulate many edits locally, deploy ONCE. Editing files is free; only a push to `main` triggers a Netlify build (= credits). See CLAUDE.md → "Deploying changes" for the full workflow.
 
+## Feature — 2026-11-17 (quote follow-ups)
+
+"Quotes to follow up" section at the top of the Quotes page. Each SENT quote gets a nudge date = quote date + 2 weeks (15 Dec–31 Jan moves to the first Monday of Feb). Per client: nudge draft text (copy / open in Messages, never auto-sent), "I've sent it" (+2 weeks), snooze to any date with a note, Won / Lost / Stop (ends follow-up; Won/Lost also sets a Quoted project). Quotes whose project is already Won/Active/etc. drop out. Sent quotes older than 120 days sit in a folded "Older" list. New private table `quote_followups` (id = quote number; SQL run live: `supabase_quote_followups.sql`), read via hub-read, written via hub-write. Dan - St Ives QU-0307/8/9 pre-set to 1 Feb 2027.
+
 ## Feature — 2026-11-06 (usage tracking, to learn what gets used on iPhone)
 
 Records tab opens and button taps (function name only, no text, no client names) so the HUB can be

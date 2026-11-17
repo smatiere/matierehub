@@ -134,6 +134,8 @@ bookings           { id (BK-###), project, title, quote_number, approval_source,
                      start_date, start_time, end_date, window_days, constraints (JSONB), notify_log (JSONB),
                      notified_start, notes, created_at, updated_at }
                    ← added 2026-11-01 (supabase_bookings.sql) — the Schedule tab's data
+quote_followups    { id (= quote number), contact, status (open|won|lost|stopped), due_date, nudges, last_nudged, note, created_at, updated_at }
+                   ← added 2026-11-17 (supabase_quote_followups.sql) — the "Quotes to follow up" section of the Quotes page; RLS on, read via hub-read, write via hub-write
 category_list      { name (PK), created_at }
                    ← lookup table for valid contact categories; managed via HUB
 bank_transactions  { id, date, type, contact, contact_id, account_code, account_name,
