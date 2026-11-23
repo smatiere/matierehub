@@ -2,6 +2,13 @@
 
 **Purpose:** accumulate many edits locally, deploy ONCE. Editing files is free; only a push to `main` triggers a Netlify build (= credits). See CLAUDE.md → "Deploying changes" for the full workflow.
 
+## Fix — 2026-11-23 (connector gaps: edit contact, delete draft quote, duplicate shopping lists)
+
+- `update_contact` (xero-mcp): edit an existing Xero contact (name, first/last name, email, phone, address); only passed fields change.
+- `delete_draft_quote` (xero-mcp): deletes a DRAFT quote only; refuses sent/accepted/invoiced.
+- `create_quote`: a re-quote of the same job now replaces the items of that job's open, untouched shopping list instead of making a second list.
+- Shopping List tab: "Delete" button per list (confirm first) → hub-write `{table:'shopping_lists', id, remove:true}`; no other table can be deleted from.
+
 ## Fix — 2026-11-23 (Xero connector: quote number on invoices)
 
 `create_invoice` in `xero-mcp.js` takes `quote_number` and puts it in the invoice's Reference (same place Xero uses when a quote is converted). If it is left out and the client has exactly one ACCEPTED/SENT quote, that one is used and the result says so; with several, the result lists them and the reference stays blank. The quote is then marked Invoiced in Xero (Sent → Accepted → Invoiced; Draft quotes are left alone). New tool `mark_quote_invoiced` does the same for older quotes.

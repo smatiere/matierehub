@@ -168,7 +168,23 @@ exports.handler = async (event) => {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) return { statusCode: 500, headers, body: JSON.stringify({ error: 'Supabase env vars not configured' }) };
 
   try {
-    const { table, id, fields, insert } = JSON.parse(event.body || '{}');
+    const { table, id, fields, insert, remove } = JSON.parse(event.body || '{}');
+
+    // 2026-11-23 — delete a whole row. Shopping lists only (a duplicate or
+    // replaced list); nothing else can be deleted through this function.
+    if (remove) {
+      if (table !== 'shopping_lists') return { statusCode: 400, headers, body: JSON.stringify({ error: `Rows cannot be deleted from ${table}` }) };
+      if (!/^SL-\d+$/.test(String(id || ''))) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing list id' }) };
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/shopping_lists?id=eq.${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: { 'apikey': SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`, 'Prefer': 'return=representation' }
+      });
+      const txt = await res.text();
+      if (!res.ok) throw new Error(`Supabase DELETE shopping_lists failed: ${res.status} ${txt}`);
+      const gone = txt ? JSON.parse(txt) : [];
+      if (!gone.length) return { statusCode: 404, headers, body: JSON.stringify({ error: 'No list matched that id' }) };
+      return { statusCode: 200, headers, body: JSON.stringify({ ok: true, row: gone[0], deleted: true }) };
+    }
 
     // ── INSERT path (create a new row, e.g. a project on the spot) ─────────────
     if (insert) {

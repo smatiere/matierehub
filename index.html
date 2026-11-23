@@ -1387,6 +1387,7 @@ async function renderShopping() {
           <span style="font-size:11px;color:var(--ink-4)">${checkedCount}/${rawItems.length}</span>
           ${l.status!=='done' ? `<button onclick="event.stopPropagation();shopSetStatus('${attrEsc(l.id)}','done')" style="padding:5px 10px;background:transparent;border:1px solid var(--border-2);color:var(--ink-3);border-radius:6px;cursor:pointer;font-size:11px">Mark done</button>`
                                : `<button onclick="event.stopPropagation();shopSetStatus('${attrEsc(l.id)}','open')" style="padding:5px 10px;background:transparent;border:1px solid var(--border-2);color:var(--ink-3);border-radius:6px;cursor:pointer;font-size:11px">Reopen</button>`}
+          <button onclick="event.stopPropagation();shopDeleteList('${attrEsc(l.id)}')" title="Delete this list" aria-label="Delete this list" style="padding:5px 9px;background:transparent;border:1px solid var(--border-2);color:var(--ink-4);border-radius:6px;cursor:pointer;font-size:11px">Delete</button>
         </div>
       </div>
       ${expanded ? `<div style="padding:8px">${rows || '<div style="padding:10px;color:var(--ink-4);font-size:12px">No items</div>'}</div>` : ''}
@@ -1457,6 +1458,22 @@ async function shopSetStatus(id, status) {
     if (list) list.status = row.status;
     renderShopping();
   } catch (e) { claudeToast('Could not save: ' + e.message, 'error'); }
+}
+
+// 2026-11-23 — remove a whole list (a duplicate, or one replaced by a new quote).
+async function shopDeleteList(id) {
+  const list = (D.shopping_lists||[]).find(l => l.id === id);
+  if (!list) return;
+  const n = (list.items||[]).length;
+  if (!confirm(`Delete the list "${list.title||list.project||id}" (${n} item${n===1?'':'s'})? This cannot be undone.`)) return;
+  try {
+    const r = await fetch('/.netlify/functions/hub-write', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ table: 'shopping_lists', id, remove: true }) });
+    const out = await r.json().catch(() => ({}));
+    if (!r.ok || !out.ok) throw new Error(out.error || ('hub-write error ' + r.status));
+    D.shopping_lists = (D.shopping_lists||[]).filter(l => l.id !== id);
+    renderShopping();
+    claudeToast('List deleted', 'success');
+  } catch (e) { claudeToast('Could not delete: ' + e.message, 'error'); }
 }
 
 async function shopNewList() {

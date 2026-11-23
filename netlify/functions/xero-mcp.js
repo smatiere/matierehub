@@ -183,7 +183,6 @@ async function upsertJobBaseline({ job_name, scope, price, labour_hours, materia
 // a schema change (items is JSONB — extra keys just ride along).
 async function createShoppingList({ job_name, client_name, materials }) {
   if (!materials || !materials.length) return null;
-  const id = await nextId('shopping_lists', 'SL');
   const items = materials.map(m => {
     const item = { name: m.name || m.description || String(m), qty: m.qty || '', checked: false };
     if (m.special)         item.special = true;
@@ -195,6 +194,17 @@ async function createShoppingList({ job_name, client_name, materials }) {
     if (m.order_url)       item.order_url = m.order_url;
     return item;
   });
+  // 2026-11-23 — a re-quote of the same job used to leave two lists. If this job
+  // already has an open list with nothing ticked off yet, replace its items.
+  if (job_name) {
+    const open = await sbGet('shopping_lists', `?project=ilike.${encodeURIComponent(job_name)}&status=eq.open&select=id,items`).catch(() => []);
+    const untouched = (open || []).find(l => !(l.items || []).some(i => i && (i.checked || i.ordered)));
+    if (untouched) {
+      const upd = await sbPatch('shopping_lists', `?id=eq.${encodeURIComponent(untouched.id)}`, { items, updated_at: new Date().toISOString() });
+      return { ...(upd[0] || { id: untouched.id }), replaced_existing: true };
+    }
+  }
+  const id = await nextId('shopping_lists', 'SL');
   const rows = await sbPost('shopping_lists', {
     id, project: job_name || '', title: client_name ? `${client_name} — materials` : 'Materials', items, status: 'open'
   });
@@ -311,6 +321,59 @@ async function toolCreateContact({ name, first_name, last_name, email, phone, ad
   const res = await xeroCall('Contacts', 'POST', accessToken, tenantId, payload);
   const c = res.Contacts[0];
   return { ContactID: c.ContactID, Name: c.Name, FirstName: c.FirstName || '', LastName: c.LastName || '' };
+}
+
+// 2026-11-23 — edit an existing Xero contact (the connector could only create).
+// Only the fields passed are changed; Xero keeps everything else.
+async function toolUpdateContact({ contact_id, contact_name, name, first_name, last_name, email, phone, address_line1, city, postal_code }) {
+  const accessToken = await getAccessToken();
+  const tenantId = await getTenantId(accessToken);
+  let id = contact_id;
+  if (!id && contact_name) {
+    const found = await toolFindContact({ query: contact_name });
+    const exact = found.matches.filter(m => (m.Name || '').toLowerCase() === String(contact_name).toLowerCase());
+    if (exact.length === 1) id = exact[0].ContactID;
+    else if (found.matches.length === 1) id = found.matches[0].ContactID;
+    else if (!found.matches.length) throw new Error(`No Xero contact matched "${contact_name}".`);
+    else throw new Error(`Several contacts match "${contact_name}": ${found.matches.map(m => m.Name).join(', ')}. Pass contact_id.`);
+  }
+  if (!id) throw new Error('Provide contact_id or contact_name.');
+  const c = { ContactID: id };
+  if (name != null && String(name).trim()) c.Name = String(name).trim();
+  if (first_name != null) c.FirstName = String(first_name).trim();
+  if (last_name != null) c.LastName = String(last_name).trim();
+  if (email != null) c.EmailAddress = String(email).trim();
+  if (phone != null) c.Phones = [{ PhoneType: 'MOBILE', PhoneNumber: String(phone).trim() }];
+  if (address_line1 != null || city != null || postal_code != null) c.Addresses = [{ AddressType: 'STREET', AddressLine1: address_line1 || '', City: city || '', PostalCode: postal_code || '' }];
+  if (Object.keys(c).length === 1) throw new Error('Nothing to change: pass at least one field.');
+  const res = await xeroCall(`Contacts/${id}`, 'POST', accessToken, tenantId, { Contacts: [c] });
+  const u = res.Contacts[0];
+  return { ContactID: u.ContactID, Name: u.Name, FirstName: u.FirstName || '', LastName: u.LastName || '', EmailAddress: u.EmailAddress || '' };
+}
+
+// 2026-11-23 — delete a DRAFT quote (e.g. one replaced by a corrected quote).
+// Sent, accepted or invoiced quotes are refused: the client has seen those.
+async function toolDeleteDraftQuote({ quote_number }) {
+  const qn = String(quote_number || '').trim().toUpperCase();
+  if (!/^QU-\d+$/.test(qn)) throw new Error('quote_number is required, e.g. QU-0310.');
+  const accessToken = await getAccessToken();
+  const tenantId = await getTenantId(accessToken);
+  const found = await xeroCall(`Quotes?QuoteNumber=${encodeURIComponent(qn)}`, 'GET', accessToken, tenantId);
+  const q = (found.Quotes || []).find(x => (x.QuoteNumber || '').toUpperCase() === qn);
+  if (!q) throw new Error(`Quote ${qn} not found in Xero.`);
+  if (q.Status === 'DELETED') return { quote_number: qn, deleted: false, note: 'Already deleted.' };
+  if (q.Status !== 'DRAFT') throw new Error(`Quote ${qn} is ${q.Status}. Only DRAFT quotes can be deleted here.`);
+  const r = await xeroCall('Quotes', 'POST', accessToken, tenantId, { Quotes: [{
+    QuoteID: q.QuoteID, QuoteNumber: q.QuoteNumber, Contact: { ContactID: q.Contact.ContactID },
+    Date: String(q.DateString || '').slice(0, 10) || undefined, Status: 'DELETED'
+  }] });
+  const d = (r.Quotes || [])[0] || {};
+  // tidy the Hub's copy of its lines so it stops showing as a draft there
+  await fetch(`${SUPABASE_URL}/rest/v1/quote_items?quote_number=eq.${encodeURIComponent(qn)}`, {
+    method: 'PATCH', headers: { 'apikey': SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: 'DELETED' })
+  }).catch(() => {});
+  return { quote_number: qn, deleted: d.Status === 'DELETED', status: d.Status, contact: q.Contact.Name, total: q.Total };
 }
 
 // 2026-11-05 — the client's address/phone/email as saved on the Xero contact card,
@@ -548,6 +611,21 @@ const TOOLS = [
     }, required: ['name'] }
   },
   {
+    name: 'update_contact',
+    description: 'Edit an existing Xero contact: fix the name, first/last name (Primary person), email, phone or address. Only the fields you pass are changed.',
+    inputSchema: { type: 'object', properties: {
+      contact_id: { type: 'string', description: 'Xero ContactID (preferred)' }, contact_name: { type: 'string', description: 'Current contact name, if the id is not known' },
+      name: { type: 'string', description: 'New display name (leave out to keep it)' },
+      first_name: { type: 'string' }, last_name: { type: 'string' }, email: { type: 'string' }, phone: { type: 'string' },
+      address_line1: { type: 'string' }, city: { type: 'string' }, postal_code: { type: 'string' }
+    } }
+  },
+  {
+    name: 'delete_draft_quote',
+    description: 'Delete a DRAFT Xero quote, e.g. an old draft replaced by a corrected quote. Refuses anything already sent, accepted or invoiced. Only call when Seb has said to delete that quote.',
+    inputSchema: { type: 'object', properties: { quote_number: { type: 'string', description: 'e.g. QU-0310' } }, required: ['quote_number'] }
+  },
+  {
     name: 'create_quote',
     description: 'Create a DRAFT Xero quote for a client (Seb reviews and sends from within Xero). Price materials from search_prices (the price library) first, and save any new web prices with save_price. Also, when job_name/materials/labour_hours are given, creates a shopping list of materials and a job baseline record (status "quoted") to compare against actuals later — this is Matiere\'s standard approve-a-quote workflow.',
     inputSchema: { type: 'object', properties: {
@@ -597,6 +675,8 @@ async function callTool(name, args) {
     case 'save_price':      return toolSavePrice(args || {});
     case 'find_contact':    return toolFindContact(args || {});
     case 'mark_quote_invoiced': return toolMarkQuoteInvoiced(args || {});
+    case 'update_contact':  return toolUpdateContact(args || {});
+    case 'delete_draft_quote': return toolDeleteDraftQuote(args || {});
     case 'create_contact':  return toolCreateContact(args || {});
     case 'create_quote':    return toolCreateQuote(args || {});
     case 'create_invoice':  return toolCreateInvoice(args || {});
