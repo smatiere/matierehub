@@ -403,7 +403,7 @@ async function toolCreateQuote(args) {
 }
 
 async function toolCreateInvoice(args) {
-  const { contact_id, contact_name, line_items, due_days = 14 } = args;
+  const { contact_id, contact_name, line_items, due_days = 14, quote_number } = args;
   if (!line_items || !line_items.length) throw new Error('line_items is required (at least one {description, quantity, unit_amount})');
 
   const accessToken = await getAccessToken();
@@ -417,11 +417,37 @@ async function toolCreateInvoice(args) {
   }
   if (!contactRef) throw new Error('Provide contact_id or contact_name.');
 
+  // 2026-11-23 — show the quote number on the invoice, the way Xero does when a
+  // quote is converted to an invoice (it goes in the invoice's Reference field).
+  // Given: use it. Not given: if this client has exactly one accepted/sent quote,
+  // use that one; if several, list them in the result and leave Reference blank.
+  let quoteRef = '';
+  let quoteNote = '';
+  let quoteCandidates = [];
+  const qn = String(quote_number || '').trim();
+  if (qn) {
+    const m = qn.match(/(\d+)\s*$/);
+    quoteRef = /^qu-/i.test(qn) ? qn.toUpperCase() : (m ? 'QU-' + m[1].padStart(4, '0') : qn);
+  } else {
+    try {
+      const qr = await xeroCall(`Quotes?ContactID=${contactRef}`, 'GET', accessToken, tenantId);
+      quoteCandidates = (qr.Quotes || []).filter(q => ['ACCEPTED', 'SENT'].includes(q.Status))
+        .map(q => ({ QuoteNumber: q.QuoteNumber, Status: q.Status, Title: q.Title || '', Total: q.Total, Date: q.DateString ? q.DateString.slice(0, 10) : '' }));
+      if (quoteCandidates.length === 1) {
+        quoteRef = quoteCandidates[0].QuoteNumber;
+        quoteNote = `Quote ${quoteRef} was put on the invoice automatically (this client's only open quote). Tell Seb.`;
+      } else if (quoteCandidates.length > 1) {
+        quoteNote = 'This client has several open quotes, so no quote number was put on the invoice. Ask Seb which one it is for.';
+      }
+    } catch (e) { /* the invoice is still created without a quote number */ }
+  }
+
   const today = new Date();
   const due = new Date(today.getTime() + due_days * 86400000);
   const fmtDate = d => d.toISOString().slice(0, 10);
 
   const payload = { Invoices: [{
+    Reference: quoteRef || undefined,
     Type: 'ACCREC',
     Contact: { ContactID: contactRef },
     Date: fmtDate(today),
@@ -434,7 +460,10 @@ async function toolCreateInvoice(args) {
   }] };
   const res = await xeroCall('Invoices', 'POST', accessToken, tenantId, payload);
   const inv = res.Invoices[0];
-  return { InvoiceNumber: inv.InvoiceNumber, InvoiceID: inv.InvoiceID, Status: inv.Status, SubTotal: inv.SubTotal, Total: inv.Total };
+  const out = { InvoiceNumber: inv.InvoiceNumber, InvoiceID: inv.InvoiceID, Status: inv.Status, SubTotal: inv.SubTotal, Total: inv.Total, QuoteNumber: inv.Reference || '' };
+  if (quoteNote) out.note = quoteNote;
+  if (!quoteRef && quoteCandidates.length > 1) out.open_quotes = quoteCandidates;
+  return out;
 }
 
 // ── MCP tool catalogue ─────────────────────────────────────────────────────
@@ -502,13 +531,14 @@ const TOOLS = [
   },
   {
     name: 'create_invoice',
-    description: 'Create a DRAFT Xero invoice (ACCREC) for a client (Seb reviews and sends from within Xero).',
+    description: 'Create a DRAFT Xero invoice (ACCREC) for a client (Seb reviews and sends from within Xero). When the invoice follows a quote, ALWAYS pass quote_number (e.g. QU-0312) so the quote number prints on the invoice as its reference, exactly as when a quote is converted to an invoice inside Xero.',
     inputSchema: { type: 'object', properties: {
       contact_id: { type: 'string' }, contact_name: { type: 'string' },
       line_items: { type: 'array', items: { type: 'object', properties: {
         description: { type: 'string' }, quantity: { type: 'number' }, unit_amount: { type: 'number' }
       }, required: ['description', 'unit_amount'] } },
-      due_days: { type: 'number', description: 'Days until due, default 14' }
+      due_days: { type: 'number', description: 'Days until due, default 14' },
+      quote_number: { type: 'string', description: 'The Xero quote this invoice is for, e.g. QU-0312. Shown on the invoice as its reference. If left out and the client has exactly one accepted/sent quote, that one is used.' }
     }, required: ['line_items'] }
   }
 ];

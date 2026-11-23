@@ -2,6 +2,10 @@
 
 **Purpose:** accumulate many edits locally, deploy ONCE. Editing files is free; only a push to `main` triggers a Netlify build (= credits). See CLAUDE.md → "Deploying changes" for the full workflow.
 
+## Fix — 2026-11-23 (Xero connector: quote number on invoices)
+
+`create_invoice` in `xero-mcp.js` takes `quote_number` and puts it in the invoice's Reference (same place Xero uses when a quote is converted). If it is left out and the client has exactly one ACCEPTED/SENT quote, that one is used and the result says so; with several, the result lists them and the reference stays blank. The quote's own status in Xero is not changed.
+
 ## Fix — 2026-11-23 (Xero connector: first and last name on new contacts)
 
 `create_contact` in `xero-mcp.js` now fills Xero's Primary person First name / Last name. It takes `first_name` / `last_name` when given; otherwise it works them out from the name ("Stephen Wright - Mosman" → Stephen / Wright; business-looking names are left blank). Existing contacts are not changed.
