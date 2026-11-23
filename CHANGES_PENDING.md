@@ -2,6 +2,10 @@
 
 **Purpose:** accumulate many edits locally, deploy ONCE. Editing files is free; only a push to `main` triggers a Netlify build (= credits). See CLAUDE.md → "Deploying changes" for the full workflow.
 
+## Fix — 2026-11-23 (Xero connector: first and last name on new contacts)
+
+`create_contact` in `xero-mcp.js` now fills Xero's Primary person First name / Last name. It takes `first_name` / `last_name` when given; otherwise it works them out from the name ("Stephen Wright - Mosman" → Stephen / Wright; business-looking names are left blank). Existing contacts are not changed.
+
 ## Feature — 2026-11-17 (quote follow-ups)
 
 "Quotes to follow up" section at the top of the Quotes page. Each SENT quote gets a nudge date = quote date + 2 weeks (15 Dec–31 Jan moves to the first Monday of Feb). Per client: nudge draft text (copy / open in Messages, never auto-sent), "I've sent it" (+2 weeks), snooze to any date with a note, Won / Lost / Stop (ends follow-up; Won/Lost also sets a Quoted project). Quotes whose project is already Won/Active/etc. drop out. Sent quotes older than 120 days sit in a folded "Older" list. New private table `quote_followups` (id = quote number; SQL run live: `supabase_quote_followups.sql`), read via hub-read, written via hub-write. Dan - St Ives QU-0307/8/9 pre-set to 1 Feb 2027.

@@ -274,7 +274,19 @@ async function toolFindContact({ query }) {
   return { matches };
 }
 
-async function toolCreateContact({ name, email, phone, address_line1, city, postal_code }) {
+// 2026-11-23 — Xero's "Primary person" First name / Last name were left blank on
+// every contact made here. Use what the caller passes; otherwise work them out
+// from the name ("Stephen Wright - Mosman" → Stephen / Wright). Business-looking
+// names are left alone.
+function splitPersonName(name) {
+  const person = String(name || '').split(/\s+[-–—]\s+/)[0].trim();
+  if (!person || /\d|&|\b(pty|ltd|limited|inc|co|company|group|services|constructions?|building|builders|plumbing|electrical|strata|real estate|property|properties|design|studio|trust|council|school|club)\b/i.test(person)) return {};
+  const parts = person.split(/\s+/);
+  if (parts.length > 4) return {};
+  return { first: parts[0], last: parts.slice(1).join(' ') };
+}
+
+async function toolCreateContact({ name, first_name, last_name, email, phone, address_line1, city, postal_code }) {
   // Guard: a blank/whitespace Name silently produces a Xero contact with no
   // client details on quotes/invoices (see BUGS.md 2026-09-18 — QU-0285).
   // Fail loudly instead so the caller fixes the call rather than shipping a
@@ -283,17 +295,22 @@ async function toolCreateContact({ name, email, phone, address_line1, city, post
   if (!cleanName) {
     throw new Error('name is required and cannot be blank. Use the same "FirstName - Suburb" identifier as the quote title, e.g. "Vladimir - Manly Vale" — not just the first name.');
   }
+  const guess = splitPersonName(cleanName);
+  const first = (first_name || '').trim() || ((last_name || '').trim() ? '' : guess.first) || '';
+  const last = (last_name || '').trim() || ((first_name || '').trim() ? '' : guess.last) || '';
   const accessToken = await getAccessToken();
   const tenantId = await getTenantId(accessToken);
   const payload = { Contacts: [{
     Name: cleanName,
+    FirstName: first || undefined,
+    LastName: last || undefined,
     EmailAddress: email || undefined,
     Phones: phone ? [{ PhoneType: 'MOBILE', PhoneNumber: phone }] : undefined,
     Addresses: (address_line1 || city) ? [{ AddressType: 'STREET', AddressLine1: address_line1 || '', City: city || '', PostalCode: postal_code || '' }] : undefined
   }] };
   const res = await xeroCall('Contacts', 'POST', accessToken, tenantId, payload);
   const c = res.Contacts[0];
-  return { ContactID: c.ContactID, Name: c.Name };
+  return { ContactID: c.ContactID, Name: c.Name, FirstName: c.FirstName || '', LastName: c.LastName || '' };
 }
 
 // 2026-11-05 — the client's address/phone/email as saved on the Xero contact card,
@@ -451,9 +468,10 @@ const TOOLS = [
   },
   {
     name: 'create_contact',
-    description: 'Create a new client contact in Xero (for a lead not yet in Xero). IMPORTANT: name must be the full client identifier in the same "FirstName - Suburb" pattern you will use as the create_quote title (e.g. "Vladimir - Manly Vale"), not just the first name — this is what shows as the client on the quote/invoice PDF. Also pass address_line1/city/postal_code when known, so the address prints too. Returns the new ContactID to use with create_quote/create_invoice.',
+    description: 'Create a new client contact in Xero (for a lead not yet in Xero). IMPORTANT: name must be the full client identifier in the same "FirstName - Suburb" pattern you will use as the create_quote title (e.g. "Vladimir - Manly Vale"), not just the first name — this is what shows as the client on the quote/invoice PDF. ALWAYS pass first_name and last_name too (the person\'s own first and last name, e.g. "Vladimir" / "Petrov") — they fill the Xero Primary person fields; if the last name is unknown pass first_name only. Also pass address_line1/city/postal_code when known, so the address prints too. Returns the new ContactID to use with create_quote/create_invoice.',
     inputSchema: { type: 'object', properties: {
-      name: { type: 'string' }, email: { type: 'string' }, phone: { type: 'string' },
+      name: { type: 'string' }, first_name: { type: 'string', description: "Person's first name (Xero Primary person)" }, last_name: { type: 'string', description: "Person's last name (Xero Primary person)" },
+      email: { type: 'string' }, phone: { type: 'string' },
       address_line1: { type: 'string' }, city: { type: 'string' }, postal_code: { type: 'string' }
     }, required: ['name'] }
   },
