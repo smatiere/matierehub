@@ -6,58 +6,96 @@ on:
     - cron: "52 21 * * *"
   workflow_dispatch:
 
+# Daily and weekly syncs share one queue so they never hit Xero at the same second
+# (on Saturdays both are started together and the weekly one timed out).
+concurrency:
+  group: xero-sync
+  cancel-in-progress: false
+
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
       - name: Sync invoice_items from Xero
         run: |
-          response=$(curl -s -w "\n%{http_code}" -X POST "https://matierehub2.netlify.app/.netlify/functions/xero-sync?scope=invoice_items" -H "Authorization: Bearer ${{ secrets.SYNC_SECRET }}" -H "Content-Type: application/json")
-          http_code=$(echo "$response" | tail -1)
-          body=$(echo "$response" | head -n -1)
-          echo "HTTP status: $http_code"
-          echo "Response: $body"
-          if [ "$http_code" != "200" ]; then
-            echo "invoice_items sync failed with HTTP $http_code"
-            exit 1
-          fi
-          echo "invoice_items sync completed"
+          # Xero and Netlify have short hiccups (500, 504): try up to 3 times before failing.
+          for attempt in 1 2 3; do
+            response=$(curl -s -w "\n%{http_code}" -X POST "https://matierehub2.netlify.app/.netlify/functions/xero-sync?scope=invoice_items" -H "Authorization: Bearer ${{ secrets.SYNC_SECRET }}" -H "Content-Type: application/json")
+            http_code=$(echo "$response" | tail -1)
+            body=$(echo "$response" | head -n -1)
+            echo "Attempt $attempt, HTTP status: $http_code"
+            echo "Response: $body"
+            if [ "$http_code" = "200" ]; then
+              echo "invoice_items sync completed"
+              exit 0
+            fi
+            if [ "$attempt" != "3" ]; then
+              echo "invoice_items sync failed with HTTP $http_code, waiting 60 seconds before trying again"
+              sleep 60
+            fi
+          done
+          echo "invoice_items sync failed 3 times, last HTTP $http_code"
+          exit 1
 
       - name: Sync quote_items from Xero
         run: |
-          response=$(curl -s -w "\n%{http_code}" -X POST "https://matierehub2.netlify.app/.netlify/functions/xero-sync?scope=quote_items" -H "Authorization: Bearer ${{ secrets.SYNC_SECRET }}" -H "Content-Type: application/json")
-          http_code=$(echo "$response" | tail -1)
-          body=$(echo "$response" | head -n -1)
-          echo "HTTP status: $http_code"
-          echo "Response: $body"
-          if [ "$http_code" != "200" ]; then
-            echo "quote_items sync failed with HTTP $http_code"
-            exit 1
-          fi
-          echo "quote_items sync completed"
+          # Xero and Netlify have short hiccups (500, 504): try up to 3 times before failing.
+          for attempt in 1 2 3; do
+            response=$(curl -s -w "\n%{http_code}" -X POST "https://matierehub2.netlify.app/.netlify/functions/xero-sync?scope=quote_items" -H "Authorization: Bearer ${{ secrets.SYNC_SECRET }}" -H "Content-Type: application/json")
+            http_code=$(echo "$response" | tail -1)
+            body=$(echo "$response" | head -n -1)
+            echo "Attempt $attempt, HTTP status: $http_code"
+            echo "Response: $body"
+            if [ "$http_code" = "200" ]; then
+              echo "quote_items sync completed"
+              exit 0
+            fi
+            if [ "$attempt" != "3" ]; then
+              echo "quote_items sync failed with HTTP $http_code, waiting 60 seconds before trying again"
+              sleep 60
+            fi
+          done
+          echo "quote_items sync failed 3 times, last HTTP $http_code"
+          exit 1
 
       - name: Sync contacts from Xero
         run: |
-          response=$(curl -s -w "\n%{http_code}" -X POST "https://matierehub2.netlify.app/.netlify/functions/xero-sync?scope=contacts" -H "Authorization: Bearer ${{ secrets.SYNC_SECRET }}" -H "Content-Type: application/json")
-          http_code=$(echo "$response" | tail -1)
-          body=$(echo "$response" | head -n -1)
-          echo "HTTP status: $http_code"
-          echo "Response: $body"
-          if [ "$http_code" != "200" ]; then
-            echo "contacts sync failed with HTTP $http_code"
-            exit 1
-          fi
-          echo "contacts sync completed"
+          # Xero and Netlify have short hiccups (500, 504): try up to 3 times before failing.
+          for attempt in 1 2 3; do
+            response=$(curl -s -w "\n%{http_code}" -X POST "https://matierehub2.netlify.app/.netlify/functions/xero-sync?scope=contacts" -H "Authorization: Bearer ${{ secrets.SYNC_SECRET }}" -H "Content-Type: application/json")
+            http_code=$(echo "$response" | tail -1)
+            body=$(echo "$response" | head -n -1)
+            echo "Attempt $attempt, HTTP status: $http_code"
+            echo "Response: $body"
+            if [ "$http_code" = "200" ]; then
+              echo "contacts sync completed"
+              exit 0
+            fi
+            if [ "$attempt" != "3" ]; then
+              echo "contacts sync failed with HTTP $http_code, waiting 60 seconds before trying again"
+              sleep 60
+            fi
+          done
+          echo "contacts sync failed 3 times, last HTTP $http_code"
+          exit 1
 
       - name: Sync bank_transactions from Xero
         run: |
-          response=$(curl -s -w "\n%{http_code}" -X POST "https://matierehub2.netlify.app/.netlify/functions/xero-sync?scope=bank_transactions&days=100" -H "Authorization: Bearer ${{ secrets.SYNC_SECRET }}" -H "Content-Type: application/json")
-          http_code=$(echo "$response" | tail -1)
-          body=$(echo "$response" | head -n -1)
-          echo "HTTP status: $http_code"
-          echo "Response: $body"
-          if [ "$http_code" != "200" ]; then
-            echo "bank_transactions sync failed with HTTP $http_code"
-            exit 1
-          fi
-          echo "bank_transactions sync completed"
+          # Xero and Netlify have short hiccups (500, 504): try up to 3 times before failing.
+          for attempt in 1 2 3; do
+            response=$(curl -s -w "\n%{http_code}" -X POST "https://matierehub2.netlify.app/.netlify/functions/xero-sync?scope=bank_transactions&days=100" -H "Authorization: Bearer ${{ secrets.SYNC_SECRET }}" -H "Content-Type: application/json")
+            http_code=$(echo "$response" | tail -1)
+            body=$(echo "$response" | head -n -1)
+            echo "Attempt $attempt, HTTP status: $http_code"
+            echo "Response: $body"
+            if [ "$http_code" = "200" ]; then
+              echo "bank_transactions sync completed"
+              exit 0
+            fi
+            if [ "$attempt" != "3" ]; then
+              echo "bank_transactions sync failed with HTTP $http_code, waiting 60 seconds before trying again"
+              sleep 60
+            fi
+          done
+          echo "bank_transactions sync failed 3 times, last HTTP $http_code"
+          exit 1
