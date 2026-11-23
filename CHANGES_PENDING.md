@@ -2,6 +2,11 @@
 
 **Purpose:** accumulate many edits locally, deploy ONCE. Editing files is free; only a push to `main` triggers a Netlify build (= credits). See CLAUDE.md → "Deploying changes" for the full workflow.
 
+## Fix — 2026-11-24 (Xero sync failure emails)
+- [x] Cause: short hiccups, each run failed on the first one. Seen: Netlify 504 timeout (21 Nov, daily and weekly started in the same second), Xero 500 on BankTransactions (15 Nov), Xero token endpoint returned an HTML page (19 Nov). Other runs the same day passed, so no data was missing.
+- [x] `.github/workflows/xero-sync.yml` and `xero-weekly-sync.yml`: each step tries up to 3 times, 60 s apart; both share the `xero-sync` concurrency group so they queue instead of overlapping.
+- [x] Tested 24 Nov: both started by hand on commit c1248c6, both passed.
+
 ## Fix — 2026-11-23 (connector gaps: edit contact, delete draft quote, duplicate shopping lists)
 
 - `update_contact` (xero-mcp): edit an existing Xero contact (name, first/last name, email, phone, address); only passed fields change.
