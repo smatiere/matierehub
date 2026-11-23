@@ -402,6 +402,45 @@ async function toolCreateQuote(args) {
   };
 }
 
+// 2026-11-23 — mark a quote "Invoiced" in Xero, as Xero does itself when a quote
+// is converted to an invoice. Xero only allows Sent → Accepted → Invoiced, so it
+// steps through. Draft quotes are left alone (never sent to the client). The
+// quote's lines are sent back unchanged and the total is checked afterwards.
+async function markQuoteInvoiced(accessToken, tenantId, quoteNumber) {
+  const qn = String(quoteNumber || '').trim().toUpperCase();
+  if (!/^QU-\d+$/.test(qn)) return { quote_number: qn, changed: false, note: 'Not a quote number.' };
+  const found = await xeroCall(`Quotes?QuoteNumber=${encodeURIComponent(qn)}`, 'GET', accessToken, tenantId);
+  const q = (found.Quotes || []).find(x => (x.QuoteNumber || '').toUpperCase() === qn);
+  if (!q) return { quote_number: qn, changed: false, note: 'Quote not found in Xero.' };
+  const was = q.Status;
+  if (was === 'INVOICED') return { quote_number: qn, changed: false, status: was, note: 'Already marked Invoiced.' };
+  const steps = was === 'SENT' ? ['ACCEPTED', 'INVOICED'] : was === 'ACCEPTED' ? ['INVOICED'] : null;
+  if (!steps) return { quote_number: qn, changed: false, status: was, note: `Quote is ${was}; only Sent or Accepted quotes are marked Invoiced.` };
+  const base = {
+    QuoteID: q.QuoteID, QuoteNumber: q.QuoteNumber, Contact: { ContactID: q.Contact.ContactID },
+    Date: String(q.DateString || '').slice(0, 10) || undefined,
+    ExpiryDate: q.ExpiryDateString ? String(q.ExpiryDateString).slice(0, 10) : undefined,
+    LineAmountTypes: q.LineAmountTypes, Title: q.Title, Summary: q.Summary, Terms: q.Terms, Reference: q.Reference,
+    LineItems: (q.LineItems || []).map(li => ({
+      LineItemID: li.LineItemID, Description: li.Description, Quantity: li.Quantity, UnitAmount: li.UnitAmount,
+      ItemCode: li.ItemCode, AccountCode: li.AccountCode, TaxType: li.TaxType, DiscountRate: li.DiscountRate, Tracking: li.Tracking
+    }))
+  };
+  let now = q;
+  for (const st of steps) {
+    const r = await xeroCall('Quotes', 'POST', accessToken, tenantId, { Quotes: [{ ...base, Status: st }] });
+    now = (r.Quotes || [])[0] || now;
+  }
+  return { quote_number: qn, changed: true, was, status: now.Status, total_before: q.Total, total_after: now.Total,
+    lines_before: (q.LineItems || []).length, lines_after: (now.LineItems || []).length };
+}
+
+async function toolMarkQuoteInvoiced({ quote_number }) {
+  const accessToken = await getAccessToken();
+  const tenantId = await getTenantId(accessToken);
+  return markQuoteInvoiced(accessToken, tenantId, quote_number);
+}
+
 async function toolCreateInvoice(args) {
   const { contact_id, contact_name, line_items, due_days = 14, quote_number } = args;
   if (!line_items || !line_items.length) throw new Error('line_items is required (at least one {description, quantity, unit_amount})');
@@ -461,6 +500,10 @@ async function toolCreateInvoice(args) {
   const res = await xeroCall('Invoices', 'POST', accessToken, tenantId, payload);
   const inv = res.Invoices[0];
   const out = { InvoiceNumber: inv.InvoiceNumber, InvoiceID: inv.InvoiceID, Status: inv.Status, SubTotal: inv.SubTotal, Total: inv.Total, QuoteNumber: inv.Reference || '' };
+  if (quoteRef) {
+    try { out.quote = await markQuoteInvoiced(accessToken, tenantId, quoteRef); }
+    catch (e) { out.quote = { quote_number: quoteRef, changed: false, note: 'Could not mark the quote Invoiced: ' + String(e.message || e).slice(0, 200) }; }
+  }
   if (quoteNote) out.note = quoteNote;
   if (!quoteRef && quoteCandidates.length > 1) out.open_quotes = quoteCandidates;
   return out;
@@ -530,8 +573,13 @@ const TOOLS = [
     }, required: ['line_items'] }
   },
   {
+    name: 'mark_quote_invoiced',
+    description: 'Mark a Xero quote as Invoiced (housekeeping, for a quote whose invoice already exists). create_invoice does this by itself when it is given a quote_number, so this is only for older quotes. Sent or Accepted quotes only; the quote itself is not otherwise changed.',
+    inputSchema: { type: 'object', properties: { quote_number: { type: 'string', description: 'e.g. QU-0312' } }, required: ['quote_number'] }
+  },
+  {
     name: 'create_invoice',
-    description: 'Create a DRAFT Xero invoice (ACCREC) for a client (Seb reviews and sends from within Xero). When the invoice follows a quote, ALWAYS pass quote_number (e.g. QU-0312) so the quote number prints on the invoice as its reference, exactly as when a quote is converted to an invoice inside Xero.',
+    description: 'Create a DRAFT Xero invoice (ACCREC) for a client (Seb reviews and sends from within Xero). When the invoice follows a quote, ALWAYS pass quote_number (e.g. QU-0312) so the quote number prints on the invoice as its reference and the quote is marked Invoiced, exactly as when a quote is converted to an invoice inside Xero.',
     inputSchema: { type: 'object', properties: {
       contact_id: { type: 'string' }, contact_name: { type: 'string' },
       line_items: { type: 'array', items: { type: 'object', properties: {
@@ -548,6 +596,7 @@ async function callTool(name, args) {
     case 'search_prices':   return toolSearchPrices(args || {});
     case 'save_price':      return toolSavePrice(args || {});
     case 'find_contact':    return toolFindContact(args || {});
+    case 'mark_quote_invoiced': return toolMarkQuoteInvoiced(args || {});
     case 'create_contact':  return toolCreateContact(args || {});
     case 'create_quote':    return toolCreateQuote(args || {});
     case 'create_invoice':  return toolCreateInvoice(args || {});
