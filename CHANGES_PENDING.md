@@ -2,6 +2,10 @@
 
 **Purpose:** accumulate many edits locally, deploy ONCE. Editing files is free; only a push to `main` triggers a Netlify build (= credits). See CLAUDE.md → "Deploying changes" for the full workflow.
 
+## Change — 2026-11-24 (job window: manual sale as a line, Sales tile, costs total)
+- [x] `index.html` job detail: a manual sale now shows as a MANUAL line in Linked Quotes & Invoices with a red ✕ (`projRemoveManualSale`, asks first), and counts in a new Sales tile (invoice lines picked + manual, with what is left after labour and expenses).
+- [x] Remaining tile also shows "Costs $X of $Y". Field renamed "Manual sale (not in Xero)". Manual sales are for job review only; nothing is sent to Xero.
+
 ## Fix — 2026-11-24 (Xero sync failure emails)
 - [x] Cause: short hiccups, each run failed on the first one. Seen: Netlify 504 timeout (21 Nov, daily and weekly started in the same second), Xero 500 on BankTransactions (15 Nov), Xero token endpoint returned an HTML page (19 Nov). Other runs the same day passed, so no data was missing.
 - [x] `.github/workflows/xero-sync.yml` and `xero-weekly-sync.yml`: each step tries up to 3 times, 60 s apart; both share the `xero-sync` concurrency group so they queue instead of overlapping.

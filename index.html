@@ -3055,12 +3055,23 @@ function projVsTile(label, actual, quoted, sub) {
 }
 // Remaining = estimate minus labour and expenses, with its share of the job.
 function projMarginColor(pct) { return pct == null ? 'var(--ink-4)' : pct >= 30 ? 'var(--sage)' : pct >= 10 ? 'var(--amber)' : 'var(--pink)'; }
-function projRemainingTile(remaining, pct) {
+function projRemainingTile(remaining, pct, costs, value) {
   if (remaining == null) return kpi('Remaining', '—', 'Needs an estimate', '');
   const col = projMarginColor(pct);
+  const tot = costs != null && value != null ? `<div class="kpi-sub" style="color:${col}">Costs ${fmt(costs)} of ${fmt(value)}</div>` : '';
   return `<div class="kpi"><div class="kpi-label">Remaining</div>
     <div class="kpi-value" style="color:${col}">${remaining < 0 ? '−' : ''}${fmt(Math.abs(remaining))}</div>
-    <div class="kpi-sub" style="color:${col};font-weight:600">${pct != null ? pct.toFixed(0) + '% of the job' : ''}</div></div>`;
+    <div class="kpi-sub" style="color:${col};font-weight:600">${pct != null ? pct.toFixed(0) + '% of the job' : ''}</div>${tot}</div>`;
+}
+// Sales = invoice lines picked plus any manual sale, with what is left after costs.
+function projSalesTile(sales, manual, costs) {
+  if (!(sales > 0)) return '';
+  const left = sales - costs, pct = left / sales * 100, col = projMarginColor(pct);
+  const src = manual > 0 ? (manual >= sales ? 'Manual entry' : 'incl. ' + fmt(manual) + ' manual') : 'Invoice lines picked';
+  return `<div class="kpi"><div class="kpi-label">Sales</div>
+    <div class="kpi-value">${fmt(sales)}</div>
+    <div class="kpi-sub">${src}</div>
+    <div class="kpi-sub" style="color:${col};font-weight:600">${left < 0 ? '−' : ''}${fmt(Math.abs(left))} left (${pct.toFixed(0)}%)</div></div>`;
 }
 
 function kpiBar(label, value, sub, fillPct, style='') {
@@ -3584,20 +3595,23 @@ function showProjectDetail(name) {
   // (Linked Quotes / Linked Invoices, each its own table + search box) was too
   // busy. One combined list, one search box, and the "nothing linked yet" filler
   // copy is dropped entirely rather than shown as an empty state.
-  const linkBars = [
+  const linkBarItems = [
     ...linkedQ.map(qi => ({ kind:'Q', id:qi.id, num:qi.quote_number, contact:qi.contact, date:qi.date, amount:qi.line_amount })),
     ...linked.map(ii  => ({ kind:'INV', id:ii.id, num:ii.invoice_number, contact:ii.contact, date:ii.date, amount:ii.price_excl_gst })),
-  ].sort((a,b)=>(b.date||'').localeCompare(a.date||''))
+  ].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  // A manual sale sits in the same list, marked MANUAL: for job review only, never sent to Xero.
+  if (manRev > 0) linkBarItems.unshift({ kind:'MANUAL', num:'Manual sale', contact:manRevNote || 'not in Xero, job review only', amount:manRev });
+  const linkBars = linkBarItems
    .map(it => `
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 9px;background:var(--bg-2);border-radius:6px;margin-bottom:3px;font-size:12px">
       <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-        <span style="font-size:9px;font-weight:700;color:${it.kind==='Q'?'var(--amber)':'var(--blue)'};background:var(--bg-1);padding:1px 5px;border-radius:4px;margin-right:6px">${it.kind}</span>
+        <span style="font-size:9px;font-weight:700;color:${it.kind==='Q'?'var(--amber)':it.kind==='MANUAL'?'var(--pink)':'var(--blue)'};background:var(--bg-1);padding:1px 5px;border-radius:4px;margin-right:6px">${it.kind}</span>
         <strong style="color:var(--blue)">${attrEsc(it.num||'—')}</strong>
-        <span style="color:var(--ink-4)"> · ${attrEsc(it.contact||'')} · ${it.date?fmtDMYDash(it.date):'—'}</span>
+        <span style="color:var(--ink-4)"> · ${attrEsc(it.contact||'')}${it.kind==='MANUAL'?'':' · '+(it.date?fmtDMYDash(it.date):'—')}</span>
       </span>
       <span style="display:flex;align-items:center;gap:10px;white-space:nowrap">
         <strong class="amount" style="color:var(--blue)">${fmt(it.amount||0)}</strong>
-        <span onclick="${it.kind==='Q'?`projUnlinkQuoteItem('${safe}','${attrEsc(it.id)}')`:`projUnlinkItem('${safe}','${attrEsc(it.id)}')`}" style="cursor:pointer;color:var(--pink);font-size:11px">✕</span>
+        <span onclick="${it.kind==='MANUAL'?`projRemoveManualSale('${safe}')`:it.kind==='Q'?`projUnlinkQuoteItem('${safe}','${attrEsc(it.id)}')`:`projUnlinkItem('${safe}','${attrEsc(it.id)}')`}" style="cursor:pointer;color:var(--pink);font-size:11px">✕</span>
       </span>
     </div>`).join('');
 
@@ -3606,8 +3620,8 @@ function showProjectDetail(name) {
       <div class="divider" style="margin-top:0">Est. Value & Revenue</div>
       <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:14px;padding:12px;background:var(--bg-2);border-radius:10px">
         <div><div style="font-size:11px;color:var(--ink-4);margin-bottom:3px">Manual Est. Value${linkedQTotal>0?' <span style="color:var(--amber)">(not used — picked quote lines win)</span>':''}</div><input id="pd-quoted" type="number" step="0.01" value="${quoted!=null?quoted:''}" placeholder="0" style="${inpS};width:140px;text-align:right"></div>
-        <div><div style="font-size:11px;color:var(--ink-4);margin-bottom:3px">Manual revenue (cash)</div><input id="pd-manrev" type="number" step="0.01" value="${manRev||''}" placeholder="0" style="${inpS};width:140px;text-align:right"></div>
-        <div style="flex:1;min-width:160px"><div style="font-size:11px;color:var(--ink-4);margin-bottom:3px">Manual revenue note</div><input id="pd-manrev-note" value="${attrEsc(manRevNote)}" placeholder="e.g. cash job, no invoice" style="${inpS};width:100%"></div>
+        <div><div style="font-size:11px;color:var(--ink-4);margin-bottom:3px">Manual sale (not in Xero)</div><input id="pd-manrev" type="number" step="0.01" value="${manRev||''}" placeholder="0" style="${inpS};width:140px;text-align:right"></div>
+        <div style="flex:1;min-width:160px"><div style="font-size:11px;color:var(--ink-4);margin-bottom:3px">Manual sale note</div><input id="pd-manrev-note" value="${attrEsc(manRevNote)}" placeholder="e.g. cash job, no invoice" style="${inpS};width:100%"></div>
         <button onclick="projSaveRevenue('${safe}')" style="padding:8px 16px;background:var(--sage);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700">Save</button>
       </div>
 
@@ -3616,7 +3630,8 @@ function showProjectDetail(name) {
       ${linkBars}
       <div style="display:flex;flex-wrap:wrap;gap:16px;font-size:11px;color:var(--ink-4);margin:${linkBars?'6px':'0'} 0 12px">
         ${linkedQ.length ? `<span>Quotes: <strong style="color:var(--ink-2)">${fmt(linkedQTotal)}</strong> (${linkedQ.length}) → Est. Value</span>` : ''}
-        ${linked.length ? `<span>Invoices: <strong style="color:var(--ink-2)">${fmt(linkedTotal)}</strong> (${linked.length}) → Invoiced</span>` : ''}
+        ${linked.length ? `<span>Invoices: <strong style="color:var(--ink-2)">${fmt(linkedTotal)}</strong> (${linked.length}) → Sales</span>` : ''}
+        ${manRev > 0 ? `<span>Manual: <strong style="color:var(--ink-2)">${fmt(manRev)}</strong> → Sales (job review only, not in Xero)</span>` : ''}
       </div>
       <input id="pd-link-search" placeholder="Search quote #, invoice # or contact name…" oninput="projRenderCombinedCandidates('${safe}')" style="${inpS};width:100%">
       <div id="pd-link-results" style="margin-top:8px"></div>
@@ -3644,7 +3659,8 @@ function showProjectDetail(name) {
       ${kpi('Est. Value', estValue!=null?fmt(estValue):'TBD', linkedQ.length?linkedQ.length+' quote line'+(linkedQ.length>1?'s':'')+' picked':'','highlight')}
       ${projVsTile('Labour', laborValue, qLab, totalHours+'h @ $'+rate+'/hr')}
       ${projVsTile('Expenses', totalExpenses, qMat, 'Materials & costs')}
-      ${projRemainingTile(remaining, remPct)}
+      ${projSalesTile(billedVal, manRev, laborValue + totalExpenses)}
+      ${projRemainingTile(remaining, remPct, laborValue + totalExpenses, estValue)}
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:18px;font-size:11px;color:var(--ink-4);margin-bottom:20px;padding:10px 12px;background:var(--bg-2);border-radius:8px">
       <div><strong style="color:var(--ink-2)">Team:</strong> ${players.length?players.join(', '):'—'}</div>
@@ -3827,6 +3843,18 @@ async function projSaveTsNote(inp) {
     inp.style.outline = '2px solid var(--pink)';
     claudeToast('⚠ ' + (e.message || 'Could not save note'), 'error');
   }
+}
+
+async function projRemoveManualSale(name) {
+  const proj = (D.projects||[]).find(p => p.name === name);
+  if (!proj || !confirm('Remove the manual sale from this job?')) return;
+  try {
+    const row = await hubWrite('projects', proj.id, { manual_revenue: 0, manual_revenue_note: '' });
+    Object.assign(proj, row);
+    claudeToast('✓ Manual sale removed', 'success');
+    showProjectDetail(name);
+    renderProjects(D.kpis);
+  } catch (e) { claudeToast('⚠ ' + (e.message||'Remove failed'), 'error'); }
 }
 
 async function projSaveRevenue(name) {
