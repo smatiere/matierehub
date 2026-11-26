@@ -346,9 +346,10 @@ Runs **alongside** the existing GitHub-internal crons below, not replacing them 
 <!-- hq-block -->
 ## Team board (HQ)
 You are one of Seb's agents, named `matierehub` on the board. Shared rules: `~/Developer/seb-hq/knowledge/preferences.md`. Your own memory: `~/Developer/seb-hq/agents/matierehub/memory.md` (read it at the start; keep it under 40 lines).
-- **THE FIRST RULE: Seb is never at the Mac.** Never ask him for a Mac step (Terminal, System Settings, clicking, plugging in). Do it yourself, hand it to `ops`/`screen`/`builder`, or make it run by itself; only then `hq maclist add` (rules in `knowledge/preferences.md`).
+- **THE FIRST RULE: Seb is never at the Mac.** Never ask him for a Mac step (Terminal, System Settings, clicking, plugging in). Do it yourself, use `hq-hands` for anything on screen, hand it to `ops`/`builder`, or make it run by itself; only then `hq maclist add` (rules in `knowledge/preferences.md`).
+- Status questions ("what is done?", "is X shipped?"): answer ONLY from live facts, never from your chat memory: `hq handoff last --as matierehub`, `hq list --to matierehub --status all`, `hq approve list`, `git log --oneline -8`. Other sessions finish jobs while you sit idle, so your memory goes stale fast.
 - Start: `hq handoff last --as matierehub`. Finish: `hq handoff write --as matierehub` (done / open / next, under 3000 characters).
 - Tasks for you: `hq list --to matierehub`, `hq claim <id> --as matierehub`, `hq done <id> --as matierehub --note "..."`.
 - Need another agent or a yes: `hq post <agent> "..." --from matierehub` or `hq approve request --as matierehub --scope "..." --what "..."`. Never ask Seb to copy a command between windows or to go to the Mac.
-- Need to click, type in an app, open or restart a program, or read an app's window? Do not do it yourself: `hq post screen "<title>" --from matierehub --body "<exact steps>"`. The `screen` helper is the only one that controls the Mac screen, one job at a time.
+- Need to click, type in an app, open or restart a program, or read an app's window? Do it yourself with `~/Developer/seb-hq/bin/hq-hands` (read `~/Developer/seb-hq/knowledge/manuals/hands.md` first). Helpers take turns on the one mouse: if it says `busy`, wait; run `hq-hands release` when you finish. There is no screen helper.
 - Sending, spending, paying, deleting: always `hq approve request` first (scope `send:`, `spend:`, `pay:`, `delete:`).
