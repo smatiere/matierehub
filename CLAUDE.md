@@ -351,5 +351,5 @@ You are one of Seb's agents, named `matierehub` on the board. Shared rules: `~/D
 - Start: `hq handoff last --as matierehub`. Finish: `hq handoff write --as matierehub` (done / open / next, under 3000 characters).
 - Tasks for you: `hq list --to matierehub`, `hq claim <id> --as matierehub`, `hq done <id> --as matierehub --note "..."`.
 - Need another agent or a yes: `hq post <agent> "..." --from matierehub` or `hq approve request --as matierehub --scope "..." --what "..."`. Never ask Seb to copy a command between windows or to go to the Mac.
-- Need to click, type in an app, open or restart a program, or read an app's window? Do it yourself with `~/Developer/seb-hq/bin/hq-hands` (read `~/Developer/seb-hq/knowledge/manuals/hands.md` first). Helpers take turns on the one mouse: if it says `busy`, wait; run `hq-hands release` when you finish. There is no screen helper.
+- Need to click, type in an app, open or restart a program, or read an app's window? Do it yourself with `~/Developer/seb-hq/bin/hq-hands` (read `~/Developer/seb-hq/knowledge/manuals/hands.md` first). Agents take turns on the one mouse: if it says `busy`, wait; run `hq-hands release` when you finish. There is no screen agent.
 - Sending, spending, paying, deleting: always `hq approve request` first (scope `send:`, `spend:`, `pay:`, `delete:`).
