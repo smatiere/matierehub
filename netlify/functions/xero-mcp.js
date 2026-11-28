@@ -657,6 +657,236 @@ async function toolUpdateInvoice(args) {
   return out;
 }
 
+// 2026-11-28 — the rest of the scope: quote status, approve / email an invoice,
+// payments, credit notes, supplier bills (draft only), attachments.
+// Each one changes the books or reaches the client, so each is only for when Seb
+// asked for that exact thing; emailing also needs confirm_send true.
+async function getQuoteByNumber(accessToken, tenantId, quote_number) {
+  const qn = String(quote_number || '').trim().toUpperCase();
+  if (!/^QU-\d+$/.test(qn)) throw new Error('quote_number is required, e.g. QU-0310.');
+  const found = await xeroCall(`Quotes?QuoteNumber=${encodeURIComponent(qn)}`, 'GET', accessToken, tenantId);
+  const q = (found.Quotes || []).find(x => (x.QuoteNumber || '').toUpperCase() === qn);
+  if (!q) throw new Error(`Quote ${qn} not found in Xero.`);
+  return q;
+}
+async function getSalesInvoice(accessToken, tenantId, invoice_number) {
+  const num = String(invoice_number || '').trim().toUpperCase();
+  if (!/^INV-\d+$/.test(num)) throw new Error('invoice_number is required, e.g. INV-0345.');
+  const found = await xeroCall(`Invoices?InvoiceNumbers=${encodeURIComponent(num)}`, 'GET', accessToken, tenantId);
+  const inv = (found.Invoices || []).find(x => (x.InvoiceNumber || '').toUpperCase() === num && x.Type === 'ACCREC');
+  if (!inv) throw new Error(`Invoice ${num} not found in Xero (sales invoices only).`);
+  return inv;
+}
+// keep the Hub's copy of an invoice in step after a payment or credit (the daily sync does the same)
+async function hubInvoiceRefresh(accessToken, tenantId, num) {
+  try {
+    const inv = await getSalesInvoice(accessToken, tenantId, num);
+    const ratio = Number(inv.Total) > 0 ? Number(inv.AmountPaid || 0) / Number(inv.Total) : 0;
+    const rows = await sbGet('invoice_items', `?select=id,price_excl_gst&invoice_number=eq.${encodeURIComponent(num)}`);
+    for (const r of rows) await sbPatchQuiet('invoice_items', `id=eq.${encodeURIComponent(r.id)}`, { status: inv.Status, paid: round2c((Number(r.price_excl_gst) || 0) * ratio) });
+    return inv;
+  } catch (e) { return null; }
+}
+
+async function toolSetQuoteStatus({ quote_number, status }) {
+  const target = String(status || '').trim().toUpperCase();
+  if (!['SENT', 'ACCEPTED', 'DECLINED', 'DRAFT'].includes(target)) throw new Error('status must be SENT, ACCEPTED, DECLINED or DRAFT. (Invoiced: use mark_quote_invoiced. Deleted: use delete_quote.)');
+  const accessToken = await getAccessToken();
+  const tenantId = await getTenantId(accessToken);
+  const q = await getQuoteByNumber(accessToken, tenantId, quote_number);
+  const qn = q.QuoteNumber;
+  if (q.Status === target) return { quote_number: qn, changed: false, status: q.Status, note: `Already ${target}.` };
+  if (q.Status === 'INVOICED' || q.Status === 'DELETED') throw new Error(`Quote ${qn} is ${q.Status}; its status cannot be changed.`);
+  // Xero wants a draft to be Sent before it can be Accepted or Declined
+  const steps = (q.Status === 'DRAFT' && target !== 'SENT') ? ['SENT', target] : [target];
+  const base = quoteBody(q);
+  let now = q;
+  for (const st of steps) {
+    const r = await xeroCall('Quotes', 'POST', accessToken, tenantId, { Quotes: [{ ...base, Status: st }] });
+    now = (r.Quotes || [])[0] || now;
+  }
+  if (now.Status !== target) return { quote_number: qn, changed: false, was: q.Status, status: now.Status, note: 'Xero did not move it to the status asked.' };
+  await sbPatchQuiet('quote_items', `quote_number=eq.${encodeURIComponent(qn)}`, { status: target });
+  if (target === 'ACCEPTED') await sbPatchQuiet('quote_followups', `id=eq.${encodeURIComponent(qn)}&status=eq.open`, { status: 'won' });
+  if (target === 'DECLINED') await sbPatchQuiet('quote_followups', `id=eq.${encodeURIComponent(qn)}&status=eq.open`, { status: 'lost' });
+  const out = { quote_number: qn, changed: true, was: q.Status, status: now.Status, contact: q.Contact && q.Contact.Name, total_before: q.Total, total_after: now.Total };
+  if (target === 'SENT') out.note = 'Marked as Sent in Xero. Nothing was emailed: Xero does not let a connector email a quote, so Seb sends it from Xero.';
+  if (target === 'ACCEPTED') out.note = 'The Hub moves the linked job to Won and puts it on the Schedule the next time the Hub is opened.';
+  if (target === 'DECLINED') out.note = 'The Hub moves the linked job to Lost the next time the Hub is opened.';
+  return out;
+}
+
+async function toolApproveInvoice({ invoice_number }) {
+  const accessToken = await getAccessToken();
+  const tenantId = await getTenantId(accessToken);
+  const inv = await getSalesInvoice(accessToken, tenantId, invoice_number);
+  const num = inv.InvoiceNumber;
+  if (inv.Status === 'AUTHORISED' || inv.Status === 'PAID') return { invoice_number: num, changed: false, status: inv.Status, note: 'Already approved.' };
+  if (!['DRAFT', 'SUBMITTED'].includes(inv.Status)) throw new Error(`Invoice ${num} is ${inv.Status} and cannot be approved.`);
+  const r = await xeroCall(`Invoices/${inv.InvoiceID}`, 'POST', accessToken, tenantId, { Invoices: [{ InvoiceID: inv.InvoiceID, Status: 'AUTHORISED' }] });
+  const n = (r.Invoices || [])[0] || {};
+  if (n.Status !== 'AUTHORISED') return { invoice_number: num, changed: false, status: n.Status, note: 'Xero did not approve it.' };
+  await sbPatchQuiet('invoice_items', `invoice_number=eq.${encodeURIComponent(num)}`, { status: 'AUTHORISED' });
+  return { invoice_number: num, changed: true, was: inv.Status, status: 'AUTHORISED', contact: inv.Contact && inv.Contact.Name, total_inc_gst: n.Total, due_date: d10(n.DueDateString),
+    note: 'Approved: it now counts in the books as money owed. It has NOT been sent to the client.' };
+}
+
+async function toolEmailInvoice({ invoice_number, confirm_send }) {
+  if (confirm_send !== true) throw new Error('Not sent. This emails the client. Call again with confirm_send true only after Seb has said, in this chat, to send this invoice.');
+  const accessToken = await getAccessToken();
+  const tenantId = await getTenantId(accessToken);
+  const inv = await getSalesInvoice(accessToken, tenantId, invoice_number);
+  const num = inv.InvoiceNumber;
+  if (['DRAFT', 'SUBMITTED'].includes(inv.Status)) throw new Error(`Invoice ${num} is still a draft. Approve it first (approve_invoice), then send.`);
+  if (!['AUTHORISED', 'PAID'].includes(inv.Status)) throw new Error(`Invoice ${num} is ${inv.Status} and cannot be sent.`);
+  const c = await xeroCall(`Contacts/${inv.Contact.ContactID}`, 'GET', accessToken, tenantId);
+  const email = (((c.Contacts || [])[0] || {}).EmailAddress || '').trim();
+  if (!email) throw new Error(`Not sent: ${inv.Contact.Name} has no email address in Xero. Add one with update_contact first.`);
+  const res = await httpRequest({ hostname: 'api.xero.com', path: `/api.xro/2.0/Invoices/${inv.InvoiceID}/Email`, method: 'POST',
+    headers: { 'Authorization': `Bearer ${accessToken}`, 'Xero-Tenant-Id': tenantId, 'Accept': 'application/json', 'Content-Type': 'application/json', 'Content-Length': 2 } }, '{}');
+  if (res.status >= 300) throw new Error(`Xero did not send the email (${res.status}): ${String(res.body || '').slice(0, 300)}`);
+  return { invoice_number: num, sent: true, to: email, contact: inv.Contact.Name, total_inc_gst: inv.Total, amount_due: inv.AmountDue,
+    note: "Sent by Xero with Xero's standard invoice email and the PDF. The wording cannot be changed from here." };
+}
+
+async function bankAccounts(accessToken, tenantId) {
+  const r = await xeroCall(`Accounts?where=${encodeURIComponent('Type=="BANK"&&Status=="ACTIVE"')}`, 'GET', accessToken, tenantId);
+  return (r.Accounts || []).map(a => ({ AccountID: a.AccountID, name: a.Name, code: a.Code || '' }));
+}
+
+async function toolRecordPayment({ invoice_number, amount, date, bank_account, reference }) {
+  const accessToken = await getAccessToken();
+  const tenantId = await getTenantId(accessToken);
+  const inv = await getSalesInvoice(accessToken, tenantId, invoice_number);
+  const num = inv.InvoiceNumber;
+  if (inv.Status === 'PAID') return { invoice_number: num, recorded: false, note: 'Already fully paid.' };
+  if (inv.Status !== 'AUTHORISED') throw new Error(`Invoice ${num} is ${inv.Status}. Only an approved invoice can take a payment (approve_invoice first).`);
+  const due = Number(inv.AmountDue || 0);
+  const amt = amount == null ? due : round2c(amount);
+  if (!(amt > 0)) throw new Error('amount must be more than zero (inc GST).');
+  if (amt > due + 0.005) throw new Error(`Refused: ${amt} is more than the ${due} still owing on ${num}.`);
+  const banks = await bankAccounts(accessToken, tenantId);
+  if (!banks.length) throw new Error('No active bank account found in Xero.');
+  let bank;
+  const want = String(bank_account || '').toLowerCase().trim();
+  if (want) bank = banks.find(b => b.name.toLowerCase() === want || b.code.toLowerCase() === want) || banks.find(b => b.name.toLowerCase().includes(want));
+  else if (banks.length === 1) bank = banks[0];
+  if (!bank) throw new Error(`Which bank account did the money land in? Call again with bank_account set to one of: ${banks.map(b => b.name).join(' | ')}`);
+  const payDate = d10(date) || new Date().toISOString().slice(0, 10);
+  const r = await xeroCall('Payments', 'PUT', accessToken, tenantId, { Payments: [{ Invoice: { InvoiceID: inv.InvoiceID }, Account: { AccountID: bank.AccountID }, Date: payDate, Amount: amt, Reference: reference || undefined }] });
+  const p = (r.Payments || [])[0] || {};
+  const after = await hubInvoiceRefresh(accessToken, tenantId, num);
+  return { invoice_number: num, recorded: true, payment_id: p.PaymentID, amount: amt, date: payDate, into: bank.name, contact: inv.Contact && inv.Contact.Name,
+    status: after ? after.Status : undefined, still_owing: after ? after.AmountDue : round2c(due - amt),
+    note: 'When this deposit shows up in the Xero bank feed, match it to this payment in Reconcile; do not create a second one.' };
+}
+
+async function toolCreateCreditNote({ invoice_number, contact_id, contact_name, line_items, reference, apply_to_invoice }) {
+  if (!line_items || !line_items.length) throw new Error('line_items is required (at least one {description, quantity, unit_amount ex GST}, positive amounts).');
+  const accessToken = await getAccessToken();
+  const tenantId = await getTenantId(accessToken);
+  let inv = null, contactRef = contact_id;
+  if (invoice_number) { inv = await getSalesInvoice(accessToken, tenantId, invoice_number); contactRef = inv.Contact.ContactID; }
+  if (!contactRef && contact_name) {
+    const found = await toolFindContact({ query: contact_name });
+    if (!found.matches.length) throw new Error(`No Xero contact matched "${contact_name}".`);
+    contactRef = found.matches[0].ContactID;
+  }
+  if (!contactRef) throw new Error('Give invoice_number, or contact_id / contact_name.');
+  const apply = apply_to_invoice === true;
+  if (apply) {
+    if (!inv) throw new Error('apply_to_invoice needs invoice_number.');
+    if (inv.Status !== 'AUTHORISED' || !(Number(inv.AmountDue) > 0)) throw new Error(`Invoice ${inv.InvoiceNumber} is ${inv.Status} with ${inv.AmountDue} owing: a credit can only be applied to an approved invoice that still has money owing. Create the credit note without apply_to_invoice and Seb handles the refund in Xero.`);
+  }
+  const r = await xeroCall('CreditNotes', 'PUT', accessToken, tenantId, { CreditNotes: [{
+    Type: 'ACCRECCREDIT', Contact: { ContactID: contactRef }, Date: new Date().toISOString().slice(0, 10), Status: apply ? 'AUTHORISED' : 'DRAFT',
+    LineAmountTypes: 'Exclusive', Reference: reference || (inv ? `Credit for ${inv.InvoiceNumber}` : undefined),
+    LineItems: line_items.map(li => ({ Description: li.description, Quantity: li.quantity || 1, UnitAmount: Math.abs(Number(li.unit_amount) || 0), AccountCode: '200', TaxType: 'OUTPUT' }))
+  }] });
+  const cn = (r.CreditNotes || [])[0] || {};
+  const out = { credit_note_number: cn.CreditNoteNumber, status: cn.Status, contact: (cn.Contact && cn.Contact.Name) || (inv && inv.Contact.Name), subtotal: cn.SubTotal, total_inc_gst: cn.Total };
+  if (!apply) { out.note = 'Created as a DRAFT credit note. Nothing is applied or refunded until it is approved in Xero.'; return out; }
+  const use = round2c(Math.min(Number(cn.Total) || 0, Number(inv.AmountDue) || 0));
+  try {
+    await xeroCall(`CreditNotes/${cn.CreditNoteID}/Allocations`, 'PUT', accessToken, tenantId, { Allocations: [{ Invoice: { InvoiceID: inv.InvoiceID }, Amount: use, Date: new Date().toISOString().slice(0, 10) }] });
+    const after = await hubInvoiceRefresh(accessToken, tenantId, inv.InvoiceNumber);
+    out.applied = { invoice_number: inv.InvoiceNumber, amount: use, invoice_status: after ? after.Status : undefined, still_owing: after ? after.AmountDue : undefined };
+    if (use < Number(cn.Total)) out.note = `Only ${use} was applied; ${round2c(cn.Total - use)} of the credit is left on the client's account in Xero.`;
+  } catch (e) {
+    out.applied = false;
+    out.note = 'The credit note is approved but could NOT be applied to the invoice: ' + String(e.message || e).slice(0, 250) + ' Tell Seb; it can be applied in Xero.';
+  }
+  return out;
+}
+
+async function toolCreateBill({ supplier_name, contact_id, line_items, account, date, due_date, reference, gst_included, gst_free }) {
+  if (!line_items || !line_items.length) throw new Error('line_items is required (at least one {description, quantity, unit_amount}).');
+  const accessToken = await getAccessToken();
+  const tenantId = await getTenantId(accessToken);
+  let contactRef = contact_id, supplier = supplier_name || '';
+  if (!contactRef && supplier_name) {
+    const found = await toolFindContact({ query: supplier_name });
+    if (!found.matches.length) throw new Error(`No Xero contact matched "${supplier_name}". Call create_contact first.`);
+    contactRef = found.matches[0].ContactID; supplier = found.matches[0].Name || supplier;
+  }
+  if (!contactRef) throw new Error('Give supplier_name or contact_id.');
+  const ar = await xeroCall(`Accounts?where=${encodeURIComponent('Status=="ACTIVE"')}`, 'GET', accessToken, tenantId);
+  const costAccounts = (ar.Accounts || []).filter(a => ['EXPENSE', 'DIRECTCOSTS', 'OVERHEADS'].includes(a.Type) && a.Code);
+  const pick = want => { const w = String(want || '').toLowerCase().trim(); if (!w) return null;
+    return costAccounts.find(a => a.Code.toLowerCase() === w || a.Name.toLowerCase() === w) || costAccounts.find(a => a.Name.toLowerCase().includes(w)) || null; };
+  const main = pick(account);
+  const lines = line_items.map(li => {
+    const acc = pick(li.account) || main;
+    if (!acc) throw new Error(`Which Xero account does this cost belong to? Call again with account set to one of: ${costAccounts.map(a => a.Name).join(' | ')}`);
+    return { Description: li.description, Quantity: li.quantity || 1, UnitAmount: Number(li.unit_amount) || 0, AccountCode: acc.Code, TaxType: gst_free === true ? 'EXEMPTEXPENSES' : 'INPUT' };
+  });
+  const billDate = d10(date) || new Date().toISOString().slice(0, 10);
+  const r = await xeroCall('Invoices', 'POST', accessToken, tenantId, { Invoices: [{
+    Type: 'ACCPAY', Contact: { ContactID: contactRef }, Date: billDate, DueDate: d10(due_date) || undefined, Status: 'DRAFT',
+    InvoiceNumber: reference || undefined, LineAmountTypes: gst_included === false ? 'Exclusive' : 'Inclusive', LineItems: lines
+  }] });
+  const b = (r.Invoices || [])[0] || {};
+  return { bill_id: b.InvoiceID, supplier: (b.Contact && b.Contact.Name) || supplier, reference: b.InvoiceNumber || '', status: b.Status, subtotal: b.SubTotal, gst: b.TotalTax, total_inc_gst: b.Total, date: billDate, due_date: d10(b.DueDateString),
+    note: 'Created as a DRAFT bill (Xero: Business > Bills to pay > Draft). It is not approved and not paid.' };
+}
+
+const ATTACH_TYPES = { pdf: 'application/pdf', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', heic: 'image/heic', txt: 'text/plain', csv: 'text/csv',
+  doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
+async function toolAttachFile({ quote_number, invoice_number, file_url, content_base64, filename, show_to_client }) {
+  if (!quote_number === !invoice_number) throw new Error('Give exactly one of quote_number or invoice_number.');
+  if (!file_url === !content_base64) throw new Error('Give exactly one of file_url (a web link to the file) or content_base64 (the file itself; small files only).');
+  let buf, name = String(filename || '').trim(), mime = '';
+  if (file_url) {
+    let u; try { u = new URL(file_url); } catch (e) { throw new Error('file_url is not a valid link.'); }
+    if (u.protocol !== 'https:' || /^(localhost|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|\[)/i.test(u.hostname)) throw new Error('file_url must be a public https link.');
+    const res = await fetch(u.href);
+    if (!res.ok) throw new Error(`Could not download the file (${res.status}).`);
+    buf = Buffer.from(await res.arrayBuffer());
+    mime = String(res.headers.get('content-type') || '').split(';')[0].trim();
+    if (!name) name = decodeURIComponent(u.pathname.split('/').pop() || '');
+  } else {
+    buf = Buffer.from(String(content_base64).replace(/^data:[^,]*,/, ''), 'base64');
+  }
+  if (!buf.length) throw new Error('The file is empty.');
+  if (buf.length > 4 * 1024 * 1024) throw new Error(`The file is ${(buf.length / 1048576).toFixed(1)} MB; the limit here is 4 MB.`);
+  name = name.replace(/[^\w.\- ]+/g, '_').slice(0, 120);
+  const ext = (name.match(/\.([a-z0-9]+)$/i) || [])[1];
+  if (!ext || !ATTACH_TYPES[ext.toLowerCase()]) throw new Error('Give a filename with its ending, e.g. site-photo.jpg or plan.pdf (pdf, jpg, png, gif, webp, heic, txt, csv, doc, docx, xls, xlsx).');
+  if (/html/i.test(mime)) throw new Error('That link opens a web page, not the file itself. Use a direct link to the file.');
+  mime = ATTACH_TYPES[ext.toLowerCase()];
+  const accessToken = await getAccessToken();
+  const tenantId = await getTenantId(accessToken);
+  let kind, id, number;
+  if (quote_number) { const q = await getQuoteByNumber(accessToken, tenantId, quote_number); kind = 'Quotes'; id = q.QuoteID; number = q.QuoteNumber; }
+  else { const inv = await getSalesInvoice(accessToken, tenantId, invoice_number); kind = 'Invoices'; id = inv.InvoiceID; number = inv.InvoiceNumber; }
+  const online = kind === 'Invoices' && show_to_client === true;
+  const res = await httpRequest({ hostname: 'api.xero.com', method: 'PUT', path: `/api.xro/2.0/${kind}/${id}/Attachments/${encodeURIComponent(name)}${online ? '?IncludeOnline=true' : ''}`,
+    headers: { 'Authorization': `Bearer ${accessToken}`, 'Xero-Tenant-Id': tenantId, 'Accept': 'application/json', 'Content-Type': mime, 'Content-Length': buf.length } }, buf);
+  if (res.status >= 300) throw new Error(`Xero did not take the file (${res.status}): ${String(res.body || '').slice(0, 300)}`);
+  return { attached: true, to: number, filename: name, size_kb: Math.round(buf.length / 1024), client_can_see_it: online,
+    note: online ? 'The client sees this file on the online invoice.' : 'The file is kept on the record in Xero for Seb; the client does not see it.' };
+}
+
 // 2026-11-05 — the client's address/phone/email as saved on the Xero contact card,
 // so a new quote's booking (and the project) get the site address straight away.
 async function contactDetails(accessToken, tenantId, contactId) {
@@ -938,6 +1168,72 @@ const TOOLS = [
     }, required: ['invoice_number'] }
   },
   {
+    name: 'set_quote_status',
+    description: 'Mark an existing Xero quote as Sent, Accepted or Declined (or back to Draft). Only when Seb said so for that quote. Marking Sent does NOT email anything: Xero does not let a connector email a quote, Seb sends it from Xero. Accepted moves the linked Hub job to Won and onto the Schedule; Declined moves it to Lost. For Invoiced use mark_quote_invoiced; to remove a quote use delete_quote.',
+    inputSchema: { type: 'object', properties: {
+      quote_number: { type: 'string', description: 'e.g. QU-0312' },
+      status: { type: 'string', enum: ['SENT', 'ACCEPTED', 'DECLINED', 'DRAFT'] }
+    }, required: ['quote_number', 'status'] }
+  },
+  {
+    name: 'approve_invoice',
+    description: 'Approve a draft Xero sales invoice (Draft or Awaiting approval → Approved / awaiting payment). It then counts in the books as money owed. Does not send it. Only when Seb said to approve that invoice.',
+    inputSchema: { type: 'object', properties: { invoice_number: { type: 'string', description: 'e.g. INV-0345' } }, required: ['invoice_number'] }
+  },
+  {
+    name: 'email_invoice',
+    description: "EMAILS THE CLIENT. Sends an approved Xero sales invoice to the client's email address on their Xero contact, using Xero's standard invoice email with the PDF (the wording cannot be changed here). Never call on your own judgement: only after Seb has said, in this chat, to send this exact invoice; then pass confirm_send true. Check the invoice with find_invoices first and tell Seb the client, the total and the email address it will go to. Quotes cannot be emailed through the connector.",
+    inputSchema: { type: 'object', properties: {
+      invoice_number: { type: 'string', description: 'e.g. INV-0345' },
+      confirm_send: { type: 'boolean', description: 'true only when Seb said to send this invoice.' }
+    }, required: ['invoice_number', 'confirm_send'] }
+  },
+  {
+    name: 'record_payment',
+    description: 'Record that a client paid a Xero sales invoice (full or part). Only when Seb said the money arrived. The invoice must be approved. amount is inc GST and defaults to everything still owing; more than what is owing is refused. If Seb has more than one bank account in Xero and none is named, the tool lists them: ask Seb which one. When the deposit later shows in the bank feed, it must be matched to this payment, not entered again.',
+    inputSchema: { type: 'object', properties: {
+      invoice_number: { type: 'string', description: 'e.g. INV-0345' },
+      amount: { type: 'number', description: 'inc GST. Default: the full amount still owing.' },
+      date: { type: 'string', description: 'Day the money arrived, YYYY-MM-DD. Default today.' },
+      bank_account: { type: 'string', description: 'Name of the Xero bank account the money landed in.' },
+      reference: { type: 'string' }
+    }, required: ['invoice_number'] }
+  },
+  {
+    name: 'create_credit_note',
+    description: 'Create a Xero credit note for a client (a correction or a reduction). Amounts are positive and ex GST. By default it is a DRAFT and changes nothing until approved in Xero. With apply_to_invoice true (needs invoice_number, and Seb to have said so) it is approved and taken off what is still owing on that approved invoice. A cash refund on an invoice already paid is not done here: create the draft and Seb finishes the refund in Xero.',
+    inputSchema: { type: 'object', properties: {
+      invoice_number: { type: 'string', description: 'The invoice this credit is for, e.g. INV-0345. Gives the client too.' },
+      contact_id: { type: 'string' }, contact_name: { type: 'string', description: 'Only when there is no invoice_number.' },
+      line_items: { type: 'array', items: { type: 'object', properties: { description: { type: 'string' }, quantity: { type: 'number' }, unit_amount: { type: 'number', description: 'ex GST, positive' } }, required: ['description', 'unit_amount'] } },
+      reference: { type: 'string' },
+      apply_to_invoice: { type: 'boolean', description: 'true = approve the credit note and apply it to the invoice now. Default false (draft).' }
+    }, required: ['line_items'] }
+  },
+  {
+    name: 'create_bill',
+    description: "Create a DRAFT supplier bill in Xero (money Matiere owes a supplier or subcontractor, to be paid later). It is never approved or paid from here. NOT for things already paid by card or at the counter: those receipts go through the Hub's Scan Receipt flow, and a bill as well would count the cost twice. Amounts include GST unless gst_included is false. account is the Xero cost account (name or code); if missing or unknown the tool lists the choices.",
+    inputSchema: { type: 'object', properties: {
+      supplier_name: { type: 'string' }, contact_id: { type: 'string' },
+      line_items: { type: 'array', items: { type: 'object', properties: { description: { type: 'string' }, quantity: { type: 'number' }, unit_amount: { type: 'number', description: 'inc GST unless gst_included is false' }, account: { type: 'string', description: 'Cost account for this line, if different' } }, required: ['description', 'unit_amount'] } },
+      account: { type: 'string', description: 'Xero cost account for all lines, by name or code.' },
+      date: { type: 'string', description: 'Bill date YYYY-MM-DD. Default today.' }, due_date: { type: 'string', description: 'YYYY-MM-DD' },
+      reference: { type: 'string', description: "The supplier's own invoice number." },
+      gst_included: { type: 'boolean', description: 'Default true: amounts include GST.' },
+      gst_free: { type: 'boolean', description: 'true when the supplier charges no GST.' }
+    }, required: ['line_items'] }
+  },
+  {
+    name: 'attach_file',
+    description: 'Attach a photo or document (pdf, jpg, png and similar, up to 4 MB) to a Xero quote or sales invoice. Give the file as file_url (a direct, public https link to the file) or as content_base64 (small files only). A photo dropped into a chat cannot be passed here unless it has a link. On an invoice, show_to_client true makes the file visible to the client on the online invoice; otherwise it is for Seb only.',
+    inputSchema: { type: 'object', properties: {
+      quote_number: { type: 'string' }, invoice_number: { type: 'string' },
+      file_url: { type: 'string' }, content_base64: { type: 'string' },
+      filename: { type: 'string', description: 'With its ending, e.g. site-photo.jpg' },
+      show_to_client: { type: 'boolean', description: 'Invoices only. Default false.' }
+    } }
+  },
+  {
     name: 'delete_quote',
     description: 'Delete redundant Xero quotes (Draft, Sent, Declined or Accepted; Invoiced quotes are refused). Permanent. Only call for quote numbers Seb himself has named for deletion in this chat; never on your own judgement. Up to 10 per call. The Hub copy is marked deleted and its follow-up reminder stops.',
     inputSchema: { type: 'object', properties: {
@@ -1014,6 +1310,13 @@ async function callTool(name, args) {
     case 'find_invoices':   return toolFindInvoices(args || {});
     case 'update_quote':    return toolUpdateQuote(args || {});
     case 'update_invoice':  return toolUpdateInvoice(args || {});
+    case 'set_quote_status': return toolSetQuoteStatus(args || {});
+    case 'approve_invoice': return toolApproveInvoice(args || {});
+    case 'email_invoice':   return toolEmailInvoice(args || {});
+    case 'record_payment':  return toolRecordPayment(args || {});
+    case 'create_credit_note': return toolCreateCreditNote(args || {});
+    case 'create_bill':     return toolCreateBill(args || {});
+    case 'attach_file':     return toolAttachFile(args || {});
     case 'delete_quote':
     case 'delete_draft_quote': return toolDeleteQuote(args || {});
     case 'delete_invoice':  return toolDeleteInvoice(args || {});

@@ -2,6 +2,16 @@
 
 **Purpose:** accumulate many edits locally, deploy ONCE. Editing files is free; only a push to `main` triggers a Netlify build (= credits). See CLAUDE.md → "Deploying changes" for the full workflow.
 
+## Change — 2026-11-28 (connector: the rest of the scope — status, send, payments, credit notes, bills, attachments)
+- [x] `set_quote_status`: Sent / Accepted / Declined / back to Draft (a draft steps through Sent). Hub `quote_items` status and the follow-up reminder follow. Marking Sent emails nothing (Xero has no quote email for connectors).
+- [x] `approve_invoice`: Draft / Awaiting approval → Approved.
+- [x] `email_invoice`: Xero emails the approved invoice to the client's address on the contact. Needs `confirm_send: true`; refused for drafts and for a client with no email.
+- [x] `record_payment`: full or part payment on an approved invoice; more than owing refused; asks which bank account if there are several. Hub `invoice_items` status / paid updated.
+- [x] `create_credit_note`: draft by default; `apply_to_invoice: true` approves it and takes it off an approved invoice that still has money owing.
+- [x] `create_bill`: DRAFT supplier bill only (never approved or paid here); cost account by name or code.
+- [x] `attach_file`: file by https link or base64 (4 MB) onto a quote or invoice; `show_to_client` for invoices.
+- [x] Tested against a pretend Xero and Hub (27 cases). Not yet run on real Xero.
+
 ## Change — 2026-11-28 (connector: look up and edit quotes and invoices)
 - [x] `find_quotes` / `find_invoices` (read-only, live from Xero): one number with its lines, or a list filtered by client, status, dates, `older_than_days`, `unpaid_only` (invoices). Quotes show the Hub job they are linked to.
 - [x] `update_quote`: edit title, summary, expiry date and/or lines of an existing quote in place. `line_items` replaces the whole list; lines keep their Xero ID by position so Hub job links survive. Invoiced/deleted refused. Hub `quote_items` rewritten straight away (removed lines deleted, new lines take the job link); the linked job's `quoted` / `baseline_price` follow only if they still equalled the old quote total.
