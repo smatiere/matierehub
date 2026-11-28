@@ -852,11 +852,40 @@ async function toolCreateBill({ supplier_name, contact_id, line_items, account, 
 
 const ATTACH_TYPES = { pdf: 'application/pdf', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', heic: 'image/heic', txt: 'text/plain', csv: 'text/csv',
   doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
-async function toolAttachFile({ quote_number, invoice_number, file_url, content_base64, filename, show_to_client }) {
+// ── File drop: photos and documents an agent saved from a chat (scripts/filedrop.js) ──
+function dropStore() {
+  return getStore({ name: 'file-drop', siteID: process.env.NETLIFY_SITE_ID, token: process.env.NETLIFY_BLOBS_TOKEN });
+}
+async function dropMeta(id) {
+  if (!/^fd-[0-9a-f]{8}$/.test(String(id))) throw new Error(`"${id}" is not a file drop id. Use find_files to get the id.`);
+  const raw = await dropStore().get(`meta/${id}`);
+  if (!raw) throw new Error(`No file ${id} in the file drop. Use find_files.`);
+  return JSON.parse(raw);
+}
+
+async function toolFindFiles({ query, limit }) {
+  const { blobs } = await dropStore().list({ prefix: 'meta/' });
+  const all = (await Promise.all(blobs.map(b => dropStore().get(b.key)))).filter(Boolean).map(r => JSON.parse(r));
+  const words = String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
+  const hits = all.filter(m => words.every(w => `${m.label} ${m.job} ${m.note} ${m.filename}`.toLowerCase().includes(w)))
+    .sort((a, b) => b.added.localeCompare(a.added));
+  const files = hits.slice(0, Math.min(limit || 30, 100)).map(m => ({ id: m.id, label: m.label, job: m.job, note: m.note, filename: m.filename,
+    size_kb: Math.ceil(m.size / 1024), added_sydney: new Date(m.added).toLocaleString('en-AU', { timeZone: 'Australia/Sydney', dateStyle: 'medium', timeStyle: 'short' }), attached_to: m.attached_to || [] }));
+  return { matches: hits.length, files, note: files.length ? undefined
+    : `Nothing matches${all.length ? ` (the file drop holds ${all.length}; try fewer words or none)` : ' and the file drop is empty'}. Files get in when Seb sends them to a Claude Code chat on the Mac and that chat files them.` };
+}
+
+async function toolAttachFile({ quote_number, invoice_number, drop_file, file_url, content_base64, filename, show_to_client }) {
   if (!quote_number === !invoice_number) throw new Error('Give exactly one of quote_number or invoice_number.');
-  if (!file_url === !content_base64) throw new Error('Give exactly one of file_url (a web link to the file) or content_base64 (the file itself; small files only).');
-  let buf, name = String(filename || '').trim(), mime = '';
-  if (file_url) {
+  if ([drop_file, file_url, content_base64].filter(Boolean).length !== 1) throw new Error('Give exactly one of drop_file (an id from find_files), file_url (a web link to the file) or content_base64.');
+  let buf, name = String(filename || '').trim(), mime = '', meta = null, max = 4;
+  if (drop_file) {
+    meta = await dropMeta(drop_file);
+    const data = await dropStore().get(`data/${meta.id}`);
+    if (!data) throw new Error(`The file drop has no contents for ${meta.id}.`);
+    buf = Buffer.from(String(data).trim(), 'base64');
+    name = meta.filename; max = 10;
+  } else if (file_url) {
     let u; try { u = new URL(file_url); } catch (e) { throw new Error('file_url is not a valid link.'); }
     if (u.protocol !== 'https:' || /^(localhost|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|\[)/i.test(u.hostname)) throw new Error('file_url must be a public https link.');
     const res = await fetch(u.href);
@@ -868,7 +897,7 @@ async function toolAttachFile({ quote_number, invoice_number, file_url, content_
     buf = Buffer.from(String(content_base64).replace(/^data:[^,]*,/, ''), 'base64');
   }
   if (!buf.length) throw new Error('The file is empty.');
-  if (buf.length > 4 * 1024 * 1024) throw new Error(`The file is ${(buf.length / 1048576).toFixed(1)} MB; the limit here is 4 MB.`);
+  if (buf.length > max * 1024 * 1024) throw new Error(`The file is ${(buf.length / 1048576).toFixed(1)} MB; the limit here is ${max} MB.`);
   name = name.replace(/[^\w.\- ]+/g, '_').slice(0, 120);
   const ext = (name.match(/\.([a-z0-9]+)$/i) || [])[1];
   if (!ext || !ATTACH_TYPES[ext.toLowerCase()]) throw new Error('Give a filename with its ending, e.g. site-photo.jpg or plan.pdf (pdf, jpg, png, gif, webp, heic, txt, csv, doc, docx, xls, xlsx).');
@@ -883,8 +912,14 @@ async function toolAttachFile({ quote_number, invoice_number, file_url, content_
   const res = await httpRequest({ hostname: 'api.xero.com', method: 'PUT', path: `/api.xro/2.0/${kind}/${id}/Attachments/${encodeURIComponent(name)}${online ? '?IncludeOnline=true' : ''}`,
     headers: { 'Authorization': `Bearer ${accessToken}`, 'Xero-Tenant-Id': tenantId, 'Accept': 'application/json', 'Content-Type': mime, 'Content-Length': buf.length } }, buf);
   if (res.status >= 300) throw new Error(`Xero did not take the file (${res.status}): ${String(res.body || '').slice(0, 300)}`);
+  // Remember where a filed document went, so find_files shows it. The attachment is already in Xero, so a failure here is not an error.
+  if (meta) {
+    try { await dropStore().set(`meta/${meta.id}`, JSON.stringify({ ...meta, attached_to: [...new Set([...(meta.attached_to || []), number])] })); } catch (e) {}
+  }
   return { attached: true, to: number, filename: name, size_kb: Math.round(buf.length / 1024), client_can_see_it: online,
-    note: online ? 'The client sees this file on the online invoice.' : 'The file is kept on the record in Xero for Seb; the client does not see it.' };
+    note: online ? 'The client sees this file on the online invoice.'
+      : kind === 'Quotes' ? 'Attached to the quote in Xero. Xero gives connectors no switch to show a quote attachment to the client; Seb checks that in Xero when sending the quote.'
+      : 'The file is kept on the record in Xero for Seb; the client does not see it.' };
 }
 
 // 2026-11-05 — the client's address/phone/email as saved on the Xero contact card,
@@ -900,6 +935,24 @@ async function contactDetails(accessToken, tenantId, contactId) {
       phone: [ph.PhoneAreaCode, ph.PhoneNumber].filter(Boolean).join(' ').trim(), email: c.EmailAddress || ''
     };
   } catch (e) { return {}; }
+}
+
+// A new quote plus the filed photos/documents for it. A failed attachment never fails (or repeats) the quote.
+async function createQuoteWithFiles(args) {
+  const ids = [...new Set(args.attach_files || [])];
+  if (ids.length > 10) throw new Error('Xero takes at most 10 attachments on a quote. Pick fewer files.');
+  for (const id of ids) await dropMeta(id); // a wrong id stops here, before any quote exists
+  const result = await toolCreateQuote(args);
+  if (!ids.length) return result;
+  const files = [];
+  for (const id of ids) {
+    try {
+      if (!result.quote_number) throw new Error('Xero did not return the quote number.');
+      const a = await toolAttachFile({ quote_number: result.quote_number, drop_file: id });
+      files.push({ id, attached: true, filename: a.filename });
+    } catch (e) { files.push({ id, attached: false, error: e.message }); }
+  }
+  return { ...result, attachments: files };
 }
 
 async function toolCreateQuote(args) {
@@ -1224,12 +1277,18 @@ const TOOLS = [
     }, required: ['line_items'] }
   },
   {
+    name: 'find_files',
+    description: 'List photos and documents saved in the file drop (files Seb sent in an earlier chat and asked to keep for a quote or invoice). Read-only. Use it whenever Seb mentions photos, plans or documents he sent before, and before writing a quote he wants files on. query filters on label, job, note and filename; leave it out to see the newest. Attach only the files he means: if it is unclear which, list the labels and dates and ask.',
+    inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Words such as the client or job name' }, limit: { type: 'number' } } }
+  },
+  {
     name: 'attach_file',
-    description: 'Attach a photo or document (pdf, jpg, png and similar, up to 4 MB) to a Xero quote or sales invoice. Give the file as file_url (a direct, public https link to the file) or as content_base64 (small files only). A photo dropped into a chat cannot be passed here unless it has a link. On an invoice, show_to_client true makes the file visible to the client on the online invoice; otherwise it is for Seb only.',
+    description: 'Attach a photo or document (pdf, jpg, png and similar) to a Xero quote or sales invoice. Normally pass drop_file, an id from find_files. Otherwise file_url (a direct public https link, up to 4 MB) or content_base64 (very small files). A photo dropped into this chat cannot be passed directly. On an invoice, show_to_client true makes the file visible to the client; ask Seb first. On a quote Xero has no such switch.',
     inputSchema: { type: 'object', properties: {
       quote_number: { type: 'string' }, invoice_number: { type: 'string' },
+      drop_file: { type: 'string', description: 'File drop id from find_files, e.g. fd-1a2b3c4d' },
       file_url: { type: 'string' }, content_base64: { type: 'string' },
-      filename: { type: 'string', description: 'With its ending, e.g. site-photo.jpg' },
+      filename: { type: 'string', description: 'With its ending, e.g. site-photo.jpg. Not needed with drop_file.' },
       show_to_client: { type: 'boolean', description: 'Invoices only. Default false.' }
     } }
   },
@@ -1268,6 +1327,7 @@ const TOOLS = [
       expiry_days: { type: 'number', description: 'Days until the quote expires, default 28' },
       job_name: { type: 'string', description: 'Project/job name for the baseline + shopping list (defaults to contact_name)' },
       labour_hours: { type: 'number', description: 'Estimated labour hours behind this quote, for the baseline record' },
+      attach_files: { type: 'array', items: { type: 'string' }, description: 'File drop ids (from find_files) to attach to the new quote, up to 10. If one fails the quote is still created; retry that file with attach_file, never create the quote again.' },
       materials: { type: 'array', description: 'Materials for the shopping list + baseline materials estimate', items: { type: 'object', properties: {
         name: { type: 'string' }, qty: { type: 'string' }, cost: { type: 'number', description: 'Estimated cost of this line, ex GST' },
         special: { type: 'boolean', description: 'True if this item needs a supplier quote or special/custom order — it is highlighted at the top of the Shopping List tab' },
@@ -1316,12 +1376,13 @@ async function callTool(name, args) {
     case 'record_payment':  return toolRecordPayment(args || {});
     case 'create_credit_note': return toolCreateCreditNote(args || {});
     case 'create_bill':     return toolCreateBill(args || {});
+    case 'find_files':      return toolFindFiles(args || {});
     case 'attach_file':     return toolAttachFile(args || {});
     case 'delete_quote':
     case 'delete_draft_quote': return toolDeleteQuote(args || {});
     case 'delete_invoice':  return toolDeleteInvoice(args || {});
     case 'create_contact':  return toolCreateContact(args || {});
-    case 'create_quote':    return toolCreateQuote(args || {});
+    case 'create_quote':    return createQuoteWithFiles(args || {});
     case 'create_invoice':  return toolCreateInvoice(args || {});
     default: throw new Error(`Unknown tool: ${name}`);
   }

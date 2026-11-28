@@ -2,6 +2,12 @@
 
 **Purpose:** accumulate many edits locally, deploy ONCE. Editing files is free; only a push to `main` triggers a Netlify build (= credits). See CLAUDE.md → "Deploying changes" for the full workflow.
 
+## Change — 2026-11-28 (file drop: photos and documents from a chat onto quotes and invoices)
+- [x] `scripts/filedrop.js` (agents, on the Mac): add / list / get / remove in the private store `file-drop`; HEIC and big photos shrunk; 10 MB limit. No Hub screen, no new key.
+- [x] Connector `find_files`; `attach_file` takes `drop_file`; `create_quote` takes `attach_files` (up to 10; wrong id stops before the quote; a failed attachment never repeats the quote).
+- [x] Checked against Xero's published API spec: quotes take attachments; the client-can-see switch is for invoices only; no quote email.
+- [x] Tested: real save and read-back in the store (identical file); connector against a pretend Xero and store. Not yet run end to end on real Xero.
+
 ## Change — 2026-11-28 (connector: the rest of the scope — status, send, payments, credit notes, bills, attachments)
 - [x] `set_quote_status`: Sent / Accepted / Declined / back to Draft (a draft steps through Sent). Hub `quote_items` status and the follow-up reminder follow. Marking Sent emails nothing (Xero has no quote email for connectors).
 - [x] `approve_invoice`: Draft / Awaiting approval → Approved.
