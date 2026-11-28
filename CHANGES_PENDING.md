@@ -2,6 +2,12 @@
 
 **Purpose:** accumulate many edits locally, deploy ONCE. Editing files is free; only a push to `main` triggers a Netlify build (= credits). See CLAUDE.md → "Deploying changes" for the full workflow.
 
+## Change — 2026-11-28 (connector: look up and edit quotes and invoices)
+- [x] `find_quotes` / `find_invoices` (read-only, live from Xero): one number with its lines, or a list filtered by client, status, dates, `older_than_days`, `unpaid_only` (invoices). Quotes show the Hub job they are linked to.
+- [x] `update_quote`: edit title, summary, expiry date and/or lines of an existing quote in place. `line_items` replaces the whole list; lines keep their Xero ID by position so Hub job links survive. Invoiced/deleted refused. Hub `quote_items` rewritten straight away (removed lines deleted, new lines take the job link); the linked job's `quoted` / `baseline_price` follow only if they still equalled the old quote total.
+- [x] `update_invoice`: lines, date, due date, quote reference. Draft / awaiting approval freely; approved unpaid only with `allow_approved: true`; paid or credited refused. Hub `invoice_items` rewritten, notes kept.
+- [x] Tested against a pretend Xero and Hub. Live: see handoff.
+
 ## Change — 2026-11-28 (connector: delete redundant quotes and invoices)
 - [x] `xero-mcp.js` new tool `delete_quote`: one quote or up to 10 per call. Deletes Draft, Sent, Declined and Accepted quotes (tries Deleted directly; if Xero refuses, steps back to Draft first). Invoiced quotes are refused. Hub copy (`quote_items`) is marked DELETED and an open `quote_followups` row is stopped. `delete_draft_quote` kept as an old name for the same tool.
 - [x] New tool `delete_invoice`: sales invoices only, up to 10 per call. Draft / Awaiting approval → deleted. Approved and unpaid → VOIDED, only with `allow_void: true`. Anything with a payment or credit → refused. Hub copy (`invoice_items`) status updated.

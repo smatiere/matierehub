@@ -455,6 +455,208 @@ async function toolDeleteInvoice({ invoice_number, invoice_numbers, allow_void }
   return { removed: results.filter(r => r.removed).length, not_removed: results.filter(r => !r.removed).length, results };
 }
 
+// 2026-11-28 — look up and edit quotes and invoices.
+// Look-up reads Xero live (read-only). Edits keep each line's Xero ID by position
+// so the Hub's hand-links (quote line → job, invoice notes) survive.
+const d10 = v => String(v || '').slice(0, 10);
+const round2c = n => Math.round((Number(n) || 0) * 100) / 100;
+function statusList(status, allowed) {
+  const list = [].concat(status || []).map(x => String(x).trim().toUpperCase()).filter(Boolean)
+    .map(x => x === 'AWAITING APPROVAL' ? 'SUBMITTED' : x === 'APPROVED' || x === 'AWAITING PAYMENT' ? 'AUTHORISED' : x);
+  const bad = list.filter(x => !allowed.includes(x));
+  if (bad.length) throw new Error(`Unknown status ${bad.join(', ')}. Use: ${allowed.join(', ')}.`);
+  return list;
+}
+function dateWindow({ date_from, date_to, older_than_days }) {
+  let from = d10(date_from), to = d10(date_to);
+  if (older_than_days) { const c = d10(new Date(Date.now() - Number(older_than_days) * 86400000).toISOString()); if (!to || c < to) to = c; }
+  return { from, to };
+}
+const lineOut = li => ({ description: li.Description, quantity: li.Quantity, unit_amount: li.UnitAmount, line_amount: li.LineAmount });
+
+async function toolFindQuotes(args) {
+  const { quote_number, contact_name, status, limit } = args || {};
+  const accessToken = await getAccessToken();
+  const tenantId = await getTenantId(accessToken);
+  const links = {};
+  try { (await sbGet('quote_items', '?select=quote_number,project&project=neq.')).forEach(r => { if (r.project) links[r.quote_number] = r.project; }); } catch (e) { /* job links are a bonus */ }
+  if (quote_number) {
+    const qn = String(quote_number).trim().toUpperCase();
+    const found = await xeroCall(`Quotes?QuoteNumber=${encodeURIComponent(qn)}`, 'GET', accessToken, tenantId);
+    const q = (found.Quotes || []).find(x => (x.QuoteNumber || '').toUpperCase() === qn);
+    if (!q) return { found: 0, note: `Quote ${qn} not found in Xero.` };
+    return { found: 1, quote: { quote_number: q.QuoteNumber, status: q.Status, contact: q.Contact && q.Contact.Name, date: d10(q.DateString), expiry_date: d10(q.ExpiryDateString),
+      title: q.Title || '', summary: q.Summary || '', reference: q.Reference || '', subtotal_ex_gst: q.SubTotal, total_inc_gst: q.Total, job: links[q.QuoteNumber] || '', lines: (q.LineItems || []).map(lineOut) } };
+  }
+  const wanted = statusList(status, ['DRAFT', 'SENT', 'ACCEPTED', 'DECLINED', 'INVOICED', 'DELETED']);
+  const { from, to } = dateWindow(args || {});
+  const name = String(contact_name || '').trim().toLowerCase();
+  let all = [];
+  for (let page = 1; page <= 15; page++) {
+    let qs = `page=${page}`;
+    if (wanted.length === 1) qs += `&Status=${wanted[0]}`;
+    if (from) qs += `&DateFrom=${from}`;
+    if (to) qs += `&DateTo=${to}`;
+    const r = await xeroCall(`Quotes?${qs}`, 'GET', accessToken, tenantId);
+    const got = r.Quotes || [];
+    const before = all.length;
+    got.forEach(q => { if (!all.some(x => x.QuoteID === q.QuoteID)) all.push(q); });
+    if (got.length < 100 || all.length === before) break;
+  }
+  all = all.filter(q => (wanted.length ? wanted.includes(q.Status) : q.Status !== 'DELETED')
+    && (!name || ((q.Contact && q.Contact.Name) || '').toLowerCase().includes(name))
+    && (!from || d10(q.DateString) >= from) && (!to || d10(q.DateString) <= to));
+  all.sort((a, b) => d10(b.DateString).localeCompare(d10(a.DateString)));
+  const max = Math.min(Math.max(Number(limit) || 50, 1), 200);
+  const by = {}; all.forEach(q => { by[q.Status] = (by[q.Status] || 0) + 1; });
+  return { found: all.length, shown: Math.min(all.length, max), by_status: by,
+    quotes: all.slice(0, max).map(q => ({ quote_number: q.QuoteNumber, status: q.Status, contact: q.Contact && q.Contact.Name, date: d10(q.DateString),
+      expiry_date: d10(q.ExpiryDateString), title: q.Title || '', subtotal_ex_gst: q.SubTotal, job: links[q.QuoteNumber] || '' })) };
+}
+
+async function toolFindInvoices(args) {
+  const { invoice_number, contact_name, status, limit, unpaid_only } = args || {};
+  const accessToken = await getAccessToken();
+  const tenantId = await getTenantId(accessToken);
+  const sum = inv => ({ invoice_number: inv.InvoiceNumber, status: inv.Status, contact: inv.Contact && inv.Contact.Name, date: d10(inv.DateString), due_date: d10(inv.DueDateString),
+    quote_number: inv.Reference || '', subtotal_ex_gst: inv.SubTotal, total_inc_gst: inv.Total, paid: inv.AmountPaid, owing: inv.AmountDue });
+  if (invoice_number) {
+    const num = String(invoice_number).trim().toUpperCase();
+    const found = await xeroCall(`Invoices?InvoiceNumbers=${encodeURIComponent(num)}`, 'GET', accessToken, tenantId);
+    const inv = (found.Invoices || []).find(x => (x.InvoiceNumber || '').toUpperCase() === num && x.Type === 'ACCREC');
+    if (!inv) return { found: 0, note: `Invoice ${num} not found in Xero (sales invoices only).` };
+    return { found: 1, invoice: { ...sum(inv), lines: (inv.LineItems || []).map(lineOut) } };
+  }
+  const wanted = statusList(status, ['DRAFT', 'SUBMITTED', 'AUTHORISED', 'PAID', 'VOIDED', 'DELETED']);
+  const { from, to } = dateWindow(args || {});
+  const dt = d => { const [y, m, dd] = d.split('-').map(Number); return `DateTime(${y},${m},${dd})`; };
+  let where = 'Type=="ACCREC"';
+  if (from) where += `&&Date>=${dt(from)}`;
+  if (to) where += `&&Date<=${dt(to)}`;
+  let qs = `where=${encodeURIComponent(where)}&order=${encodeURIComponent('Date DESC')}`;
+  if (wanted.length) qs += `&Statuses=${wanted.join(',')}`;
+  const r = await xeroCall(`Invoices?${qs}`, 'GET', accessToken, tenantId);
+  const name = String(contact_name || '').trim().toLowerCase();
+  const all = (r.Invoices || []).filter(inv => (wanted.length ? true : !['DELETED', 'VOIDED'].includes(inv.Status))
+    && (!name || ((inv.Contact && inv.Contact.Name) || '').toLowerCase().includes(name))
+    && (!unpaid_only || (inv.Status === 'AUTHORISED' && Number(inv.AmountDue) > 0)));
+  const max = Math.min(Math.max(Number(limit) || 50, 1), 200);
+  const by = {}; all.forEach(inv => { by[inv.Status] = (by[inv.Status] || 0) + 1; });
+  return { found: all.length, shown: Math.min(all.length, max), by_status: by, total_owing: round2c(all.reduce((t, inv) => t + (Number(inv.AmountDue) || 0), 0)), invoices: all.slice(0, max).map(sum) };
+}
+
+// New lines replace all the old ones. Line 1 keeps old line 1's Xero ID, and so on.
+function mergeLines(oldLines, newLines) {
+  return newLines.map((li, i) => {
+    const old = (oldLines || [])[i] || {};
+    if (li.description == null || li.unit_amount == null) throw new Error('Each line needs description and unit_amount.');
+    return { LineItemID: old.LineItemID, Description: li.description, Quantity: li.quantity || 1, UnitAmount: li.unit_amount,
+      ItemCode: old.ItemCode, AccountCode: old.AccountCode || '200', TaxType: old.TaxType || 'OUTPUT' };
+  });
+}
+// Bring the Hub's copy of one quote/invoice in line with Xero straight away (the daily sync would only add, never remove).
+async function hubReplaceLines(table, numberCol, number, rows, carry) {
+  try {
+    const old = await sbGet(table, `?select=id,${carry}&${numberCol}=eq.${encodeURIComponent(number)}`);
+    const carried = [...new Set(old.map(r => r[carry]).filter(Boolean))];
+    const oldIds = new Set(old.map(r => r.id));
+    const keep = new Set(rows.map(r => r.id));
+    // a line that is new to the Hub takes the job link / note the other lines share
+    const out = rows.map(r => (!oldIds.has(r.id) && carried.length === 1) ? { ...r, [carry]: carried[0] } : r);
+    const same = out.filter(r => oldIds.has(r.id)), fresh = out.filter(r => !oldIds.has(r.id));
+    for (const set of [same, fresh]) {
+      if (!set.length) continue;
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, { method: 'POST',
+        headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify(set) });
+      if (!res.ok) throw new Error(`${res.status} ${(await res.text()).slice(0, 150)}`);
+    }
+    const gone = old.filter(r => !keep.has(r.id)).map(r => r.id);
+    if (gone.length) await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=in.(${gone.map(g => `"${g}"`).join(',')})`, { method: 'DELETE', headers: { apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUPABASE_SERVICE_KEY}` } });
+    return { updated: true, job_or_note_kept: carried.length === 1 ? carried[0] : '' };
+  } catch (e) { return { updated: false, note: 'Xero was changed but the Hub copy was not; the daily sync will catch up. ' + String(e.message || e).slice(0, 150) }; }
+}
+
+async function toolUpdateQuote(args) {
+  const { quote_number, title, summary, expiry_date, line_items } = args || {};
+  const qn = String(quote_number || '').trim().toUpperCase();
+  if (!/^QU-\d+$/.test(qn)) throw new Error('quote_number is required, e.g. QU-0312.');
+  if (title == null && summary == null && !expiry_date && !(line_items && line_items.length)) throw new Error('Nothing to change: give title, summary, expiry_date or line_items.');
+  const accessToken = await getAccessToken();
+  const tenantId = await getTenantId(accessToken);
+  const found = await xeroCall(`Quotes?QuoteNumber=${encodeURIComponent(qn)}`, 'GET', accessToken, tenantId);
+  const q = (found.Quotes || []).find(x => (x.QuoteNumber || '').toUpperCase() === qn);
+  if (!q) throw new Error(`Quote ${qn} not found in Xero.`);
+  if (['INVOICED', 'DELETED'].includes(q.Status)) throw new Error(`Quote ${qn} is ${q.Status} and cannot be edited.`);
+  const body = { ...quoteBody(q), Status: q.Status };
+  if (title != null) body.Title = title;
+  if (summary != null) body.Summary = summary;
+  if (expiry_date) body.ExpiryDate = d10(expiry_date);
+  if (line_items && line_items.length) body.LineItems = mergeLines(q.LineItems, line_items);
+  const r = await xeroCall('Quotes', 'POST', accessToken, tenantId, { Quotes: [body] });
+  const n = (r.Quotes || [])[0] || {};
+  const rows = [];
+  (n.LineItems || []).forEach((li, idx) => {
+    const desc = (li.Description || '').trim(), amt = Math.abs(li.LineAmount || 0);
+    if (!desc && amt === 0) return;
+    rows.push({ id: li.LineItemID || `${n.QuoteNumber}-${String(idx + 1).padStart(2, '0')}`, quote_number: n.QuoteNumber, item: (li.ItemCode || '').trim(), description: desc,
+      qty: li.Quantity || 1, unit_price: Math.abs(li.UnitAmount || 0), line_amount: amt, contact: (n.Contact && n.Contact.Name) || '', contact_id: (n.Contact && n.Contact.ContactID) || '',
+      date: d10(n.DateString) || null, expiry_date: d10(n.ExpiryDateString) || null, status: n.Status || '' });
+  });
+  const hub = await hubReplaceLines('quote_items', 'quote_number', qn, rows, 'project');
+  const out = { quote_number: qn, status: n.Status, was_status: q.Status, subtotal_before: q.SubTotal, subtotal_after: n.SubTotal, total_inc_gst: n.Total,
+    lines_before: (q.LineItems || []).length, lines_after: (n.LineItems || []).length, hub };
+  // keep the linked job's quoted price in step, only when it still showed the old quote total
+  if (hub.job_or_note_kept && Number(q.SubTotal) !== Number(n.SubTotal)) {
+    try {
+      const pr = await sbGet('projects', `?select=id,quoted,baseline_price&name=eq.${encodeURIComponent(hub.job_or_note_kept)}`);
+      if (pr.length === 1) {
+        const f = {};
+        if (Number(pr[0].quoted) === Number(q.SubTotal)) f.quoted = n.SubTotal;
+        if (Number(pr[0].baseline_price) === Number(q.SubTotal)) f.baseline_price = n.SubTotal;
+        if (Object.keys(f).length) { await sbPatch('projects', `?id=eq.${encodeURIComponent(pr[0].id)}`, f); out.job_price_updated = hub.job_or_note_kept; }
+        else out.note = `Job "${hub.job_or_note_kept}" keeps its own quoted price (it did not match the old quote total). Tell Seb.`;
+      }
+    } catch (e) { /* job price left as is */ }
+  }
+  if (q.Status !== 'DRAFT') out.reminder = `This quote was already ${q.Status}: the client has the old version until Seb re-sends it from Xero.`;
+  return out;
+}
+
+async function toolUpdateInvoice(args) {
+  const { invoice_number, line_items, due_date, date, quote_number, allow_approved } = args || {};
+  const num = String(invoice_number || '').trim().toUpperCase();
+  if (!/^INV-\d+$/.test(num)) throw new Error('invoice_number is required, e.g. INV-0345.');
+  if (!due_date && !date && quote_number == null && !(line_items && line_items.length)) throw new Error('Nothing to change: give line_items, due_date, date or quote_number.');
+  const accessToken = await getAccessToken();
+  const tenantId = await getTenantId(accessToken);
+  const found = await xeroCall(`Invoices?InvoiceNumbers=${encodeURIComponent(num)}`, 'GET', accessToken, tenantId);
+  const inv = (found.Invoices || []).find(x => (x.InvoiceNumber || '').toUpperCase() === num && x.Type === 'ACCREC');
+  if (!inv) throw new Error(`Invoice ${num} not found in Xero (sales invoices only).`);
+  if (Number(inv.AmountPaid || 0) !== 0 || Number(inv.AmountCredited || 0) !== 0 || inv.Status === 'PAID') throw new Error(`Invoice ${num} has a payment or credit on it and cannot be edited here.`);
+  if (inv.Status === 'AUTHORISED' && allow_approved !== true) throw new Error(`Invoice ${num} is approved (it is in the books and may be with the client). Edit it only when Seb says so for this invoice: call again with allow_approved true.`);
+  if (!['DRAFT', 'SUBMITTED', 'AUTHORISED'].includes(inv.Status)) throw new Error(`Invoice ${num} is ${inv.Status} and cannot be edited.`);
+  const body = { InvoiceID: inv.InvoiceID };
+  if (due_date) body.DueDate = d10(due_date);
+  if (date) body.Date = d10(date);
+  if (quote_number != null) body.Reference = String(quote_number).trim().toUpperCase();
+  if (line_items && line_items.length) body.LineItems = mergeLines(inv.LineItems, line_items);
+  const r = await xeroCall(`Invoices/${inv.InvoiceID}`, 'POST', accessToken, tenantId, { Invoices: [body] });
+  const n = (r.Invoices || [])[0] || {};
+  const rows = [];
+  (n.LineItems || []).forEach((li, idx) => {
+    const desc = (li.Description || '').trim(), amt = li.LineAmount || 0;
+    if (!desc && amt === 0) return;
+    rows.push({ id: li.LineItemID || `${n.InvoiceNumber}-${String(idx + 1).padStart(2, '0')}`, invoice_number: n.InvoiceNumber, item: (li.ItemCode || '').trim(), description: desc,
+      qty: li.Quantity || 1, unit_price: li.UnitAmount || 0, price_excl_gst: amt, quote_number: (n.Reference || '').trim(), contact: (n.Contact && n.Contact.Name) || '',
+      contact_id: (n.Contact && n.Contact.ContactID) || '', date: d10(n.DateString) || null, due_date: d10(n.DueDateString) || null, status: n.Status || '', paid: 0 });
+  });
+  const hub = await hubReplaceLines('invoice_items', 'invoice_number', num, rows, 'notes');
+  const out = { invoice_number: num, status: n.Status, subtotal_before: inv.SubTotal, subtotal_after: n.SubTotal, total_inc_gst: n.Total, due_date: d10(n.DueDateString), quote_number: n.Reference || '',
+    lines_before: (inv.LineItems || []).length, lines_after: (n.LineItems || []).length, hub };
+  if (inv.Status === 'AUTHORISED') out.reminder = 'This invoice was already approved: if the client has it, Seb needs to re-send it from Xero.';
+  return out;
+}
+
 // 2026-11-05 — the client's address/phone/email as saved on the Xero contact card,
 // so a new quote's booking (and the project) get the site address straight away.
 async function contactDetails(accessToken, tenantId, contactId) {
@@ -691,6 +893,51 @@ const TOOLS = [
     } }
   },
   {
+    name: 'find_quotes',
+    description: 'Look up Xero quotes (read-only, live from Xero). Give quote_number for one quote with its lines, or filter a list by client, status and date. Use it to check a quote before editing, or to list old quotes for Seb to choose which to delete. Amounts are ex GST unless named otherwise. "job" is the Hub job the quote is linked to, if any.',
+    inputSchema: { type: 'object', properties: {
+      quote_number: { type: 'string', description: 'One quote with full lines, e.g. QU-0312' },
+      contact_name: { type: 'string', description: 'Part of the client name' },
+      status: { type: 'array', items: { type: 'string' }, description: 'Any of DRAFT, SENT, ACCEPTED, DECLINED, INVOICED, DELETED. Left out: all except deleted.' },
+      date_from: { type: 'string', description: 'YYYY-MM-DD' }, date_to: { type: 'string', description: 'YYYY-MM-DD' },
+      older_than_days: { type: 'number', description: 'Only quotes dated more than this many days ago' },
+      limit: { type: 'number', description: 'Default 50, max 200 (newest first)' }
+    } }
+  },
+  {
+    name: 'find_invoices',
+    description: 'Look up Xero sales invoices (read-only, live from Xero). Give invoice_number for one invoice with its lines, or filter a list by client, status and date. unpaid_only lists approved invoices still owing.',
+    inputSchema: { type: 'object', properties: {
+      invoice_number: { type: 'string', description: 'One invoice with full lines, e.g. INV-0345' },
+      contact_name: { type: 'string', description: 'Part of the client name' },
+      status: { type: 'array', items: { type: 'string' }, description: 'Any of DRAFT, SUBMITTED (awaiting approval), AUTHORISED (approved, awaiting payment), PAID, VOIDED, DELETED. Left out: all except voided and deleted.' },
+      unpaid_only: { type: 'boolean' },
+      date_from: { type: 'string', description: 'YYYY-MM-DD' }, date_to: { type: 'string', description: 'YYYY-MM-DD' },
+      older_than_days: { type: 'number' },
+      limit: { type: 'number', description: 'Default 50, max 200 (newest first)' }
+    } }
+  },
+  {
+    name: 'update_quote',
+    description: 'Edit an existing Xero quote in place (same quote number): title, summary, expiry date and/or its lines. Call find_quotes with the quote_number first to see the current lines. Invoiced and deleted quotes are refused. Only fields you pass change. The Hub copy and a linked job price follow. If the quote was already sent, Seb must re-send it from Xero. Only edit when Seb asked for the change.',
+    inputSchema: { type: 'object', properties: {
+      quote_number: { type: 'string', description: 'e.g. QU-0312' },
+      title: { type: 'string' }, summary: { type: 'string' }, expiry_date: { type: 'string', description: 'YYYY-MM-DD' },
+      line_items: { type: 'array', description: 'The FULL new list of lines: it replaces all existing lines, so include the lines that stay.', items: { type: 'object', properties: { description: { type: 'string' }, quantity: { type: 'number' }, unit_amount: { type: 'number', description: 'ex GST' } }, required: ['description', 'unit_amount'] } }
+    }, required: ['quote_number'] }
+  },
+  {
+    name: 'update_invoice',
+    description: 'Edit an existing Xero sales invoice in place (same invoice number): lines, date, due date, or the quote number shown as its reference. Call find_invoices with the invoice_number first. Draft and awaiting-approval invoices are edited freely. An approved, unpaid invoice is in the books: edited only with allow_approved true, which needs Seb to have said so for that invoice. Anything with a payment or credit is refused. Only edit when Seb asked for the change.',
+    inputSchema: { type: 'object', properties: {
+      invoice_number: { type: 'string', description: 'e.g. INV-0345' },
+      line_items: { type: 'array', description: 'The FULL new list of lines: it replaces all existing lines, so include the lines that stay.', items: { type: 'object', properties: { description: { type: 'string' }, quantity: { type: 'number' }, unit_amount: { type: 'number', description: 'ex GST' } }, required: ['description', 'unit_amount'] } },
+      date: { type: 'string', description: 'YYYY-MM-DD' }, due_date: { type: 'string', description: 'YYYY-MM-DD' },
+      quote_number: { type: 'string', description: 'Quote number to show as the invoice reference' },
+      allow_approved: { type: 'boolean', description: 'true = also edit an approved, unpaid invoice. Default false.' }
+    }, required: ['invoice_number'] }
+  },
+  {
     name: 'delete_quote',
     description: 'Delete redundant Xero quotes (Draft, Sent, Declined or Accepted; Invoiced quotes are refused). Permanent. Only call for quote numbers Seb himself has named for deletion in this chat; never on your own judgement. Up to 10 per call. The Hub copy is marked deleted and its follow-up reminder stops.',
     inputSchema: { type: 'object', properties: {
@@ -763,6 +1010,10 @@ async function callTool(name, args) {
     case 'find_contact':    return toolFindContact(args || {});
     case 'mark_quote_invoiced': return toolMarkQuoteInvoiced(args || {});
     case 'update_contact':  return toolUpdateContact(args || {});
+    case 'find_quotes':     return toolFindQuotes(args || {});
+    case 'find_invoices':   return toolFindInvoices(args || {});
+    case 'update_quote':    return toolUpdateQuote(args || {});
+    case 'update_invoice':  return toolUpdateInvoice(args || {});
     case 'delete_quote':
     case 'delete_draft_quote': return toolDeleteQuote(args || {});
     case 'delete_invoice':  return toolDeleteInvoice(args || {});
