@@ -351,29 +351,108 @@ async function toolUpdateContact({ contact_id, contact_name, name, first_name, l
   return { ContactID: u.ContactID, Name: u.Name, FirstName: u.FirstName || '', LastName: u.LastName || '', EmailAddress: u.EmailAddress || '' };
 }
 
-// 2026-11-23 — delete a DRAFT quote (e.g. one replaced by a corrected quote).
-// Sent, accepted or invoiced quotes are refused: the client has seen those.
-async function toolDeleteDraftQuote({ quote_number }) {
-  const qn = String(quote_number || '').trim().toUpperCase();
-  if (!/^QU-\d+$/.test(qn)) throw new Error('quote_number is required, e.g. QU-0310.');
-  const accessToken = await getAccessToken();
-  const tenantId = await getTenantId(accessToken);
+// 2026-11-28 — delete redundant quotes and invoices, only ever on Seb's say-so.
+// Quotes: Draft, Sent, Declined and Accepted can be deleted; Invoiced ones are
+// refused (a real invoice hangs off them). Invoices: Draft / Awaiting approval are
+// deleted; an approved, unpaid one is VOIDED and only when allow_void is true;
+// anything with a payment or credit on it is refused.
+function quoteBody(q) {
+  return {
+    QuoteID: q.QuoteID, QuoteNumber: q.QuoteNumber, Contact: { ContactID: q.Contact.ContactID },
+    Date: String(q.DateString || '').slice(0, 10) || undefined,
+    ExpiryDate: q.ExpiryDateString ? String(q.ExpiryDateString).slice(0, 10) : undefined,
+    LineAmountTypes: q.LineAmountTypes, Title: q.Title, Summary: q.Summary, Terms: q.Terms, Reference: q.Reference,
+    LineItems: (q.LineItems || []).map(li => ({
+      LineItemID: li.LineItemID, Description: li.Description, Quantity: li.Quantity, UnitAmount: li.UnitAmount,
+      ItemCode: li.ItemCode, AccountCode: li.AccountCode, TaxType: li.TaxType, DiscountRate: li.DiscountRate, Tracking: li.Tracking
+    }))
+  };
+}
+async function sbPatchQuiet(table, query, fields) {
+  await fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`, {
+    method: 'PATCH', headers: { 'apikey': SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(fields)
+  }).catch(() => {});
+}
+function numberList(one, many, max) {
+  const list = [].concat(many || [], one || []).map(x => String(x || '').trim().toUpperCase()).filter(Boolean);
+  const uniq = [...new Set(list)];
+  if (!uniq.length) throw new Error('Give at least one number.');
+  if (uniq.length > max) throw new Error(`At most ${max} per call; send the rest in another call.`);
+  return uniq;
+}
+
+async function deleteOneQuote(accessToken, tenantId, qn) {
+  if (!/^QU-\d+$/.test(qn)) return { quote_number: qn, deleted: false, note: 'Not a quote number (e.g. QU-0310).' };
   const found = await xeroCall(`Quotes?QuoteNumber=${encodeURIComponent(qn)}`, 'GET', accessToken, tenantId);
   const q = (found.Quotes || []).find(x => (x.QuoteNumber || '').toUpperCase() === qn);
-  if (!q) throw new Error(`Quote ${qn} not found in Xero.`);
-  if (q.Status === 'DELETED') return { quote_number: qn, deleted: false, note: 'Already deleted.' };
-  if (q.Status !== 'DRAFT') throw new Error(`Quote ${qn} is ${q.Status}. Only DRAFT quotes can be deleted here.`);
-  const r = await xeroCall('Quotes', 'POST', accessToken, tenantId, { Quotes: [{
-    QuoteID: q.QuoteID, QuoteNumber: q.QuoteNumber, Contact: { ContactID: q.Contact.ContactID },
-    Date: String(q.DateString || '').slice(0, 10) || undefined, Status: 'DELETED'
-  }] });
-  const d = (r.Quotes || [])[0] || {};
-  // tidy the Hub's copy of its lines so it stops showing as a draft there
-  await fetch(`${SUPABASE_URL}/rest/v1/quote_items?quote_number=eq.${encodeURIComponent(qn)}`, {
-    method: 'PATCH', headers: { 'apikey': SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status: 'DELETED' })
-  }).catch(() => {});
-  return { quote_number: qn, deleted: d.Status === 'DELETED', status: d.Status, contact: q.Contact.Name, total: q.Total };
+  if (!q) return { quote_number: qn, deleted: false, note: 'Not found in Xero.' };
+  const info = { quote_number: qn, contact: q.Contact && q.Contact.Name, total: q.Total, was: q.Status };
+  if (q.Status === 'DELETED') return { ...info, deleted: false, note: 'Already deleted.' };
+  if (q.Status === 'INVOICED') return { ...info, deleted: false, note: 'Refused: this quote is Invoiced (a real invoice was raised from it).' };
+  const base = quoteBody(q);
+  let d;
+  try {
+    const r = await xeroCall('Quotes', 'POST', accessToken, tenantId, { Quotes: [{ ...base, Status: 'DELETED' }] });
+    d = (r.Quotes || [])[0] || {};
+  } catch (e1) {
+    // Xero would not go straight to Deleted from this status: step back to Draft first.
+    if (q.Status === 'DRAFT') throw e1;
+    await xeroCall('Quotes', 'POST', accessToken, tenantId, { Quotes: [{ ...base, Status: 'DRAFT' }] });
+    const r = await xeroCall('Quotes', 'POST', accessToken, tenantId, { Quotes: [{ ...base, Status: 'DELETED' }] });
+    d = (r.Quotes || [])[0] || {};
+  }
+  if (d.Status !== 'DELETED') return { ...info, deleted: false, status: d.Status, note: 'Xero did not mark it Deleted.' };
+  // tidy the Hub's copy: its lines stop counting, and its follow-up reminder stops
+  await sbPatchQuiet('quote_items', `quote_number=eq.${encodeURIComponent(qn)}`, { status: 'DELETED' });
+  await sbPatchQuiet('quote_followups', `id=eq.${encodeURIComponent(qn)}&status=eq.open`, { status: 'stopped' });
+  return { ...info, deleted: true, status: 'DELETED' };
+}
+
+async function toolDeleteQuote({ quote_number, quote_numbers }) {
+  const list = numberList(quote_number, quote_numbers, 10);
+  const accessToken = await getAccessToken();
+  const tenantId = await getTenantId(accessToken);
+  const results = [];
+  for (const qn of list) {
+    try { results.push(await deleteOneQuote(accessToken, tenantId, qn)); }
+    catch (e) { results.push({ quote_number: qn, deleted: false, note: String(e.message || e).slice(0, 300) }); }
+  }
+  return { deleted: results.filter(r => r.deleted).length, not_deleted: results.filter(r => !r.deleted).length, results };
+}
+
+async function deleteOneInvoice(accessToken, tenantId, num, allowVoid) {
+  if (!/^INV-\d+$/.test(num)) return { invoice_number: num, removed: false, note: 'Not an invoice number (e.g. INV-0345).' };
+  const found = await xeroCall(`Invoices?InvoiceNumbers=${encodeURIComponent(num)}`, 'GET', accessToken, tenantId);
+  const inv = (found.Invoices || []).find(x => (x.InvoiceNumber || '').toUpperCase() === num && x.Type === 'ACCREC');
+  if (!inv) return { invoice_number: num, removed: false, note: 'Not found in Xero (sales invoices only).' };
+  const info = { invoice_number: num, contact: inv.Contact && inv.Contact.Name, total: inv.Total, was: inv.Status };
+  if (inv.Status === 'DELETED' || inv.Status === 'VOIDED') return { ...info, removed: false, note: `Already ${inv.Status.toLowerCase()}.` };
+  if (Number(inv.AmountPaid || 0) !== 0 || Number(inv.AmountCredited || 0) !== 0 || inv.Status === 'PAID')
+    return { ...info, removed: false, note: 'Refused: this invoice has a payment or credit on it.' };
+  let target;
+  if (inv.Status === 'DRAFT' || inv.Status === 'SUBMITTED') target = 'DELETED';
+  else if (inv.Status === 'AUTHORISED') {
+    if (!allowVoid) return { ...info, removed: false, note: 'Refused: this invoice is approved (it is in the books). It can only be voided, and only when Seb says so for this invoice: call again with allow_void true.' };
+    target = 'VOIDED';
+  } else return { ...info, removed: false, note: `Refused: status ${inv.Status}.` };
+  const r = await xeroCall(`Invoices/${inv.InvoiceID}`, 'POST', accessToken, tenantId, { Invoices: [{ InvoiceID: inv.InvoiceID, Status: target }] });
+  const d = (r.Invoices || [])[0] || {};
+  if (d.Status !== target) return { ...info, removed: false, status: d.Status, note: `Xero did not mark it ${target}.` };
+  await sbPatchQuiet('invoice_items', `invoice_number=eq.${encodeURIComponent(num)}`, { status: target });
+  return { ...info, removed: true, status: target };
+}
+
+async function toolDeleteInvoice({ invoice_number, invoice_numbers, allow_void }) {
+  const list = numberList(invoice_number, invoice_numbers, 10);
+  const accessToken = await getAccessToken();
+  const tenantId = await getTenantId(accessToken);
+  const results = [];
+  for (const num of list) {
+    try { results.push(await deleteOneInvoice(accessToken, tenantId, num, allow_void === true)); }
+    catch (e) { results.push({ invoice_number: num, removed: false, note: String(e.message || e).slice(0, 300) }); }
+  }
+  return { removed: results.filter(r => r.removed).length, not_removed: results.filter(r => !r.removed).length, results };
 }
 
 // 2026-11-05 — the client's address/phone/email as saved on the Xero contact card,
@@ -479,16 +558,7 @@ async function markQuoteInvoiced(accessToken, tenantId, quoteNumber) {
   if (was === 'INVOICED') return { quote_number: qn, changed: false, status: was, note: 'Already marked Invoiced.' };
   const steps = was === 'SENT' ? ['ACCEPTED', 'INVOICED'] : was === 'ACCEPTED' ? ['INVOICED'] : null;
   if (!steps) return { quote_number: qn, changed: false, status: was, note: `Quote is ${was}; only Sent or Accepted quotes are marked Invoiced.` };
-  const base = {
-    QuoteID: q.QuoteID, QuoteNumber: q.QuoteNumber, Contact: { ContactID: q.Contact.ContactID },
-    Date: String(q.DateString || '').slice(0, 10) || undefined,
-    ExpiryDate: q.ExpiryDateString ? String(q.ExpiryDateString).slice(0, 10) : undefined,
-    LineAmountTypes: q.LineAmountTypes, Title: q.Title, Summary: q.Summary, Terms: q.Terms, Reference: q.Reference,
-    LineItems: (q.LineItems || []).map(li => ({
-      LineItemID: li.LineItemID, Description: li.Description, Quantity: li.Quantity, UnitAmount: li.UnitAmount,
-      ItemCode: li.ItemCode, AccountCode: li.AccountCode, TaxType: li.TaxType, DiscountRate: li.DiscountRate, Tracking: li.Tracking
-    }))
-  };
+  const base = quoteBody(q);
   let now = q;
   for (const st of steps) {
     const r = await xeroCall('Quotes', 'POST', accessToken, tenantId, { Quotes: [{ ...base, Status: st }] });
@@ -621,9 +691,26 @@ const TOOLS = [
     } }
   },
   {
+    name: 'delete_quote',
+    description: 'Delete redundant Xero quotes (Draft, Sent, Declined or Accepted; Invoiced quotes are refused). Permanent. Only call for quote numbers Seb himself has named for deletion in this chat; never on your own judgement. Up to 10 per call. The Hub copy is marked deleted and its follow-up reminder stops.',
+    inputSchema: { type: 'object', properties: {
+      quote_number: { type: 'string', description: 'One quote, e.g. QU-0310' },
+      quote_numbers: { type: 'array', items: { type: 'string' }, description: 'Several quotes, up to 10' }
+    } }
+  },
+  {
     name: 'delete_draft_quote',
-    description: 'Delete a DRAFT Xero quote, e.g. an old draft replaced by a corrected quote. Refuses anything already sent, accepted or invoiced. Only call when Seb has said to delete that quote.',
+    description: 'Old name for delete_quote (kept so existing chats keep working). Same rules: only for quote numbers Seb has named for deletion.',
     inputSchema: { type: 'object', properties: { quote_number: { type: 'string', description: 'e.g. QU-0310' } }, required: ['quote_number'] }
+  },
+  {
+    name: 'delete_invoice',
+    description: 'Remove redundant Xero sales invoices. Draft and Awaiting-approval invoices are deleted. An approved, unpaid invoice is in the books: it is only VOIDED, and only with allow_void true, which needs Seb to have said to void that invoice. Anything with a payment or credit is refused. Only call for invoice numbers Seb himself has named in this chat. Up to 10 per call.',
+    inputSchema: { type: 'object', properties: {
+      invoice_number: { type: 'string', description: 'One invoice, e.g. INV-0345' },
+      invoice_numbers: { type: 'array', items: { type: 'string' }, description: 'Several invoices, up to 10' },
+      allow_void: { type: 'boolean', description: 'true = also void approved, unpaid invoices. Default false.' }
+    } }
   },
   {
     name: 'create_quote',
@@ -676,7 +763,9 @@ async function callTool(name, args) {
     case 'find_contact':    return toolFindContact(args || {});
     case 'mark_quote_invoiced': return toolMarkQuoteInvoiced(args || {});
     case 'update_contact':  return toolUpdateContact(args || {});
-    case 'delete_draft_quote': return toolDeleteDraftQuote(args || {});
+    case 'delete_quote':
+    case 'delete_draft_quote': return toolDeleteQuote(args || {});
+    case 'delete_invoice':  return toolDeleteInvoice(args || {});
     case 'create_contact':  return toolCreateContact(args || {});
     case 'create_quote':    return toolCreateQuote(args || {});
     case 'create_invoice':  return toolCreateInvoice(args || {});

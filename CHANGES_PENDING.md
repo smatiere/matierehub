@@ -2,6 +2,12 @@
 
 **Purpose:** accumulate many edits locally, deploy ONCE. Editing files is free; only a push to `main` triggers a Netlify build (= credits). See CLAUDE.md → "Deploying changes" for the full workflow.
 
+## Change — 2026-11-28 (connector: delete redundant quotes and invoices)
+- [x] `xero-mcp.js` new tool `delete_quote`: one quote or up to 10 per call. Deletes Draft, Sent, Declined and Accepted quotes (tries Deleted directly; if Xero refuses, steps back to Draft first). Invoiced quotes are refused. Hub copy (`quote_items`) is marked DELETED and an open `quote_followups` row is stopped. `delete_draft_quote` kept as an old name for the same tool.
+- [x] New tool `delete_invoice`: sales invoices only, up to 10 per call. Draft / Awaiting approval → deleted. Approved and unpaid → VOIDED, only with `allow_void: true`. Anything with a payment or credit → refused. Hub copy (`invoice_items`) status updated.
+- [x] Both tool descriptions say: only for numbers Seb has named for deletion in the chat.
+- [x] Tested against a pretend Xero (every status, the fallback path, the 10 limit). Live test: see handoff.
+
 ## Change — 2026-11-24 (job window: manual sale as a line, Sales tile, costs total)
 - [x] `index.html` job detail: a manual sale now shows as a MANUAL line in Linked Quotes & Invoices with a red ✕ (`projRemoveManualSale`, asks first), and counts in a new Sales tile (invoice lines picked + manual, with what is left after labour and expenses).
 - [x] Remaining tile also shows "Costs $X of $Y". Field renamed "Manual sale (not in Xero)". Manual sales are for job review only; nothing is sent to Xero.
